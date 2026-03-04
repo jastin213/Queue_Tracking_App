@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 List<String> globalQueue = [];
 int currentServingIndex = -1;
-int averageServiceTime = 8; // minutes per vehicle
+int averageServiceTime = 6; // minutes per vehicle
 
 class AdminPage extends StatefulWidget {
   const AdminPage({super.key});
