@@ -12,22 +12,37 @@ class _TrackPageState extends State<TrackPage> {
   final TextEditingController _queueController = TextEditingController();
   String result = "";
 
+  bool isValidQueue(String input) {
+    final regex = RegExp(r'^A\d+$'); // must start with A and digits only
+    return regex.hasMatch(input);
+  }
+
   void checkQueue() {
     String queueNumber = _queueController.text.trim();
 
+    // VALIDATION
+    if (!isValidQueue(queueNumber)) {
+      setState(() {
+        result = "Invalid format. Use uppercase like A10";
+      });
+      return;
+    }
+
     if (!globalQueue.contains(queueNumber)) {
       setState(() {
-        result = "Queue number not found or already served.";
+        result = "Queue not found or already served.";
       });
       return;
     }
 
     int position = globalQueue.indexOf(queueNumber);
-    int estimatedTime = position * averageServiceTime;
+
+    // FIXED ESTIMATION
+    int estimatedTime = (position + 1) * averageServiceTime;
 
     setState(() {
       result =
-          "Your Position: ${position + 1}\nEstimated Waiting Time: $estimatedTime minutes";
+          "Position in line: ${position + 1}\nEstimated waiting time: $estimatedTime minutes";
     });
   }
 
@@ -36,29 +51,29 @@ class _TrackPageState extends State<TrackPage> {
     return Scaffold(
       appBar: AppBar(title: const Text("Track My Queue")),
       body: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+
+            // NOW SERVING
             Card(
-              elevation: 5,
+              elevation: 6,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
               child: Padding(
-                padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(24),
                 child: Column(
                   children: [
-                    const Text(
-                      "NOW SERVING",
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
+                    const Text("NOW SERVING",
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 12),
                     Text(
-                      currentServingIndex < 0
-                          ? "No one yet"
-                          : "A${currentServingIndex + 1}",
+                      currentServingNumber == 0
+                          ? "—"
+                          : "A$currentServingNumber",
                       style: const TextStyle(
-                        fontSize: 32,
+                        fontSize: 36,
                         fontWeight: FontWeight.bold,
                         color: Colors.red,
                       ),
@@ -67,23 +82,34 @@ class _TrackPageState extends State<TrackPage> {
                 ),
               ),
             ),
+
             const SizedBox(height: 30),
+
             TextField(
               controller: _queueController,
               decoration: const InputDecoration(
-                labelText: "Enter Your Queue Number (ex: A1)",
+                labelText: "Enter Queue Number (A10)",
                 border: OutlineInputBorder(),
               ),
             ),
+
             const SizedBox(height: 20),
+
             ElevatedButton(
               onPressed: checkQueue,
               child: const Text("Check Status"),
             ),
+
             const SizedBox(height: 30),
-            Text(
-              result,
-              style: const TextStyle(fontSize: 16),
+
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  result,
+                  style: const TextStyle(fontSize: 16),
+                ),
+              ),
             ),
           ],
         ),
