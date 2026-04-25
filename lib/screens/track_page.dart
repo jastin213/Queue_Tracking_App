@@ -10,107 +10,136 @@ class TrackPage extends StatefulWidget {
 
 class _TrackPageState extends State<TrackPage> {
   final TextEditingController _queueController = TextEditingController();
-  String result = "";
+
+  String positionText = "";
+  String timeText = "";
 
   bool isValidQueue(String input) {
-    final regex = RegExp(r'^A\d+$'); // must start with A and digits only
+    final regex = RegExp(r'^A\d+$');
     return regex.hasMatch(input);
   }
 
   void checkQueue() {
     String queueNumber = _queueController.text.trim();
 
-    // VALIDATION
     if (!isValidQueue(queueNumber)) {
-      setState(() {
-        result = "Invalid format. Use uppercase like A10";
-      });
+      showMessage("Invalid format. Use A10");
       return;
     }
 
     if (!globalQueue.contains(queueNumber)) {
-      setState(() {
-        result = "Queue not found or already served.";
-      });
+      showMessage("Queue not found or already served.");
       return;
     }
 
     int position = globalQueue.indexOf(queueNumber);
 
-    // FIXED ESTIMATION
     int estimatedTime = (position + 1) * averageServiceTime;
 
     setState(() {
-      result =
-          "Position in line: ${position + 1}\nEstimated waiting time: $estimatedTime minutes";
+      positionText = "Position: ${position + 1}";
+      timeText = "Estimated Time: $estimatedTime mins";
     });
+
+    // 🔔 NOTIFICATION LOGIC (5 SLOTS AHEAD)
+    if (position <= 4) {
+      showAlert();
+    }
+  }
+
+  void showAlert() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("Get Ready"),
+        content: const Text("You are near your turn. Please prepare."),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("OK"),
+          )
+        ],
+      ),
+    );
+  }
+
+  void showMessage(String msg) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Widget buildCard(String title, String value, Color color) {
+    return Card(
+      elevation: 6,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          children: [
+            Text(title,
+                style: const TextStyle(
+                    fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            Text(value,
+                style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    color: color)),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    String nowServing = currentServingNumber == 0
+        ? "-"
+        : "A$currentServingNumber";
+
     return Scaffold(
-      appBar: AppBar(title: const Text("Track My Queue")),
+      appBar: AppBar(title: const Text("Queue Tracker")),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
 
             // NOW SERVING
-            Card(
-              elevation: 6,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  children: [
-                    const Text("NOW SERVING",
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 12),
-                    Text(
-                      currentServingNumber == 0
-                          ? "—"
-                          : "A$currentServingNumber",
-                      style: const TextStyle(
-                        fontSize: 36,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.red,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 30),
-
-            TextField(
-              controller: _queueController,
-              decoration: const InputDecoration(
-                labelText: "Enter Queue Number (A10)",
-                border: OutlineInputBorder(),
-              ),
-            ),
+            buildCard("NOW SERVING", nowServing, Colors.red),
 
             const SizedBox(height: 20),
 
-            ElevatedButton(
-              onPressed: checkQueue,
-              child: const Text("Check Status"),
-            ),
-
-            const SizedBox(height: 30),
-
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(
-                  result,
-                  style: const TextStyle(fontSize: 16),
-                ),
+            // INPUT
+            TextField(
+              controller: _queueController,
+              decoration: InputDecoration(
+                labelText: "Enter Queue Number",
+                hintText: "Example: A10",
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10)),
               ),
             ),
+
+            const SizedBox(height: 15),
+
+            // BUTTON
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: checkQueue,
+                child: const Text("CHECK STATUS"),
+              ),
+            ),
+
+            const SizedBox(height: 25),
+
+            // RESULT CARDS
+            if (positionText.isNotEmpty)
+              buildCard("YOUR POSITION", positionText, Colors.blue),
+
+            if (timeText.isNotEmpty)
+              buildCard("WAITING TIME", timeText, Colors.green),
           ],
         ),
       ),
