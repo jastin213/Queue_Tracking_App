@@ -6,8 +6,9 @@ class DisplayPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    String nowServing =
-        currentServingNumber == 0 ? "-" : "A$currentServingNumber";
+    String nowServing = currentServingNumber == 0
+        ? "-"
+        : "A$currentServingNumber";
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -16,7 +17,6 @@ class DisplayPage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-
             const SizedBox(height: 40),
 
             const Text(
@@ -32,10 +32,7 @@ class DisplayPage extends StatelessWidget {
 
             const Text(
               "NOW SERVING",
-              style: TextStyle(
-                color: Colors.white70,
-                fontSize: 24,
-              ),
+              style: TextStyle(color: Colors.white70, fontSize: 24),
             ),
 
             const SizedBox(height: 20),
@@ -53,10 +50,7 @@ class DisplayPage extends StatelessWidget {
 
             const Text(
               "NEXT IN LINE",
-              style: TextStyle(
-                color: Colors.white70,
-                fontSize: 20,
-              ),
+              style: TextStyle(color: Colors.white70, fontSize: 20),
             ),
 
             const SizedBox(height: 20),
@@ -65,10 +59,7 @@ class DisplayPage extends StatelessWidget {
               spacing: 20,
               children: globalQueue.take(5).map((q) {
                 return Chip(
-                  label: Text(
-                    q,
-                    style: const TextStyle(fontSize: 20),
-                  ),
+                  label: Text(q, style: const TextStyle(fontSize: 20)),
                 );
               }).toList(),
             ),
@@ -77,10 +68,7 @@ class DisplayPage extends StatelessWidget {
 
             const Text(
               "Please prepare. Stay alert for your turn.",
-              style: TextStyle(
-                color: Colors.white54,
-                fontSize: 16,
-              ),
+              style: TextStyle(color: Colors.white54, fontSize: 16),
             ),
 
             const SizedBox(height: 20),
