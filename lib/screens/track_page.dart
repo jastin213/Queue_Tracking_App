@@ -41,7 +41,6 @@ class _TrackPageState extends State<TrackPage> {
       timeText = "Estimated Time: $estimatedTime mins";
     });
 
-    // 🔔 NOTIFICATION LOGIC (5 SLOTS AHEAD)
     if (position <= 4) {
       showAlert();
     }
@@ -69,23 +68,31 @@ class _TrackPageState extends State<TrackPage> {
 
   Widget buildCard(String title, String value, Color color) {
     return Card(
-      elevation: 6,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      elevation: 4,
+      color: color,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: Colors.black.withOpacity(0.12), width: 1),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
         child: Column(
           children: [
             Text(
               title,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.white70,
+              ),
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             Text(
               value,
-              style: TextStyle(
-                fontSize: 28,
+              style: const TextStyle(
+                fontSize: 26,
                 fontWeight: FontWeight.bold,
-                color: color,
+                color: Colors.white,
               ),
             ),
           ],
@@ -101,48 +108,99 @@ class _TrackPageState extends State<TrackPage> {
         : "A$currentServingNumber";
 
     return Scaffold(
-      appBar: AppBar(title: const Text("Queue Tracker")),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            // NOW SERVING
-            buildCard("NOW SERVING", nowServing, Colors.red),
+      backgroundColor: const Color(0xFFD6E3E8),
+      appBar: AppBar(
+        title: const Text("Queue Tracker"),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        foregroundColor: Colors.black,
+      ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 500),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 20),
 
-            const SizedBox(height: 20),
-
-            // INPUT
-            TextField(
-              controller: _queueController,
-              decoration: InputDecoration(
-                labelText: "Enter Queue Number",
-                hintText: "Example: A10",
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
+                // NOW SERVING (COMPACT CENTERED)
+                Center(
+                  child: SizedBox(
+                    width: 140,
+                    child: buildCard(
+                      "NOW SERVING",
+                      nowServing,
+                      const Color(0xFF2C2C2C),
+                    ),
+                  ),
                 ),
-              ),
+
+                const SizedBox(height: 20),
+
+                // INPUT
+                TextField(
+                  controller: _queueController,
+                  textAlign: TextAlign.center,
+                  decoration: InputDecoration(
+                    hintText: "Enter Queue Number (A10)",
+                    filled: true,
+                    fillColor: Colors.grey[200],
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(30),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // BUTTON
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.black,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(30),
+                      ),
+                      elevation: 3,
+                    ),
+                    onPressed: checkQueue,
+                    child: const Text("CHECK STATUS"),
+                  ),
+                ),
+
+                const SizedBox(height: 30),
+
+                // RESULTS (COMPACT CENTERED)
+                if (positionText.isNotEmpty)
+                  Center(
+                    child: SizedBox(
+                      width: 200,
+                      child: buildCard(
+                        "YOUR POSITION",
+                        positionText,
+                        Colors.blue,
+                      ),
+                    ),
+                  ),
+
+                if (timeText.isNotEmpty) ...[
+                  const SizedBox(height: 15),
+                  Center(
+                    child: SizedBox(
+                      width: 260,
+                      child: buildCard("WAITING TIME", timeText, Colors.green),
+                    ),
+                  ),
+                ],
+              ],
             ),
-
-            const SizedBox(height: 15),
-
-            // BUTTON
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: checkQueue,
-                child: const Text("CHECK STATUS"),
-              ),
-            ),
-
-            const SizedBox(height: 25),
-
-            // RESULT CARDS
-            if (positionText.isNotEmpty)
-              buildCard("YOUR POSITION", positionText, Colors.blue),
-
-            if (timeText.isNotEmpty)
-              buildCard("WAITING TIME", timeText, Colors.green),
-          ],
+          ),
         ),
       ),
     );

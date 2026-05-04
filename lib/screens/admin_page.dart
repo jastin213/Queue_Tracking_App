@@ -74,11 +74,9 @@ class _AdminPageState extends State<AdminPage> {
 
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 227, 242, 248),
-
       body: SafeArea(
         child: Column(
           children: [
-            // 🔝 HEADER
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
               child: Row(
@@ -94,8 +92,6 @@ class _AdminPageState extends State<AdminPage> {
                 ],
               ),
             ),
-
-            // 🟦 MAIN CONTENT
             Expanded(
               child: Container(
                 margin: const EdgeInsets.all(16),
@@ -110,10 +106,8 @@ class _AdminPageState extends State<AdminPage> {
                     ),
                   ],
                 ),
-
                 child: Column(
                   children: [
-                    // 🔴 NOW SERVING
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.all(20),
@@ -142,29 +136,34 @@ class _AdminPageState extends State<AdminPage> {
                         ],
                       ),
                     ),
-
                     const SizedBox(height: 15),
-
                     Text(
                       "Issued Today: ${nextQueueNumber - 1} / 80",
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
-
                     const SizedBox(height: 20),
 
-                    // 🔘 BUTTONS
                     Row(
                       children: [
                         Expanded(
-                          child: OutlinedButton(
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(30),
+                          child: Material(
+                            elevation: 3,
+                            shadowColor: Colors.black.withOpacity(0.2),
+                            borderRadius: BorderRadius.circular(30),
+                            child: OutlinedButton(
+                              style: OutlinedButton.styleFrom(
+                                backgroundColor: Colors.white,
+                                foregroundColor: Colors.black,
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 14,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(30),
+                                ),
                               ),
+                              onPressed: addQueue,
+                              child: const Text("Add Customer"),
                             ),
-                            onPressed: addQueue,
-                            child: const Text("Add Customer"),
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -173,10 +172,13 @@ class _AdminPageState extends State<AdminPage> {
                             style: ElevatedButton.styleFrom(
                               backgroundColor: const Color.fromARGB(
                                 255,
-                                25,
-                                233,
-                                88,
+                                55,
+                                218,
+                                109,
                               ),
+                              foregroundColor: Colors.black,
+                              elevation: 4,
+                              shadowColor: Colors.black.withOpacity(0.25),
                               padding: const EdgeInsets.symmetric(vertical: 14),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(30),
@@ -191,50 +193,61 @@ class _AdminPageState extends State<AdminPage> {
 
                     const SizedBox(height: 12),
 
-                    // 📺 DISPLAY
                     SizedBox(
                       width: double.infinity,
-                      child: OutlinedButton.icon(
-                        icon: const Icon(Icons.tv),
-                        label: const Text("Open Display Screen"),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30),
-                          ),
-                        ),
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const DisplayPage(),
+                      child: Material(
+                        elevation: 2,
+                        shadowColor: Colors.black.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(30),
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.tv),
+                          label: const Text("Open Display Screen"),
+                          style: OutlinedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(30),
                             ),
-                          );
-                        },
+                          ),
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const DisplayPage(),
+                              ),
+                            );
+                          },
+                        ),
                       ),
                     ),
 
                     const SizedBox(height: 10),
 
-                    // 🔁 RESET
                     SizedBox(
                       width: double.infinity,
-                      child: OutlinedButton.icon(
-                        icon: const Icon(Icons.restart_alt),
-                        label: const Text("Reset for New Day"),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30),
+                      child: Material(
+                        elevation: 2,
+                        shadowColor: Colors.black.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(30),
+                        child: OutlinedButton.icon(
+                          icon: const Icon(Icons.restart_alt),
+                          label: const Text("Reset for New Day"),
+                          style: OutlinedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(30),
+                            ),
                           ),
+                          onPressed: resetDay,
                         ),
-                        onPressed: resetDay,
                       ),
                     ),
 
                     const SizedBox(height: 20),
 
-                    // 📋 WAITING LIST
                     const Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
@@ -255,12 +268,17 @@ class _AdminPageState extends State<AdminPage> {
                           return Container(
                             margin: const EdgeInsets.only(bottom: 10),
                             decoration: BoxDecoration(
-                              color: Colors.grey.shade100,
+                              color: const Color.fromARGB(255, 236, 235, 235),
                               borderRadius: BorderRadius.circular(15),
                             ),
                             child: ListTile(
                               leading: CircleAvatar(
-                                backgroundColor: Colors.black,
+                                backgroundColor: const Color.fromARGB(
+                                  255,
+                                  56,
+                                  55,
+                                  55,
+                                ),
                                 child: Text(
                                   "${index + 1}",
                                   style: const TextStyle(color: Colors.white),
