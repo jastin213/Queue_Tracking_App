@@ -6,24 +6,20 @@ class DisplayPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    String nowServing = currentServingNumber == 0
-        ? "-"
-        : "A$currentServingNumber";
-
     return Scaffold(
       backgroundColor: Colors.black,
+
       body: Padding(
         padding: const EdgeInsets.all(30),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            const SizedBox(height: 40),
+            const SizedBox(height: 50),
 
             const Text(
               "NPJN EMISSION CENTER",
               style: TextStyle(
                 color: Colors.white,
-                fontSize: 28,
+                fontSize: 30,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -32,46 +28,67 @@ class DisplayPage extends StatelessWidget {
 
             const Text(
               "NOW SERVING",
-              style: TextStyle(color: Colors.white70, fontSize: 24),
-            ),
-
-            const SizedBox(height: 20),
-
-            Text(
-              nowServing,
-              style: const TextStyle(
-                color: Colors.red,
-                fontSize: 90,
-                fontWeight: FontWeight.bold,
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 24,
               ),
             ),
 
-            const SizedBox(height: 40),
+            const SizedBox(height: 20),
+
+            ValueListenableBuilder<Map<String, dynamic>?>(
+              valueListenable: nowServingNotifier,
+              builder: (context, customer, _) {
+                return Text(
+                  customer == null ? "-" : customer['queue'],
+                  style: const TextStyle(
+                    color: Colors.red,
+                    fontSize: 90,
+                    fontWeight: FontWeight.bold,
+                  ),
+                );
+              },
+            ),
+
+            const SizedBox(height: 50),
 
             const Text(
               "NEXT IN LINE",
-              style: TextStyle(color: Colors.white70, fontSize: 20),
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 20,
+              ),
             ),
 
             const SizedBox(height: 20),
 
-            Wrap(
-              spacing: 20,
-              children: globalQueue.take(5).map((q) {
-                return Chip(
-                  label: Text(q, style: const TextStyle(fontSize: 20)),
-                );
-              }).toList(),
+            Expanded(
+              child: ValueListenableBuilder<
+                  List<Map<String, dynamic>>>(
+                valueListenable: waitingQueueNotifier,
+                builder: (context, queueList, _) {
+                  return ListView.builder(
+                    itemCount: queueList.length,
+                    itemBuilder: (context, index) {
+                      final customer = queueList[index];
+
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 10),
+                        padding: const EdgeInsets.all(15),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(15),
+                        ),
+                        child: Text(
+                          customer['queue'],
+                          style: const TextStyle(fontSize: 24),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
             ),
-
-            const Spacer(),
-
-            const Text(
-              "Please prepare. Stay alert for your turn.",
-              style: TextStyle(color: Colors.white54, fontSize: 16),
-            ),
-
-            const SizedBox(height: 20),
           ],
         ),
       ),

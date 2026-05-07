@@ -9,53 +9,95 @@ class TrackPage extends StatefulWidget {
 }
 
 class _TrackPageState extends State<TrackPage> {
-  final TextEditingController _queueController = TextEditingController();
+  final TextEditingController queueController =
+      TextEditingController();
 
   String positionText = "";
-  String timeText = "";
+  String estimatedText = "";
+  String statusText = "";
 
-  bool isValidQueue(String input) {
-    final regex = RegExp(r'^A\d+$');
-    return regex.hasMatch(input);
-  }
+  // ✅ AVERAGE SERVICE TIME
+  final int averageServiceTime = 9;
+
+  // ================= CHECK QUEUE =================
 
   void checkQueue() {
-    String queueNumber = _queueController.text.trim();
+    String input =
+        queueController.text.trim().toUpperCase();
 
-    if (!isValidQueue(queueNumber)) {
-      showMessage("Invalid format. Use A10");
-      return;
+    bool found = false;
+
+    // ================= WAITING QUEUE =================
+
+    for (var customer in waitingQueueNotifier.value) {
+      if (customer['queue'] == input) {
+        found = true;
+
+        int position =
+            waitingQueueNotifier.value.indexOf(customer) +
+                1;
+
+        int estimatedTime =
+            position * averageServiceTime;
+
+        setState(() {
+          statusText = "Waiting";
+          positionText = "Position: $position";
+          estimatedText =
+              "Estimated Waiting Time: $estimatedTime mins";
+        });
+
+        // ✅ NEAR TURN ALERT
+        if (position <= 5) {
+          showNearTurnDialog();
+        }
+
+        break;
+      }
     }
 
-    if (!globalQueue.contains(queueNumber)) {
-      showMessage("Queue not found or already served.");
-      return;
+    // ================= NOW SERVING =================
+
+    if (!found) {
+      if (nowServingNotifier.value != null &&
+          nowServingNotifier.value!['queue'] ==
+              input) {
+        setState(() {
+          statusText = "NOW SERVING";
+          positionText = "Please proceed to testing area";
+          estimatedText = "";
+        });
+
+        found = true;
+      }
     }
 
-    int position = globalQueue.indexOf(queueNumber);
+    // ================= NOT FOUND =================
 
-    int estimatedTime = (position + 1) * averageServiceTime;
-
-    setState(() {
-      positionText = "Position: ${position + 1}";
-      timeText = "Estimated Time: $estimatedTime mins";
-    });
-
-    // 🔔 NOTIFICATION LOGIC (5 SLOTS AHEAD)
-    if (position <= 4) {
-      showAlert();
+    if (!found) {
+      setState(() {
+        statusText = "Queue not found";
+        positionText = "";
+        estimatedText = "";
+      });
     }
   }
 
-  void showAlert() {
+  // ================= ALERT =================
+
+  void showNearTurnDialog() {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text("Get Ready"),
-        content: const Text("You are near your turn. Please prepare."),
+        title: const Text("Queue Alert"),
+        content: const Text(
+          "Please prepare. Your turn is near.",
+        ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () {
+              Navigator.pop(context);
+            },
             child: const Text("OK"),
           ),
         ],
@@ -63,25 +105,35 @@ class _TrackPageState extends State<TrackPage> {
     );
   }
 
-  void showMessage(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-  }
+  // ================= CARD =================
 
-  Widget buildCard(String title, String value, Color color) {
+  Widget buildCard(
+    String title,
+    String value,
+    Color color,
+  ) {
     return Card(
-      elevation: 6,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      elevation: 5,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(15),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
             Text(
               title,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
             ),
+
             const SizedBox(height: 10),
+
             Text(
               value,
+              textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 28,
                 fontWeight: FontWeight.bold,
@@ -94,38 +146,56 @@ class _TrackPageState extends State<TrackPage> {
     );
   }
 
+  // ================= UI =================
+
   @override
   Widget build(BuildContext context) {
-    String nowServing = currentServingNumber == 0
-        ? "-"
-        : "A$currentServingNumber";
-
     return Scaffold(
-      appBar: AppBar(title: const Text("Queue Tracker")),
+      appBar: AppBar(
+        title: const Text("Track Queue"),
+      ),
+
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // NOW SERVING
-            buildCard("NOW SERVING", nowServing, Colors.red),
+            // ================= NOW SERVING =================
+
+            ValueListenableBuilder<Map<String, dynamic>?>(
+              valueListenable: nowServingNotifier,
+              builder: (context, customer, _) {
+                return buildCard(
+                  "NOW SERVING",
+                  customer == null
+                      ? "-"
+                      : customer['queue'],
+                  Colors.red,
+                );
+              },
+            ),
 
             const SizedBox(height: 20),
 
-            // INPUT
+            // ================= INPUT =================
+
             TextField(
-              controller: _queueController,
+              controller: queueController,
+              textCapitalization:
+                  TextCapitalization.characters,
               decoration: InputDecoration(
                 labelText: "Enter Queue Number",
-                hintText: "Example: A10",
+                hintText: "Example: G001 or D001",
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius:
+                      BorderRadius.circular(12),
                 ),
               ),
             ),
 
             const SizedBox(height: 15),
 
-            // BUTTON
+            // ================= BUTTON =================
+
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
@@ -136,12 +206,32 @@ class _TrackPageState extends State<TrackPage> {
 
             const SizedBox(height: 25),
 
-            // RESULT CARDS
-            if (positionText.isNotEmpty)
-              buildCard("YOUR POSITION", positionText, Colors.blue),
+            // ================= STATUS =================
 
-            if (timeText.isNotEmpty)
-              buildCard("WAITING TIME", timeText, Colors.green),
+            if (statusText.isNotEmpty)
+              buildCard(
+                "STATUS",
+                statusText,
+                Colors.blue,
+              ),
+
+            // ================= POSITION =================
+
+            if (positionText.isNotEmpty)
+              buildCard(
+                "QUEUE POSITION",
+                positionText,
+                Colors.orange,
+              ),
+
+            // ================= ESTIMATION =================
+
+            if (estimatedText.isNotEmpty)
+              buildCard(
+                "ESTIMATED WAITING TIME",
+                estimatedText,
+                Colors.green,
+              ),
           ],
         ),
       ),
