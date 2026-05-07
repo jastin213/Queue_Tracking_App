@@ -27,6 +27,22 @@ class _TrackPageState extends State<TrackPage> {
 
     bool found = false;
 
+    // ================= VALIDATION =================
+
+    final regex = RegExp(r'^[GD]\d+$');
+
+    if (!regex.hasMatch(input)) {
+      setState(() {
+        statusText =
+            "Invalid Queue Format";
+        positionText =
+            "Use format like G001 or D001";
+        estimatedText = "";
+      });
+
+      return;
+    }
+
     // ================= WAITING QUEUE =================
 
     for (var customer in waitingQueueNotifier.value) {
@@ -43,6 +59,7 @@ class _TrackPageState extends State<TrackPage> {
         setState(() {
           statusText = "Waiting";
           positionText = "Position: $position";
+
           estimatedText =
               "Estimated Waiting Time: $estimatedTime mins";
         });
@@ -64,7 +81,10 @@ class _TrackPageState extends State<TrackPage> {
               input) {
         setState(() {
           statusText = "NOW SERVING";
-          positionText = "Please proceed to testing area";
+
+          positionText =
+              "Please proceed to testing area";
+
           estimatedText = "";
         });
 
@@ -72,12 +92,58 @@ class _TrackPageState extends State<TrackPage> {
       }
     }
 
+    // ================= MISSED QUEUE =================
+
+    if (!found &&
+        nowServingNotifier.value != null) {
+      String currentQueue =
+          nowServingNotifier.value!['queue'];
+
+      // CURRENT PREFIX
+      String currentPrefix =
+          currentQueue.substring(0, 1);
+
+      // USER PREFIX
+      String userPrefix =
+          input.substring(0, 1);
+
+      // ONLY COMPARE SAME TYPE
+      if (currentPrefix == userPrefix) {
+        int currentNumber = int.parse(
+          currentQueue.substring(1),
+        );
+
+        int userNumber = int.parse(
+          input.substring(1),
+        );
+
+        // USER MISSED QUEUE
+        if (userNumber < currentNumber) {
+          setState(() {
+            statusText =
+                "Sorry, you missed your queue.";
+
+            positionText =
+                "Please coordinate with staff.";
+
+            estimatedText = "";
+          });
+
+          found = true;
+        }
+      }
+    }
+
     // ================= NOT FOUND =================
 
     if (!found) {
       setState(() {
-        statusText = "Queue not found";
-        positionText = "";
+        statusText =
+            "Queue not found";
+
+        positionText =
+            "Please check your queue number.";
+
         estimatedText = "";
       });
     }
@@ -90,14 +156,17 @@ class _TrackPageState extends State<TrackPage> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text("Queue Alert"),
+
         content: const Text(
           "Please prepare. Your turn is near.",
         ),
+
         actions: [
           TextButton(
             onPressed: () {
               Navigator.pop(context);
             },
+
             child: const Text("OK"),
           ),
         ],
@@ -114,15 +183,20 @@ class _TrackPageState extends State<TrackPage> {
   ) {
     return Card(
       elevation: 5,
+
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(15),
+        borderRadius:
+            BorderRadius.circular(15),
       ),
+
       child: Padding(
         padding: const EdgeInsets.all(20),
+
         child: Column(
           children: [
             Text(
               title,
+
               style: const TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 16,
@@ -133,7 +207,9 @@ class _TrackPageState extends State<TrackPage> {
 
             Text(
               value,
+
               textAlign: TextAlign.center,
+
               style: TextStyle(
                 fontSize: 28,
                 fontWeight: FontWeight.bold,
@@ -157,18 +233,29 @@ class _TrackPageState extends State<TrackPage> {
 
       body: Padding(
         padding: const EdgeInsets.all(16),
+
         child: Column(
           children: [
             // ================= NOW SERVING =================
 
-            ValueListenableBuilder<Map<String, dynamic>?>(
-              valueListenable: nowServingNotifier,
-              builder: (context, customer, _) {
+            ValueListenableBuilder<
+                Map<String, dynamic>?>(
+              valueListenable:
+                  nowServingNotifier,
+
+              builder:
+                  (
+                    context,
+                    customer,
+                    _,
+                  ) {
                 return buildCard(
                   "NOW SERVING",
+
                   customer == null
                       ? "-"
                       : customer['queue'],
+
                   Colors.red,
                 );
               },
@@ -180,14 +267,22 @@ class _TrackPageState extends State<TrackPage> {
 
             TextField(
               controller: queueController,
+
               textCapitalization:
                   TextCapitalization.characters,
+
               decoration: InputDecoration(
-                labelText: "Enter Queue Number",
-                hintText: "Example: G001 or D001",
+                labelText:
+                    "Enter Queue Number",
+
+                hintText:
+                    "Example: G001 or D001",
+
                 border: OutlineInputBorder(
                   borderRadius:
-                      BorderRadius.circular(12),
+                      BorderRadius.circular(
+                    12,
+                  ),
                 ),
               ),
             ),
@@ -198,9 +293,13 @@ class _TrackPageState extends State<TrackPage> {
 
             SizedBox(
               width: double.infinity,
+
               child: ElevatedButton(
                 onPressed: checkQueue,
-                child: const Text("CHECK STATUS"),
+
+                child: const Text(
+                  "CHECK STATUS",
+                ),
               ),
             ),
 

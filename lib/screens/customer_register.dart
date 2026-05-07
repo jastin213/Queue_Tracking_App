@@ -13,15 +13,24 @@ class _CustomerRegisterState
   final TextEditingController fullNameController =
       TextEditingController();
 
-  final TextEditingController addressController =
-      TextEditingController();
+  String selectedAddress = "Ligao";
+
+final List<String> addressList = [
+  "Ligao",
+  "Guinobatan",
+  "Jovellar",
+  "Libon",
+  "Oas",
+  "Pio Duran",
+  "Polangui",
+];
 
   final TextEditingController passwordController =
       TextEditingController();
 
   void register() {
     if (fullNameController.text.isEmpty ||
-        addressController.text.isEmpty ||
+        addressList.isEmpty ||
         passwordController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -64,13 +73,30 @@ class _CustomerRegisterState
 
             const SizedBox(height: 15),
 
-            TextField(
-              controller: addressController,
-              decoration: const InputDecoration(
-                labelText: "Address",
-                border: OutlineInputBorder(),
-              ),
-            ),
+            DropdownButtonFormField<String>(
+  value: selectedAddress,
+
+  decoration: InputDecoration(
+    labelText: "Municipality",
+    border: OutlineInputBorder(
+      borderRadius:
+          BorderRadius.circular(12),
+    ),
+  ),
+
+  items: addressList.map((address) {
+    return DropdownMenuItem(
+      value: address,
+      child: Text(address),
+    );
+  }).toList(),
+
+  onChanged: (value) {
+    setState(() {
+      selectedAddress = value!;
+    });
+  },
+),
 
             const SizedBox(height: 15),
 

@@ -1,4 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
 
 // ================= GLOBAL BOOKING STORAGE =================
 
@@ -10,6 +14,8 @@ ValueNotifier<List<Map<String, dynamic>>> approvedBookings =
 
 ValueNotifier<List<Map<String, dynamic>>> rejectedBookings =
     ValueNotifier([]);
+
+// ================= BOOK APPOINTMENT =================
 
 class BookAppointment extends StatefulWidget {
   const BookAppointment({super.key});
@@ -28,20 +34,35 @@ class _BookAppointmentState
 
   DateTime? selectedDate;
 
-  String selectedSlot = "8:00 AM";
+  String selectedSlot = "Slot 1";
+
   String selectedVehicle = "Gas";
+
+  // ================= FILES =================
+
+  File? validIdFile;
+
+  File? orFile;
+
+  File? crFile;
+
+  // ================= IMAGE PICKER =================
+
+  final ImagePicker picker = ImagePicker();
 
   // ================= SLOT LIST =================
 
   final List<String> slots = [
-    "8:00 AM",
-    "9:00 AM",
-    "10:00 AM",
-    "11:00 AM",
-    "1:00 PM",
-    "2:00 PM",
-    "3:00 PM",
-    "4:00 PM",
+    "Slot 1",
+    "Slot 2",
+    "Slot 3",
+    "Slot 4",
+    "Slot 5",
+    "Slot 6",
+    "Slot 7",
+    "Slot 8",
+    "Slot 9",
+    "Slot 10",
   ];
 
   // ================= PICK DATE =================
@@ -64,19 +85,98 @@ class _BookAppointmentState
     }
   }
 
+  // ================= PICK VALID ID =================
+
+  Future pickValidId() async {
+    final XFile? image =
+        await picker.pickImage(
+      source: ImageSource.gallery,
+    );
+
+    if (image != null) {
+      setState(() {
+        validIdFile = File(image.path);
+      });
+    }
+  }
+
+  // ================= PICK DOCUMENT =================
+
+  Future pickDocument(String type) async {
+    FilePickerResult? result =
+        await FilePicker.platform.pickFiles();
+
+    if (result != null) {
+      File file = File(
+        result.files.single.path!,
+      );
+
+      setState(() {
+        if (type == "OR") {
+          orFile = file;
+        } else {
+          crFile = file;
+        }
+      });
+    }
+  }
+
   // ================= SUBMIT BOOKING =================
 
   void submitBooking() {
+    // ================= VALIDATION =================
+
     if (selectedDate == null ||
         plateController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Complete all fields"),
+          content: Text(
+            "Complete all fields",
+          ),
         ),
       );
 
       return;
     }
+
+    // ================= FILE VALIDATION =================
+
+    if (validIdFile == null ||
+        orFile == null ||
+        crFile == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Please upload all required documents.",
+          ),
+        ),
+      );
+
+      return;
+    }
+
+    // ================= DUPLICATE SLOT CHECK =================
+
+    bool slotTaken = pendingBookings.value.any(
+      (booking) =>
+          booking['date'] ==
+              "${selectedDate!.month}/${selectedDate!.day}/${selectedDate!.year}" &&
+          booking['slot'] == selectedSlot,
+    );
+
+    if (slotTaken) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Selected queue slot is already taken.",
+          ),
+        ),
+      );
+
+      return;
+    }
+
+    // ================= SAVE BOOKING =================
 
     pendingBookings.value = [
       ...pendingBookings.value,
@@ -85,11 +185,19 @@ class _BookAppointmentState
         "plate": plateController.text,
         "vehicle": selectedVehicle,
         "slot": selectedSlot,
+
         "date":
             "${selectedDate!.month}/${selectedDate!.day}/${selectedDate!.year}",
+
         "status": "Pending",
+
+        "validId": validIdFile,
+        "orFile": orFile,
+        "crFile": crFile,
       }
     ];
+
+    // ================= SUCCESS =================
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -102,13 +210,82 @@ class _BookAppointmentState
     Navigator.pop(context);
   }
 
+  // ================= UPLOAD CARD =================
+
+  Widget uploadCard({
+    required String title,
+    required File? file,
+    required VoidCallback onPressed,
+  }) {
+    return Container(
+      width: double.infinity,
+
+      padding: const EdgeInsets.all(15),
+
+      decoration: BoxDecoration(
+        color: Colors.white,
+
+        borderRadius:
+            BorderRadius.circular(15),
+
+        border: Border.all(
+          color: Colors.grey.shade300,
+        ),
+      ),
+
+      child: Column(
+        crossAxisAlignment:
+            CrossAxisAlignment.start,
+
+        children: [
+          Text(
+            title,
+
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+
+          const SizedBox(height: 10),
+
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  file == null
+                      ? "No file selected"
+                      : file.path
+                          .split('/')
+                          .last,
+
+                  overflow:
+                      TextOverflow.ellipsis,
+                ),
+              ),
+
+              ElevatedButton(
+                onPressed: onPressed,
+
+                child: const Text(
+                  "Choose File",
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
   // ================= UI =================
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Book Appointment"),
+        title: const Text(
+          "Book Appointment",
+        ),
       ),
 
       body: Padding(
@@ -120,6 +297,7 @@ class _BookAppointmentState
 
             const Text(
               "Select Date",
+
               style: TextStyle(
                 fontWeight: FontWeight.bold,
               ),
@@ -142,7 +320,8 @@ class _BookAppointmentState
             // ================= SLOT =================
 
             const Text(
-              "Select Slot",
+              "Available Queue Slot",
+
               style: TextStyle(
                 fontWeight: FontWeight.bold,
               ),
@@ -173,6 +352,7 @@ class _BookAppointmentState
 
             const Text(
               "Vehicle Type",
+
               style: TextStyle(
                 fontWeight: FontWeight.bold,
               ),
@@ -211,80 +391,49 @@ class _BookAppointmentState
 
               decoration: const InputDecoration(
                 labelText: "Plate Number",
+
                 border: OutlineInputBorder(),
               ),
             ),
 
             const SizedBox(height: 20),
 
-            // ================= UPLOAD ID =================
+            // ================= VALID ID =================
 
-            Container(
-              padding: const EdgeInsets.all(20),
+            uploadCard(
+              title: "Upload Valid ID",
 
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: Colors.grey,
-                ),
+              file: validIdFile,
 
-                borderRadius:
-                    BorderRadius.circular(15),
-              ),
-
-              child: Column(
-                children: [
-                  const Icon(Icons.upload_file),
-
-                  const SizedBox(height: 10),
-
-                  const Text("Upload Valid ID"),
-
-                  const SizedBox(height: 10),
-
-                  ElevatedButton(
-                    onPressed: () {},
-                    child: const Text(
-                      "Choose File",
-                    ),
-                  ),
-                ],
-              ),
+              onPressed: pickValidId,
             ),
 
-            const SizedBox(height: 20),
+            const SizedBox(height: 15),
 
-            // ================= UPLOAD OR/CR =================
+            // ================= OR =================
 
-            Container(
-              padding: const EdgeInsets.all(20),
+            uploadCard(
+              title: "Upload OR",
 
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: Colors.grey,
-                ),
+              file: orFile,
 
-                borderRadius:
-                    BorderRadius.circular(15),
-              ),
+              onPressed: () {
+                pickDocument("OR");
+              },
+            ),
 
-              child: Column(
-                children: [
-                  const Icon(Icons.upload_file),
+            const SizedBox(height: 15),
 
-                  const SizedBox(height: 10),
+            // ================= CR =================
 
-                  const Text("Upload OR/CR"),
+            uploadCard(
+              title: "Upload CR",
 
-                  const SizedBox(height: 10),
+              file: crFile,
 
-                  ElevatedButton(
-                    onPressed: () {},
-                    child: const Text(
-                      "Choose File",
-                    ),
-                  ),
-                ],
-              ),
+              onPressed: () {
+                pickDocument("CR");
+              },
             ),
 
             const SizedBox(height: 30),
