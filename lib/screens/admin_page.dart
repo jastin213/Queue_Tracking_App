@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+
 import 'display_page.dart';
+import 'admin_dashboard.dart';
+import 'history_page.dart';
+import 'home_page.dart';
 
 // ================= GLOBAL VARIABLES =================
 
@@ -50,13 +54,16 @@ class _AdminPageState extends State<AdminPage> {
       context: context,
       builder: (_) => AlertDialog(
         title: Text("Generate $type Queue"),
+
         content: TextField(
           controller: nameController,
+
           decoration: const InputDecoration(
             labelText: "Customer Name",
             border: OutlineInputBorder(),
           ),
         ),
+
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -65,7 +72,11 @@ class _AdminPageState extends State<AdminPage> {
 
           ElevatedButton(
             onPressed: () {
-              generateQueue(type, nameController.text.trim());
+              generateQueue(
+                type,
+                nameController.text.trim(),
+              );
+
               Navigator.pop(context);
             },
             child: const Text("Generate Queue"),
@@ -77,10 +88,13 @@ class _AdminPageState extends State<AdminPage> {
 
   // ================= GENERATE QUEUE =================
 
-  void generateQueue(String type, String name) {
+  void generateQueue(
+    String type,
+    String name,
+  ) {
     if (name.isEmpty) return;
 
-    // ✅ DAILY LIMIT
+    // DAILY LIMIT
     if (totalQueue >= maxQueueLimit) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -89,6 +103,7 @@ class _AdminPageState extends State<AdminPage> {
           ),
         ),
       );
+
       return;
     }
 
@@ -97,10 +112,12 @@ class _AdminPageState extends State<AdminPage> {
     if (type == "Gas") {
       queueNumber =
           "G${gasCounter.toString().padLeft(3, '0')}";
+
       gasCounter++;
     } else {
       queueNumber =
           "D${dieselCounter.toString().padLeft(3, '0')}";
+
       dieselCounter++;
     }
 
@@ -124,7 +141,9 @@ class _AdminPageState extends State<AdminPage> {
 
   // ================= CALL CUSTOMER =================
 
-  void callCustomer(Map<String, dynamic> customer) async {
+  void callCustomer(
+    Map<String, dynamic> customer,
+  ) async {
     final updatedQueue =
         List<Map<String, dynamic>>.from(
       waitingQueueNotifier.value,
@@ -177,7 +196,9 @@ class _AdminPageState extends State<AdminPage> {
 
   // ================= CANCEL QUEUE =================
 
-  void cancelQueue(Map<String, dynamic> customer) {
+  void cancelQueue(
+    Map<String, dynamic> customer,
+  ) {
     final updatedQueue =
         List<Map<String, dynamic>>.from(
       waitingQueueNotifier.value,
@@ -197,9 +218,11 @@ class _AdminPageState extends State<AdminPage> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text("Reset System"),
+
         content: const Text(
           "This will clear all queues and start a new day.",
         ),
+
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
@@ -249,6 +272,119 @@ class _AdminPageState extends State<AdminPage> {
       backgroundColor:
           const Color.fromARGB(255, 227, 242, 248),
 
+      // ================= DRAWER =================
+
+      drawer: Drawer(
+        child: ListView(
+          padding: EdgeInsets.zero,
+
+          children: [
+            DrawerHeader(
+              decoration: const BoxDecoration(
+                color: Colors.black,
+              ),
+
+              child: Column(
+                crossAxisAlignment:
+                    CrossAxisAlignment.start,
+
+                mainAxisAlignment:
+                    MainAxisAlignment.end,
+
+                children: const [
+                  Icon(
+                    Icons.admin_panel_settings,
+                    color: Colors.white,
+                    size: 50,
+                  ),
+
+                  SizedBox(height: 10),
+
+                  Text(
+                    "Admin Panel",
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // ================= QUEUE PANEL =================
+
+            ListTile(
+              leading: const Icon(Icons.queue),
+
+              title: const Text("Queue Panel"),
+
+              onTap: () {
+                Navigator.pop(context);
+              },
+            ),
+
+            // ================= BOOKING DASHBOARD =================
+
+            ListTile(
+              leading:
+                  const Icon(Icons.dashboard),
+
+              title: const Text(
+                "Booking Dashboard",
+              ),
+
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        const AdminDashboard(),
+                  ),
+                );
+              },
+            ),
+
+            // ================= HISTORY =================
+
+            ListTile(
+              leading: const Icon(Icons.history),
+
+              title: const Text("History"),
+
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        const HistoryPage(),
+                  ),
+                );
+              },
+            ),
+
+            // ================= LOGOUT =================
+
+            ListTile(
+              leading: const Icon(Icons.logout),
+
+              title: const Text("Logout"),
+
+              onTap: () {
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        const HomePage(),
+                  ),
+                  (route) => false,
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+
       appBar: AppBar(
         title: const Text("Admin Control Panel"),
         backgroundColor: Colors.white,
@@ -256,6 +392,7 @@ class _AdminPageState extends State<AdminPage> {
 
       body: Padding(
         padding: const EdgeInsets.all(16),
+
         child: Column(
           children: [
             // ================= TOP STATS =================
@@ -293,6 +430,7 @@ class _AdminPageState extends State<AdminPage> {
 
                   SizedBox(
                     width: 190,
+
                     child: Column(
                       children: [
                         cardContainer(
@@ -311,6 +449,7 @@ class _AdminPageState extends State<AdminPage> {
 
                               SizedBox(
                                 width: double.infinity,
+
                                 child: ElevatedButton(
                                   onPressed: () {
                                     showGenerateDialog(
@@ -326,13 +465,15 @@ class _AdminPageState extends State<AdminPage> {
 
                               SizedBox(
                                 width: double.infinity,
+
                                 child: ElevatedButton(
                                   onPressed: () {
                                     showGenerateDialog(
                                       "Diesel",
                                     );
                                   },
-                                  child: const Text(
+                                  child:
+                                      const Text(
                                     "DIESEL",
                                   ),
                                 ),
@@ -345,6 +486,7 @@ class _AdminPageState extends State<AdminPage> {
 
                         SizedBox(
                           width: double.infinity,
+
                           child: ElevatedButton(
                             onPressed: () {
                               Navigator.push(
@@ -365,13 +507,16 @@ class _AdminPageState extends State<AdminPage> {
 
                         SizedBox(
                           width: double.infinity,
+
                           child: ElevatedButton(
                             style:
                                 ElevatedButton.styleFrom(
                               backgroundColor:
                                   Colors.red,
                             ),
+
                             onPressed: resetDay,
+
                             child: const Text(
                               "DAILY RESET",
                             ),
@@ -395,18 +540,23 @@ class _AdminPageState extends State<AdminPage> {
                               ValueListenableBuilder<
                                   Map<String,
                                       dynamic>?>(
+
                             valueListenable:
                                 nowServingNotifier,
+
                             builder:
-                                (context, customer, _) {
+                                (
+                                  context,
+                                  customer,
+                                  _,
+                                ) {
                               return Column(
                                 children: [
                                   const Text(
                                     "NOW SERVING",
                                     style: TextStyle(
                                       fontWeight:
-                                          FontWeight
-                                              .bold,
+                                          FontWeight.bold,
                                       fontSize: 16,
                                     ),
                                   ),
@@ -419,12 +569,12 @@ class _AdminPageState extends State<AdminPage> {
                                         ? "-"
                                         : customer[
                                             'queue'],
+
                                     style:
                                         const TextStyle(
                                       fontSize: 45,
                                       fontWeight:
-                                          FontWeight
-                                              .bold,
+                                          FontWeight.bold,
                                       color:
                                           Colors.red,
                                     ),
@@ -438,6 +588,7 @@ class _AdminPageState extends State<AdminPage> {
                                         ? ""
                                         : customer[
                                             'name'],
+
                                     style:
                                         const TextStyle(
                                       fontSize: 18,
@@ -451,10 +602,10 @@ class _AdminPageState extends State<AdminPage> {
                                     mainAxisAlignment:
                                         MainAxisAlignment
                                             .center,
+
                                     children: [
                                       miniButton(
-                                        Icons
-                                            .volume_up,
+                                        Icons.volume_up,
                                         Colors.blue,
                                         callAgain,
                                       ),
@@ -494,13 +645,13 @@ class _AdminPageState extends State<AdminPage> {
                               crossAxisAlignment:
                                   CrossAxisAlignment
                                       .start,
+
                               children: [
                                 const Text(
                                   "Waiting Queue",
                                   style: TextStyle(
                                     fontWeight:
-                                        FontWeight
-                                            .bold,
+                                        FontWeight.bold,
                                     fontSize: 16,
                                   ),
                                 ),
@@ -511,26 +662,30 @@ class _AdminPageState extends State<AdminPage> {
                                 Expanded(
                                   child:
                                       ValueListenableBuilder<
-                                          List<Map<
-                                              String,
-                                              dynamic>>>(
+                                          List<
+                                              Map<String,
+                                                  dynamic>>>(
+
                                     valueListenable:
                                         waitingQueueNotifier,
-                                    builder: (
-                                      context,
-                                      queueList,
-                                      _,
-                                    ) {
+
+                                    builder:
+                                        (
+                                          context,
+                                          queueList,
+                                          _,
+                                        ) {
                                       return ListView
                                           .builder(
                                         itemCount:
                                             queueList
                                                 .length,
+
                                         itemBuilder:
                                             (
-                                          context,
-                                          index,
-                                        ) {
+                                              context,
+                                              index,
+                                            ) {
                                           final customer =
                                               queueList[
                                                   index];
@@ -542,37 +697,43 @@ class _AdminPageState extends State<AdminPage> {
                                               bottom:
                                                   10,
                                             ),
+
                                             padding:
                                                 const EdgeInsets
                                                     .all(
                                               12,
                                             ),
+
                                             decoration:
                                                 BoxDecoration(
                                               color: Colors
                                                   .grey
                                                   .shade100,
+
                                               borderRadius:
                                                   BorderRadius.circular(
                                                 15,
                                               ),
                                             ),
-                                            child:
-                                                Row(
+
+                                            child: Row(
                                               children: [
                                                 Expanded(
                                                   child:
                                                       Column(
                                                     crossAxisAlignment:
                                                         CrossAxisAlignment.start,
+
                                                     children: [
                                                       Text(
                                                         customer[
                                                             'queue'],
+
                                                         style:
                                                             const TextStyle(
                                                           fontSize:
                                                               18,
+
                                                           fontWeight:
                                                               FontWeight.bold,
                                                         ),
@@ -587,11 +748,14 @@ class _AdminPageState extends State<AdminPage> {
                                                 ),
 
                                                 // CALL BUTTON
+
                                                 miniButton(
                                                   Icons
                                                       .volume_up,
+
                                                   Colors
                                                       .blue,
+
                                                   () {
                                                     callCustomer(
                                                       customer,
@@ -604,11 +768,14 @@ class _AdminPageState extends State<AdminPage> {
                                                         8),
 
                                                 // CANCEL BUTTON
+
                                                 miniButton(
                                                   Icons
                                                       .close,
+
                                                   Colors
                                                       .red,
+
                                                   () {
                                                     cancelQueue(
                                                       customer,
@@ -646,11 +813,15 @@ class _AdminPageState extends State<AdminPage> {
   }) {
     return Container(
       width: double.infinity,
+
       padding: const EdgeInsets.all(16),
+
       decoration: BoxDecoration(
         color: Colors.white,
+
         borderRadius:
             BorderRadius.circular(20),
+
         boxShadow: [
           BoxShadow(
             color:
@@ -659,6 +830,7 @@ class _AdminPageState extends State<AdminPage> {
           ),
         ],
       ),
+
       child: child,
     );
   }
@@ -675,6 +847,7 @@ class _AdminPageState extends State<AdminPage> {
           children: [
             Text(
               title,
+
               style: const TextStyle(
                 fontWeight: FontWeight.bold,
               ),
@@ -684,6 +857,7 @@ class _AdminPageState extends State<AdminPage> {
 
             Text(
               value,
+
               style: const TextStyle(
                 fontSize: 28,
                 fontWeight: FontWeight.bold,
@@ -705,17 +879,25 @@ class _AdminPageState extends State<AdminPage> {
     return SizedBox(
       width: 40,
       height: 40,
+
       child: ElevatedButton(
         style: ElevatedButton.styleFrom(
           backgroundColor: color,
+
           padding: EdgeInsets.zero,
+
           shape: RoundedRectangleBorder(
             borderRadius:
                 BorderRadius.circular(12),
           ),
         ),
+
         onPressed: onPressed,
-        child: Icon(icon, size: 18),
+
+        child: Icon(
+          icon,
+          size: 18,
+        ),
       ),
     );
   }
