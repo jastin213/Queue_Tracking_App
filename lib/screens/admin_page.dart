@@ -5,14 +5,18 @@ import 'display_page.dart';
 import 'admin_dashboard.dart';
 import 'history_page.dart';
 import 'home_page.dart';
+import 'admin_settings.dart';
 
 // ================= GLOBAL VARIABLES =================
 
 ValueNotifier<List<Map<String, dynamic>>> waitingQueueNotifier =
     ValueNotifier([]);
 
-ValueNotifier<Map<String, dynamic>?> nowServingNotifier =
-    ValueNotifier(null);
+ValueNotifier<Map<String, dynamic>?> nowServingNotifier = ValueNotifier(null);
+
+// Selected queue date for Admin Queue Panel
+ValueNotifier<String> selectedQueueDateNotifier =
+    ValueNotifier(formatDate(DateTime.now()));
 
 int totalQueue = 0;
 int completedQueue = 0;
@@ -21,6 +25,12 @@ int gasCounter = 1;
 int dieselCounter = 1;
 
 const int maxQueueLimit = 80;
+
+// ================= DATE FORMAT =================
+
+String formatDate(DateTime date) {
+  return "${date.month}/${date.day}/${date.year}";
+}
 
 // ================= ADMIN PAGE =================
 
@@ -34,52 +44,131 @@ class AdminPage extends StatefulWidget {
 class _AdminPageState extends State<AdminPage> {
   final FlutterTts flutterTts = FlutterTts();
 
+  bool get isFilipino => appLanguageNotifier.value == "Filipino";
+
+  String text(String english, String filipino) {
+    return isFilipino ? filipino : english;
+  }
+
   // ================= SPEAK =================
 
-  Future speak(String text) async {
-    await flutterTts.setLanguage("en-US");
-    await flutterTts.setSpeechRate(0.45);
-    await flutterTts.setPitch(1.0);
+  Future<void> speak(String queueNumber) async {
+    if (voiceLanguageNotifier.value == "Filipino") {
+      await flutterTts.setLanguage("fil-PH");
+      await flutterTts.setSpeechRate(0.45);
+      await flutterTts.setPitch(1.0);
 
-    await flutterTts.speak(text);
+      await flutterTts.speak(
+        "Tinatawag ang numero $queueNumber, pumunta na po sa testing area",
+      );
+    } else {
+      await flutterTts.setLanguage("en-US");
+      await flutterTts.setSpeechRate(0.45);
+      await flutterTts.setPitch(1.0);
+
+      await flutterTts.speak(
+        "Now serving $queueNumber, please proceed to the testing area",
+      );
+    }
+  }
+
+  // ================= PICK QUEUE DATE =================
+
+  Future<void> pickQueueDate() async {
+    DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+      lastDate: DateTime(2030),
+    );
+
+    if (picked != null) {
+      selectedQueueDateNotifier.value = formatDate(picked);
+      setState(() {});
+    }
+  }
+
+  // ================= FILTER QUEUE BY SELECTED DATE =================
+
+  List<Map<String, dynamic>> getQueueForSelectedDate() {
+    return waitingQueueNotifier.value.where((customer) {
+      return customer["date"] == selectedQueueDateNotifier.value;
+    }).toList();
+  }
+
+  bool isNowServingForSelectedDate() {
+    if (nowServingNotifier.value == null) return false;
+
+    return nowServingNotifier.value!["date"] == selectedQueueDateNotifier.value;
+  }
+
+  Map<String, dynamic>? getDisplayedNowServing() {
+    if (isNowServingForSelectedDate()) {
+      return nowServingNotifier.value;
+    }
+
+    return null;
+  }
+
+  // ================= QUEUE CODE HELPERS =================
+
+  bool queueCodeExistsOnSelectedDate(String queueCode) {
+    bool inWaiting = waitingQueueNotifier.value.any((customer) {
+      return customer["date"] == selectedQueueDateNotifier.value &&
+          customer["queue"] == queueCode;
+    });
+
+    bool inNowServing = nowServingNotifier.value != null &&
+        nowServingNotifier.value!["date"] == selectedQueueDateNotifier.value &&
+        nowServingNotifier.value!["queue"] == queueCode;
+
+    return inWaiting || inNowServing;
+  }
+
+  String generateNextAvailableQueueCode(String type) {
+    String prefix = type == "Gas" ? "G" : "D";
+    int number = 1;
+
+    while (true) {
+      String queueCode = "$prefix${number.toString().padLeft(3, '0')}";
+
+      if (!queueCodeExistsOnSelectedDate(queueCode)) {
+        return queueCode;
+      }
+
+      number++;
+    }
   }
 
   // ================= GENERATE DIALOG =================
 
   void showGenerateDialog(String type) {
-    final TextEditingController nameController =
-        TextEditingController();
+    final TextEditingController nameController = TextEditingController();
 
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text("Generate $type Queue"),
-
+        title: Text(
+          text("Generate $type Queue", "Gumawa ng $type Queue"),
+        ),
         content: TextField(
           controller: nameController,
-
-          decoration: const InputDecoration(
-            labelText: "Customer Name",
-            border: OutlineInputBorder(),
+          decoration: InputDecoration(
+            labelText: text("Customer Name", "Pangalan ng Customer"),
+            border: const OutlineInputBorder(),
           ),
         ),
-
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
+            child: Text(text("Cancel", "Kanselahin")),
           ),
-
           ElevatedButton(
             onPressed: () {
-              generateQueue(
-                type,
-                nameController.text.trim(),
-              );
-
+              generateQueue(type, nameController.text.trim());
               Navigator.pop(context);
             },
-            child: const Text("Generate Queue"),
+            child: Text(text("Generate Queue", "Gumawa ng Queue")),
           ),
         ],
       ),
@@ -88,48 +177,48 @@ class _AdminPageState extends State<AdminPage> {
 
   // ================= GENERATE QUEUE =================
 
-  void generateQueue(
-    String type,
-    String name,
-  ) {
-    if (name.isEmpty) return;
-
-    // DAILY LIMIT
-    if (totalQueue >= maxQueueLimit) {
+  void generateQueue(String type, String name) {
+    if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            "QUEUE CLOSED — DAILY LIMIT REACHED",
+            text(
+              "Please enter customer name",
+              "Pakilagay ang pangalan ng customer",
+            ),
           ),
         ),
       );
-
       return;
     }
 
-    String queueNumber;
+    List<Map<String, dynamic>> selectedDateQueue = getQueueForSelectedDate();
 
-    if (type == "Gas") {
-      queueNumber =
-          "G${gasCounter.toString().padLeft(3, '0')}";
-
-      gasCounter++;
-    } else {
-      queueNumber =
-          "D${dieselCounter.toString().padLeft(3, '0')}";
-
-      dieselCounter++;
+    if (selectedDateQueue.length >= maxQueueLimit) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            text(
+              "QUEUE CLOSED — DAILY LIMIT REACHED",
+              "SARADO NA ANG QUEUE — NAABOT NA ANG DAILY LIMIT",
+            ),
+          ),
+        ),
+      );
+      return;
     }
 
+    String queueNumber = generateNextAvailableQueueCode(type);
+
     final updatedQueue =
-        List<Map<String, dynamic>>.from(
-      waitingQueueNotifier.value,
-    );
+        List<Map<String, dynamic>>.from(waitingQueueNotifier.value);
 
     updatedQueue.add({
       "queue": queueNumber,
       "name": name,
       "type": type,
+      "date": selectedQueueDateNotifier.value,
+      "source": "Walk-in",
     });
 
     waitingQueueNotifier.value = updatedQueue;
@@ -137,17 +226,24 @@ class _AdminPageState extends State<AdminPage> {
     setState(() {
       totalQueue++;
     });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          text(
+            "$queueNumber added to queue",
+            "Naidagdag ang $queueNumber sa queue",
+          ),
+        ),
+      ),
+    );
   }
 
   // ================= CALL CUSTOMER =================
 
-  void callCustomer(
-    Map<String, dynamic> customer,
-  ) async {
+  void callCustomer(Map<String, dynamic> customer) async {
     final updatedQueue =
-        List<Map<String, dynamic>>.from(
-      waitingQueueNotifier.value,
-    );
+        List<Map<String, dynamic>>.from(waitingQueueNotifier.value);
 
     updatedQueue.remove(customer);
 
@@ -155,9 +251,7 @@ class _AdminPageState extends State<AdminPage> {
 
     nowServingNotifier.value = customer;
 
-    await speak(
-      "Now serving ${customer['queue']}, please proceed to the testing area",
-    );
+    await speak(customer['queue']);
 
     setState(() {});
   }
@@ -165,50 +259,164 @@ class _AdminPageState extends State<AdminPage> {
   // ================= CALL AGAIN =================
 
   void callAgain() async {
-    if (nowServingNotifier.value == null) return;
+    final customer = getDisplayedNowServing();
 
-    await speak(
-      "Now serving ${nowServingNotifier.value!['queue']}, please proceed to the testing area",
+    if (customer == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            text(
+              "No customer is being served for this date",
+              "Walang kasalukuyang sini-serve sa petsang ito",
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+
+    await speak(customer['queue']);
+  }
+
+  // ================= SKIP CUSTOMER =================
+
+  void skipCustomer() {
+    final customer = getDisplayedNowServing();
+
+    if (customer == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            text(
+              "No customer to skip",
+              "Walang customer na i-skip",
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+
+    final skippedCustomer = {
+      ...customer,
+      "source": "Skipped / No Show",
+    };
+
+    waitingQueueNotifier.value = [
+      ...waitingQueueNotifier.value,
+      skippedCustomer,
+    ];
+
+    nowServingNotifier.value = null;
+
+    setState(() {});
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          text(
+            "${skippedCustomer['queue']} skipped and moved to bottom queue",
+            "Na-skip ang ${skippedCustomer['queue']} at nailipat sa dulo ng queue",
+          ),
+        ),
+      ),
     );
   }
 
   // ================= PASSED =================
 
   void markPassed() {
-    if (nowServingNotifier.value == null) return;
+    final customer = getDisplayedNowServing();
+
+    if (customer == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            text(
+              "No customer to mark as passed",
+              "Walang customer na mamarkahan bilang passed",
+            ),
+          ),
+        ),
+      );
+      return;
+    }
 
     nowServingNotifier.value = null;
 
     setState(() {
       completedQueue++;
     });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          text(
+            "${customer['queue']} marked as passed",
+            "Naipasa ang ${customer['queue']}",
+          ),
+        ),
+      ),
+    );
   }
 
   // ================= FAILED =================
 
   void markFailed() {
-    if (nowServingNotifier.value == null) return;
+    final customer = getDisplayedNowServing();
+
+    if (customer == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            text(
+              "No customer to mark as failed",
+              "Walang customer na mamarkahan bilang failed",
+            ),
+          ),
+        ),
+      );
+      return;
+    }
 
     nowServingNotifier.value = null;
 
     setState(() {});
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          text(
+            "${customer['queue']} marked as failed",
+            "Na-failed ang ${customer['queue']}",
+          ),
+        ),
+      ),
+    );
   }
 
   // ================= CANCEL QUEUE =================
 
-  void cancelQueue(
-    Map<String, dynamic> customer,
-  ) {
+  void cancelQueue(Map<String, dynamic> customer) {
     final updatedQueue =
-        List<Map<String, dynamic>>.from(
-      waitingQueueNotifier.value,
-    );
+        List<Map<String, dynamic>>.from(waitingQueueNotifier.value);
 
     updatedQueue.remove(customer);
 
     waitingQueueNotifier.value = updatedQueue;
 
     setState(() {});
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          text(
+            "${customer['queue']} removed from queue",
+            "Naalis ang ${customer['queue']} sa queue",
+          ),
+        ),
+      ),
+    );
   }
 
   // ================= DAILY RESET =================
@@ -217,47 +425,47 @@ class _AdminPageState extends State<AdminPage> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text("Reset System"),
-
-        content: const Text(
-          "This will clear all queues and start a new day.",
+        title: Text(text("Reset System", "I-reset ang System")),
+        content: Text(
+          text(
+            "This will clear all queues and start a new day.",
+            "Mabubura ang lahat ng queue at magsisimula ng bagong araw.",
+          ),
         ),
-
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
+            child: Text(text("Cancel", "Kanselahin")),
           ),
-
           ElevatedButton(
             onPressed: () {
-              // CLEAR WAITING
               waitingQueueNotifier.value = [];
-
-              // CLEAR NOW SERVING
               nowServingNotifier.value = null;
 
-              // RESET COUNTERS
               gasCounter = 1;
               dieselCounter = 1;
 
-              // RESET STATS
               totalQueue = 0;
               completedQueue = 0;
+
+              selectedQueueDateNotifier.value = formatDate(DateTime.now());
 
               setState(() {});
 
               Navigator.pop(context);
 
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
+                SnackBar(
                   content: Text(
-                    "System reset for new day",
+                    text(
+                      "System reset for new day",
+                      "Na-reset ang system para sa bagong araw",
+                    ),
                   ),
                 ),
               );
             },
-            child: const Text("Confirm"),
+            child: Text(text("Confirm", "Kumpirmahin")),
           ),
         ],
       ),
@@ -268,41 +476,35 @@ class _AdminPageState extends State<AdminPage> {
 
   @override
   Widget build(BuildContext context) {
+    List<Map<String, dynamic>> selectedDateQueue = getQueueForSelectedDate();
+    Map<String, dynamic>? displayedNowServing = getDisplayedNowServing();
+
     return Scaffold(
-      backgroundColor:
-          const Color.fromARGB(255, 227, 242, 248),
+      backgroundColor: const Color.fromARGB(255, 227, 242, 248),
 
       // ================= DRAWER =================
 
       drawer: Drawer(
         child: ListView(
           padding: EdgeInsets.zero,
-
           children: [
             DrawerHeader(
               decoration: const BoxDecoration(
                 color: Colors.black,
               ),
-
               child: Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment.start,
-
-                mainAxisAlignment:
-                    MainAxisAlignment.end,
-
-                children: const [
-                  Icon(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  const Icon(
                     Icons.admin_panel_settings,
                     color: Colors.white,
                     size: 50,
                   ),
-
-                  SizedBox(height: 10),
-
+                  const SizedBox(height: 10),
                   Text(
-                    "Admin Panel",
-                    style: TextStyle(
+                    text("Admin Panel", "Admin Panel"),
+                    style: const TextStyle(
                       color: Colors.white,
                       fontSize: 22,
                       fontWeight: FontWeight.bold,
@@ -312,70 +514,65 @@ class _AdminPageState extends State<AdminPage> {
               ),
             ),
 
-            // ================= QUEUE PANEL =================
-
             ListTile(
               leading: const Icon(Icons.queue),
-
-              title: const Text("Queue Panel"),
-
+              title: Text(text("Queue Panel", "Queue Panel")),
               onTap: () {
                 Navigator.pop(context);
               },
             ),
 
-            // ================= BOOKING DASHBOARD =================
-
             ListTile(
-              leading:
-                  const Icon(Icons.dashboard),
-
-              title: const Text(
-                "Booking Dashboard",
-              ),
-
+              leading: const Icon(Icons.dashboard),
+              title: Text(text("Booking Dashboard", "Booking Dashboard")),
               onTap: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) =>
-                        const AdminDashboard(),
+                    builder: (_) => const AdminDashboard(),
                   ),
-                );
+                ).then((_) {
+                  setState(() {});
+                });
               },
             ),
-
-            // ================= HISTORY =================
 
             ListTile(
               leading: const Icon(Icons.history),
-
-              title: const Text("History"),
-
+              title: Text(text("History", "History")),
               onTap: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) =>
-                        const HistoryPage(),
+                    builder: (_) => const HistoryPage(),
                   ),
                 );
               },
             ),
 
-            // ================= LOGOUT =================
+            ListTile(
+              leading: const Icon(Icons.settings),
+              title: Text(text("Settings", "Settings")),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const AdminSettings(),
+                  ),
+                ).then((_) {
+                  setState(() {});
+                });
+              },
+            ),
 
             ListTile(
               leading: const Icon(Icons.logout),
-
-              title: const Text("Logout"),
-
+              title: Text(text("Logout", "Logout")),
               onTap: () {
                 Navigator.pushAndRemoveUntil(
                   context,
                   MaterialPageRoute(
-                    builder: (_) =>
-                        const HomePage(),
+                    builder: (_) => const HomePage(),
                   ),
                   (route) => false,
                 );
@@ -386,36 +583,58 @@ class _AdminPageState extends State<AdminPage> {
       ),
 
       appBar: AppBar(
-        title: const Text("Admin Control Panel"),
+        title: Text(text("Admin Control Panel", "Admin Control Panel")),
         backgroundColor: Colors.white,
       ),
 
       body: Padding(
         padding: const EdgeInsets.all(16),
-
         child: Column(
           children: [
+            // ================= DATE SELECTOR =================
+
+            cardContainer(
+              child: Row(
+                children: [
+                  const Icon(Icons.calendar_month),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      text(
+                        "Queue Date: ${selectedQueueDateNotifier.value}",
+                        "Petsa ng Queue: ${selectedQueueDateNotifier.value}",
+                      ),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  ElevatedButton(
+                    onPressed: pickQueueDate,
+                    child: Text(text("Change Date", "Palitan")),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 15),
+
             // ================= TOP STATS =================
 
             Row(
               children: [
                 statCard(
-                  "Total Queue",
-                  totalQueue.toString(),
+                  text("Total Queue", "Kabuuang Queue"),
+                  selectedDateQueue.length.toString(),
                 ),
-
                 const SizedBox(width: 10),
-
                 statCard(
-                  "Waiting Queue",
-                  waitingQueueNotifier.value.length
-                      .toString(),
+                  text("Waiting Queue", "Naghihintay"),
+                  selectedDateQueue.length.toString(),
                 ),
-
                 const SizedBox(width: 10),
-
                 statCard(
-                  "Completed",
+                  text("Completed", "Tapos Na"),
                   completedQueue.toString(),
                 ),
               ],
@@ -430,17 +649,15 @@ class _AdminPageState extends State<AdminPage> {
 
                   SizedBox(
                     width: 190,
-
                     child: Column(
                       children: [
                         cardContainer(
                           child: Column(
                             children: [
-                              const Text(
-                                "Generate Queue",
-                                style: TextStyle(
-                                  fontWeight:
-                                      FontWeight.bold,
+                              Text(
+                                text("Generate Queue", "Gumawa ng Queue"),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
                                   fontSize: 16,
                                 ),
                               ),
@@ -449,15 +666,11 @@ class _AdminPageState extends State<AdminPage> {
 
                               SizedBox(
                                 width: double.infinity,
-
                                 child: ElevatedButton(
                                   onPressed: () {
-                                    showGenerateDialog(
-                                      "Gas",
-                                    );
+                                    showGenerateDialog("Gas");
                                   },
-                                  child:
-                                      const Text("GAS"),
+                                  child: const Text("GAS"),
                                 ),
                               ),
 
@@ -465,17 +678,11 @@ class _AdminPageState extends State<AdminPage> {
 
                               SizedBox(
                                 width: double.infinity,
-
                                 child: ElevatedButton(
                                   onPressed: () {
-                                    showGenerateDialog(
-                                      "Diesel",
-                                    );
+                                    showGenerateDialog("Diesel");
                                   },
-                                  child:
-                                      const Text(
-                                    "DIESEL",
-                                  ),
+                                  child: const Text("DIESEL"),
                                 ),
                               ),
                             ],
@@ -486,20 +693,16 @@ class _AdminPageState extends State<AdminPage> {
 
                         SizedBox(
                           width: double.infinity,
-
                           child: ElevatedButton(
                             onPressed: () {
                               Navigator.push(
                                 context,
                                 MaterialPageRoute(
-                                  builder: (_) =>
-                                      const DisplayPage(),
+                                  builder: (_) => const DisplayPage(),
                                 ),
                               );
                             },
-                            child: const Text(
-                              "DISPLAY PAGE",
-                            ),
+                            child: Text(text("DISPLAY PAGE", "DISPLAY PAGE")),
                           ),
                         ),
 
@@ -507,19 +710,13 @@ class _AdminPageState extends State<AdminPage> {
 
                         SizedBox(
                           width: double.infinity,
-
                           child: ElevatedButton(
-                            style:
-                                ElevatedButton.styleFrom(
-                              backgroundColor:
-                                  Colors.red,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red,
+                              foregroundColor: Colors.white,
                             ),
-
                             onPressed: resetDay,
-
-                            child: const Text(
-                              "DAILY RESET",
-                            ),
+                            child: Text(text("DAILY RESET", "DAILY RESET")),
                           ),
                         ),
                       ],
@@ -536,102 +733,77 @@ class _AdminPageState extends State<AdminPage> {
                         // ================= NOW SERVING =================
 
                         cardContainer(
-                          child:
-                              ValueListenableBuilder<
-                                  Map<String,
-                                      dynamic>?>(
+                          child: Column(
+                            children: [
+                              Text(
+                                text("NOW SERVING", "KASALUKUYANG TINATAWAG"),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                ),
+                              ),
 
-                            valueListenable:
-                                nowServingNotifier,
+                              const SizedBox(height: 15),
 
-                            builder:
-                                (
-                                  context,
-                                  customer,
-                                  _,
-                                ) {
-                              return Column(
+                              Text(
+                                displayedNowServing == null
+                                    ? "-"
+                                    : displayedNowServing['queue'],
+                                style: const TextStyle(
+                                  fontSize: 45,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.red,
+                                ),
+                              ),
+
+                              const SizedBox(height: 5),
+
+                              Text(
+                                displayedNowServing == null
+                                    ? ""
+                                    : displayedNowServing['name'],
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                ),
+                              ),
+
+                              const SizedBox(height: 20),
+
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  const Text(
-                                    "NOW SERVING",
-                                    style: TextStyle(
-                                      fontWeight:
-                                          FontWeight.bold,
-                                      fontSize: 16,
-                                    ),
+                                  miniButton(
+                                    Icons.volume_up,
+                                    Colors.blue,
+                                    callAgain,
                                   ),
 
-                                  const SizedBox(
-                                      height: 15),
+                                  const SizedBox(width: 10),
 
-                                  Text(
-                                    customer == null
-                                        ? "-"
-                                        : customer[
-                                            'queue'],
-
-                                    style:
-                                        const TextStyle(
-                                      fontSize: 45,
-                                      fontWeight:
-                                          FontWeight.bold,
-                                      color:
-                                          Colors.red,
-                                    ),
+                                  miniButton(
+                                    Icons.skip_next,
+                                    Colors.orange,
+                                    skipCustomer,
                                   ),
 
-                                  const SizedBox(
-                                      height: 5),
+                                  const SizedBox(width: 10),
 
-                                  Text(
-                                    customer == null
-                                        ? ""
-                                        : customer[
-                                            'name'],
-
-                                    style:
-                                        const TextStyle(
-                                      fontSize: 18,
-                                    ),
+                                  miniButton(
+                                    Icons.check,
+                                    Colors.green,
+                                    markPassed,
                                   ),
 
-                                  const SizedBox(
-                                      height: 20),
+                                  const SizedBox(width: 10),
 
-                                  Row(
-                                    mainAxisAlignment:
-                                        MainAxisAlignment
-                                            .center,
-
-                                    children: [
-                                      miniButton(
-                                        Icons.volume_up,
-                                        Colors.blue,
-                                        callAgain,
-                                      ),
-
-                                      const SizedBox(
-                                          width: 10),
-
-                                      miniButton(
-                                        Icons.check,
-                                        Colors.green,
-                                        markPassed,
-                                      ),
-
-                                      const SizedBox(
-                                          width: 10),
-
-                                      miniButton(
-                                        Icons.close,
-                                        Colors.red,
-                                        markFailed,
-                                      ),
-                                    ],
+                                  miniButton(
+                                    Icons.close,
+                                    Colors.red,
+                                    markFailed,
                                   ),
                                 ],
-                              );
-                            },
+                              ),
+                            ],
                           ),
                         ),
 
@@ -642,153 +814,100 @@ class _AdminPageState extends State<AdminPage> {
                         Expanded(
                           child: cardContainer(
                             child: Column(
-                              crossAxisAlignment:
-                                  CrossAxisAlignment
-                                      .start,
-
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
-                                  "Waiting Queue",
-                                  style: TextStyle(
-                                    fontWeight:
-                                        FontWeight.bold,
+                                Text(
+                                  text(
+                                    "Waiting Queue - ${selectedQueueDateNotifier.value}",
+                                    "Waiting Queue - ${selectedQueueDateNotifier.value}",
+                                  ),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
                                     fontSize: 16,
                                   ),
                                 ),
 
-                                const SizedBox(
-                                    height: 15),
+                                const SizedBox(height: 15),
 
                                 Expanded(
-                                  child:
-                                      ValueListenableBuilder<
-                                          List<
-                                              Map<String,
-                                                  dynamic>>>(
-
-                                    valueListenable:
-                                        waitingQueueNotifier,
-
-                                    builder:
-                                        (
-                                          context,
-                                          queueList,
-                                          _,
-                                        ) {
-                                      return ListView
-                                          .builder(
-                                        itemCount:
-                                            queueList
-                                                .length,
-
-                                        itemBuilder:
-                                            (
-                                              context,
-                                              index,
-                                            ) {
-                                          final customer =
-                                              queueList[
-                                                  index];
-
-                                          return Container(
-                                            margin:
-                                                const EdgeInsets
-                                                    .only(
-                                              bottom:
-                                                  10,
+                                  child: selectedDateQueue.isEmpty
+                                      ? Center(
+                                          child: Text(
+                                            text(
+                                              "No queue for this date",
+                                              "Walang queue sa petsang ito",
                                             ),
+                                          ),
+                                        )
+                                      : ListView.builder(
+                                          itemCount: selectedDateQueue.length,
+                                          itemBuilder: (context, index) {
+                                            final customer =
+                                                selectedDateQueue[index];
 
-                                            padding:
-                                                const EdgeInsets
-                                                    .all(
-                                              12,
-                                            ),
-
-                                            decoration:
-                                                BoxDecoration(
-                                              color: Colors
-                                                  .grey
-                                                  .shade100,
-
-                                              borderRadius:
-                                                  BorderRadius.circular(
-                                                15,
+                                            return Container(
+                                              margin: const EdgeInsets.only(
+                                                bottom: 10,
                                               ),
-                                            ),
-
-                                            child: Row(
-                                              children: [
-                                                Expanded(
-                                                  child:
-                                                      Column(
-                                                    crossAxisAlignment:
-                                                        CrossAxisAlignment.start,
-
-                                                    children: [
-                                                      Text(
-                                                        customer[
-                                                            'queue'],
-
-                                                        style:
-                                                            const TextStyle(
-                                                          fontSize:
-                                                              18,
-
-                                                          fontWeight:
-                                                              FontWeight.bold,
+                                              padding: const EdgeInsets.all(12),
+                                              decoration: BoxDecoration(
+                                                color: Colors.grey.shade100,
+                                                borderRadius:
+                                                    BorderRadius.circular(15),
+                                              ),
+                                              child: Row(
+                                                children: [
+                                                  Expanded(
+                                                    child: Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        Text(
+                                                          customer['queue'],
+                                                          style:
+                                                              const TextStyle(
+                                                            fontSize: 18,
+                                                            fontWeight:
+                                                                FontWeight.bold,
+                                                          ),
                                                         ),
-                                                      ),
-
-                                                      Text(
-                                                        customer[
-                                                            'name'],
-                                                      ),
-                                                    ],
+                                                        Text(customer['name']),
+                                                        Text(
+                                                          customer['source'] ??
+                                                              "",
+                                                          style:
+                                                              const TextStyle(
+                                                            fontSize: 12,
+                                                            color: Colors.grey,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
                                                   ),
-                                                ),
 
-                                                // CALL BUTTON
+                                                  miniButton(
+                                                    Icons.volume_up,
+                                                    Colors.blue,
+                                                    () {
+                                                      callCustomer(customer);
+                                                    },
+                                                  ),
 
-                                                miniButton(
-                                                  Icons
-                                                      .volume_up,
+                                                  const SizedBox(width: 8),
 
-                                                  Colors
-                                                      .blue,
-
-                                                  () {
-                                                    callCustomer(
-                                                      customer,
-                                                    );
-                                                  },
-                                                ),
-
-                                                const SizedBox(
-                                                    width:
-                                                        8),
-
-                                                // CANCEL BUTTON
-
-                                                miniButton(
-                                                  Icons
-                                                      .close,
-
-                                                  Colors
-                                                      .red,
-
-                                                  () {
-                                                    cancelQueue(
-                                                      customer,
-                                                    );
-                                                  },
-                                                ),
-                                              ],
-                                            ),
-                                          );
-                                        },
-                                      );
-                                    },
-                                  ),
+                                                  miniButton(
+                                                    Icons.close,
+                                                    Colors.red,
+                                                    () {
+                                                      cancelQueue(customer);
+                                                    },
+                                                  ),
+                                                ],
+                                              ),
+                                            );
+                                          },
+                                        ),
                                 ),
                               ],
                             ),
@@ -813,24 +932,17 @@ class _AdminPageState extends State<AdminPage> {
   }) {
     return Container(
       width: double.infinity,
-
       padding: const EdgeInsets.all(16),
-
       decoration: BoxDecoration(
         color: Colors.white,
-
-        borderRadius:
-            BorderRadius.circular(20),
-
+        borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color:
-                Colors.black.withOpacity(0.08),
+            color: Colors.black.withOpacity(0.08),
             blurRadius: 10,
           ),
         ],
       ),
-
       child: child,
     );
   }
@@ -847,7 +959,6 @@ class _AdminPageState extends State<AdminPage> {
           children: [
             Text(
               title,
-
               style: const TextStyle(
                 fontWeight: FontWeight.bold,
               ),
@@ -857,7 +968,6 @@ class _AdminPageState extends State<AdminPage> {
 
             Text(
               value,
-
               style: const TextStyle(
                 fontSize: 28,
                 fontWeight: FontWeight.bold,
@@ -879,21 +989,16 @@ class _AdminPageState extends State<AdminPage> {
     return SizedBox(
       width: 40,
       height: 40,
-
       child: ElevatedButton(
         style: ElevatedButton.styleFrom(
           backgroundColor: color,
-
+          foregroundColor: Colors.white,
           padding: EdgeInsets.zero,
-
           shape: RoundedRectangleBorder(
-            borderRadius:
-                BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(12),
           ),
         ),
-
         onPressed: onPressed,
-
         child: Icon(
           icon,
           size: 18,
