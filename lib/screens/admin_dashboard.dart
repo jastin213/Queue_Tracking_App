@@ -11,7 +11,42 @@ class AdminDashboard extends StatefulWidget {
 }
 
 class _AdminDashboardState extends State<AdminDashboard> {
-  void approveBooking(Map<String, dynamic> booking) {
+  // ================= CHECK IF QUEUE IS ALREADY USED =================
+
+  bool isQueueAlreadyUsed(Map<String, dynamic> booking) {
+    final String bookingQueue = booking["queue"] ?? "";
+    final String bookingDate = booking["date"] ?? "";
+
+    // Check waiting queue including walk-ins and approved appointments
+    bool inWaitingQueue = waitingQueueNotifier.value.any((customer) {
+      return customer["queue"] == bookingQueue &&
+          customer["date"] == bookingDate;
+    });
+
+    // Check currently served queue
+    bool inNowServing = nowServingNotifier.value != null &&
+        nowServingNotifier.value!["queue"] == bookingQueue &&
+        nowServingNotifier.value!["date"] == bookingDate;
+
+    return inWaitingQueue || inNowServing;
+  }
+
+  // ================= APPROVE BOOKING =================
+
+  bool approveBooking(Map<String, dynamic> booking) {
+    // ✅ PROTECTION AGAINST DUPLICATE QUEUE NUMBER
+    if (isQueueAlreadyUsed(booking)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "${booking['queue']} is already taken on ${booking['date']}. Please reject this booking or choose another slot.",
+          ),
+        ),
+      );
+
+      return false;
+    }
+
     pendingBookings.value =
         pendingBookings.value.where((b) => b != booking).toList();
 
@@ -46,7 +81,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
         ),
       ),
     );
+
+    return true;
   }
+
+  // ================= REJECT BOOKING =================
 
   void rejectBooking(Map<String, dynamic> booking) {
     pendingBookings.value =
@@ -70,6 +109,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       ),
     );
   }
+
+  // ================= SHOW DETAILS =================
 
   void showDetails(Map<String, dynamic> booking) {
     showDialog(
@@ -169,7 +210,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           child: const Text("CLOSE"),
                         ),
                       ),
+
                       const SizedBox(width: 10),
+
                       Expanded(
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
@@ -177,13 +220,19 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             foregroundColor: Colors.white,
                           ),
                           onPressed: () {
-                            approveBooking(booking);
-                            Navigator.pop(context);
+                            final success = approveBooking(booking);
+
+                            // ✅ Only close dialog if approval succeeded
+                            if (success) {
+                              Navigator.pop(context);
+                            }
                           },
                           child: const Text("APPROVE"),
                         ),
                       ),
+
                       const SizedBox(width: 10),
+
                       Expanded(
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
@@ -207,6 +256,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       },
     );
   }
+
+  // ================= DETAIL ROW =================
 
   Widget detailRow(String label, dynamic value) {
     return Padding(
@@ -232,6 +283,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       ),
     );
   }
+
+  // ================= DOCUMENT PREVIEW =================
 
   Widget documentPreview({
     required String title,
@@ -265,12 +318,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
               fontWeight: FontWeight.bold,
             ),
           ),
+
           const SizedBox(height: 8),
+
           Text(
             fileName ?? "No file attached",
             overflow: TextOverflow.ellipsis,
           ),
+
           const SizedBox(height: 10),
+
           if (!hasFile)
             const Text(
               "No document uploaded.",
@@ -316,6 +373,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
+  // ================= INFO CARD =================
+
   Widget infoCard(String title, String value) {
     return Expanded(
       child: Container(
@@ -352,6 +411,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
+  // ================= UI =================
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -375,7 +436,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     );
                   },
                 ),
+
                 const SizedBox(width: 10),
+
                 ValueListenableBuilder<List<Map<String, dynamic>>>(
                   valueListenable: approvedBookings,
                   builder: (_, list, __) {
@@ -385,7 +448,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     );
                   },
                 ),
+
                 const SizedBox(width: 10),
+
                 ValueListenableBuilder<List<Map<String, dynamic>>>(
                   valueListenable: rejectedBookings,
                   builder: (_, list, __) {
@@ -462,15 +527,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                               fontWeight: FontWeight.bold,
                                             ),
                                           ),
+
                                           const SizedBox(height: 5),
+
                                           Text(
                                             "${booking['fullName']} • ${booking['municipality']}",
                                           ),
+
                                           const SizedBox(height: 3),
+
                                           Text(
                                             "${booking['vehicle']} • ${booking['date']}",
                                           ),
+
                                           const SizedBox(height: 3),
+
                                           const Text(
                                             "Status: Pending",
                                             style: TextStyle(
@@ -481,6 +552,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                         ],
                                       ),
                                     ),
+
                                     ElevatedButton(
                                       onPressed: () {
                                         showDetails(booking);
@@ -504,4 +576,4 @@ class _AdminDashboardState extends State<AdminDashboard> {
       ),
     );
   }
-}
+} 

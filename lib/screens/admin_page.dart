@@ -1,18 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+
 import 'daily_report.dart';
 import 'display_page.dart';
 import 'admin_dashboard.dart';
-import 'history_page.dart';
 import 'home_page.dart';
 import 'admin_settings.dart';
 
 // ================= GLOBAL VARIABLES =================
 
-// Daily report storage
-ValueNotifier<Map<String, List<String>>> dailyHistoryNotifier = ValueNotifier({});
-// Key = date string (MM/DD/YYYY), Value = list of queue numbers served that day
+// Daily served / passed records
+ValueNotifier<Map<String, List<Map<String, dynamic>>>>
+    dailyServedReportNotifier = ValueNotifier({});
 
+// Daily failed records
+ValueNotifier<Map<String, List<Map<String, dynamic>>>>
+    dailyFailedReportNotifier = ValueNotifier({});
+
+// Old daily report storage
+ValueNotifier<Map<String, List<String>>> dailyHistoryNotifier =
+    ValueNotifier({});
+
+// Queue storage
 ValueNotifier<List<Map<String, dynamic>>> waitingQueueNotifier =
     ValueNotifier([]);
 
@@ -29,8 +38,6 @@ int gasCounter = 1;
 int dieselCounter = 1;
 
 const int maxQueueLimit = 80;
-
-
 
 // ================= DATE FORMAT =================
 
@@ -105,7 +112,8 @@ class _AdminPageState extends State<AdminPage> {
   bool isNowServingForSelectedDate() {
     if (nowServingNotifier.value == null) return false;
 
-    return nowServingNotifier.value!["date"] == selectedQueueDateNotifier.value;
+    return nowServingNotifier.value!["date"] ==
+        selectedQueueDateNotifier.value;
   }
 
   Map<String, dynamic>? getDisplayedNowServing() {
@@ -125,7 +133,8 @@ class _AdminPageState extends State<AdminPage> {
     });
 
     bool inNowServing = nowServingNotifier.value != null &&
-        nowServingNotifier.value!["date"] == selectedQueueDateNotifier.value &&
+        nowServingNotifier.value!["date"] ==
+            selectedQueueDateNotifier.value &&
         nowServingNotifier.value!["queue"] == queueCode;
 
     return inWaiting || inNowServing;
@@ -348,22 +357,40 @@ class _AdminPageState extends State<AdminPage> {
       return;
     }
 
+    final String date = customer["date"] ?? selectedQueueDateNotifier.value;
+
+    // Save to daily served report
+    final updatedServed =
+        Map<String, List<Map<String, dynamic>>>.from(
+      dailyServedReportNotifier.value,
+    );
+
+    final servedList =
+        List<Map<String, dynamic>>.from(updatedServed[date] ?? []);
+
+    servedList.add({
+      ...customer,
+      "result": "Passed",
+      "time": TimeOfDay.now().format(context),
+    });
+
+    updatedServed[date] = servedList;
+    dailyServedReportNotifier.value = updatedServed;
+
+    // Save to old daily history too
+    final updatedOldHistory =
+        Map<String, List<String>>.from(dailyHistoryNotifier.value);
+
+    final oldList = List<String>.from(updatedOldHistory[date] ?? []);
+
+    oldList.add(customer["queue"]);
+
+    updatedOldHistory[date] = oldList;
+    dailyHistoryNotifier.value = updatedOldHistory;
+
     nowServingNotifier.value = null;
 
     setState(() {
-      // Record to daily history
-final customer = nowServingNotifier.value;
-if (customer != null) {
-  final date = customer["date"] ?? "${DateTime.now().month}/${DateTime.now().day}/${DateTime.now().year}";
-  final updatedHistory = Map<String, List<String>>.from(dailyHistoryNotifier.value);
-
-  if (!updatedHistory.containsKey(date)) {
-    updatedHistory[date] = [];
-  }
-  updatedHistory[date]!.add(customer["queue"]);
-
-  dailyHistoryNotifier.value = updatedHistory;
-}
       completedQueue++;
     });
 
@@ -397,6 +424,26 @@ if (customer != null) {
       );
       return;
     }
+
+    final String date = customer["date"] ?? selectedQueueDateNotifier.value;
+
+    // Save to daily failed report
+    final updatedFailed =
+        Map<String, List<Map<String, dynamic>>>.from(
+      dailyFailedReportNotifier.value,
+    );
+
+    final failedList =
+        List<Map<String, dynamic>>.from(updatedFailed[date] ?? []);
+
+    failedList.add({
+      ...customer,
+      "result": "Failed",
+      "time": TimeOfDay.now().format(context),
+    });
+
+    updatedFailed[date] = failedList;
+    dailyFailedReportNotifier.value = updatedFailed;
 
     nowServingNotifier.value = null;
 
@@ -502,7 +549,6 @@ if (customer != null) {
       backgroundColor: const Color.fromARGB(255, 227, 242, 248),
 
       // ================= DRAWER =================
-      
 
       drawer: Drawer(
         child: ListView(
@@ -534,6 +580,7 @@ if (customer != null) {
               ),
             ),
 
+            // QUEUE PANEL
             ListTile(
               leading: const Icon(Icons.queue),
               title: Text(text("Queue Panel", "Queue Panel")),
@@ -542,10 +589,12 @@ if (customer != null) {
               },
             ),
 
+            // BOOKING DASHBOARD
             ListTile(
               leading: const Icon(Icons.dashboard),
               title: Text(text("Booking Dashboard", "Booking Dashboard")),
               onTap: () {
+                Navigator.pop(context);
                 Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -556,34 +605,28 @@ if (customer != null) {
                 });
               },
             ),
-              ListTile(
-  leading: const Icon(Icons.history),
-  title: const Text("Daily Report"),
-  onTap: () {
-    Navigator.pop(context);
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const DailyReport()),
-    );
-  },
-),
+
+            // DAILY REPORT
             ListTile(
-              leading: const Icon(Icons.history),
-              title: Text(text("History", "History")),
+              leading: const Icon(Icons.assessment),
+              title: Text(text("Daily Report", "Daily Report")),
               onTap: () {
+                Navigator.pop(context);
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => const HistoryPage(),
+                    builder: (_) => const DailyReport(),
                   ),
                 );
               },
             ),
 
+            // SETTINGS
             ListTile(
               leading: const Icon(Icons.settings),
               title: Text(text("Settings", "Settings")),
               onTap: () {
+                Navigator.pop(context);
                 Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -595,6 +638,7 @@ if (customer != null) {
               },
             ),
 
+            // LOGOUT
             ListTile(
               leading: const Icon(Icons.logout),
               title: Text(text("Logout", "Logout")),

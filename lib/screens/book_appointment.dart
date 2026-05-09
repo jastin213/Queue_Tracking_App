@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'location_data.dart';
+import 'admin_page.dart';
 
 // ================= GLOBAL BOOKING & QUEUE STORAGE =================
 ValueNotifier<List<Map<String, dynamic>>> pendingBookings = ValueNotifier([]);
@@ -96,18 +97,32 @@ class _BookAppointmentState extends State<BookAppointment> {
   }
 
   bool isQueueTaken(String code) {
-    if (selectedDate == null) return false;
+  if (selectedDate == null) return false;
 
-    bool inPending = pendingBookings.value.any(
-      (b) => b["date"] == formattedDate && b["queue"] == code,
-    );
+  // 1. Already requested booking but not yet approved
+  bool inPending = pendingBookings.value.any(
+    (b) => b["date"] == formattedDate && b["queue"] == code,
+  );
 
-    bool inApproved = approvedBookings.value.any(
-      (b) => b["date"] == formattedDate && b["queue"] == code,
-    );
+  // 2. Already approved booking
+  bool inApproved = approvedBookings.value.any(
+    (b) => b["date"] == formattedDate && b["queue"] == code,
+  );
 
-    return inPending || inApproved;
-  }
+  // 3. Already in waiting queue, including walk-ins
+  bool inWaitingQueue = waitingQueueNotifier.value.any(
+    (customer) =>
+        customer["date"] == formattedDate &&
+        customer["queue"] == code,
+  );
+
+  // 4. Currently being served
+  bool inNowServing = nowServingNotifier.value != null &&
+      nowServingNotifier.value!["date"] == formattedDate &&
+      nowServingNotifier.value!["queue"] == code;
+
+  return inPending || inApproved || inWaitingQueue || inNowServing;
+}
 
   String getFirstAvailableQueueCode() {
     final codes = getQueueCodes();
@@ -172,6 +187,15 @@ class _BookAppointmentState extends State<BookAppointment> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Complete all fields and documents.")),
       );
+
+      if (isQueueTaken(selectedQueueCode)) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(
+      content: Text("This queue code is already taken. Please select another available queue."),
+    ),
+  );
+  return;
+}
       return;
     }
 
@@ -181,6 +205,14 @@ class _BookAppointmentState extends State<BookAppointment> {
       );
       return;
     }
+    if (isQueueTaken(selectedQueueCode)) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    const SnackBar(
+      content: Text("This queue code is already taken. Please select another available queue."),
+    ),
+  );
+  return;
+}
 
     pendingBookings.value = [
       ...pendingBookings.value,
