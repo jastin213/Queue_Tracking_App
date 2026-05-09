@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'admin_login.dart';
-import 'customer_portal.dart';
+import 'track_page.dart';
+import 'customer_login.dart';
 
-class HomePage extends StatelessWidget {
-  const HomePage({super.key});
+class CustomerPortal extends StatelessWidget {
+  const CustomerPortal({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -12,12 +12,12 @@ class HomePage extends StatelessWidget {
       body: SafeArea(
         child: Stack(
           children: [
-            // Title (top-left)
+            // Title
             const Positioned(
               top: 20,
               left: 20,
               child: Text(
-                "NPJN Smart Queue",
+                "Customer Portal",
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.bold,
@@ -39,21 +39,16 @@ class HomePage extends StatelessWidget {
                     color: Colors.white.withOpacity(0.95),
                     borderRadius: BorderRadius.circular(30),
                     boxShadow: [
-                      // Main deep shadow
                       BoxShadow(
                         color: Colors.black.withOpacity(0.15),
                         blurRadius: 30,
                         spreadRadius: 5,
                       ),
-
-                      // Soft ambient shadow
                       BoxShadow(
                         color: Colors.black.withOpacity(0.05),
                         blurRadius: 10,
                         spreadRadius: 2,
                       ),
-
-                      // Light top highlight
                       BoxShadow(
                         color: Colors.white.withOpacity(0.7),
                         blurRadius: 20,
@@ -64,7 +59,7 @@ class HomePage extends StatelessWidget {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Icon with soft elevated background
+                      // Icon
                       Container(
                         padding: const EdgeInsets.all(18),
                         decoration: BoxDecoration(
@@ -82,17 +77,28 @@ class HomePage extends StatelessWidget {
                           ],
                         ),
                         child: const Icon(
-                          Icons.directions_car,
+                          Icons.person_outline,
                           size: 40,
                         ),
                       ),
 
-                      const SizedBox(height: 30),
+                      const SizedBox(height: 20),
 
-                      // Admin Login Button
+                      const Text(
+                        "Choose Customer Option",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+
+                      const SizedBox(height: 25),
+
+                      // TRACK MY QUEUE BUTTON
                       SizedBox(
                         width: double.infinity,
-                        child: ElevatedButton(
+                        child: ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.black,
                             foregroundColor: Colors.white,
@@ -105,24 +111,25 @@ class HomePage extends StatelessWidget {
                             elevation: 8,
                             shadowColor: Colors.black.withOpacity(0.4),
                           ),
+                          icon: const Icon(Icons.search),
+                          label: const Text("Track My Queue"),
                           onPressed: () {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) => const AdminLogin(),
+                                builder: (_) => const TrackPage(),
                               ),
                             );
                           },
-                          child: const Text("Admin Login"),
                         ),
                       ),
 
                       const SizedBox(height: 15),
 
-                      // Customer Portal Button
+                      // LOGIN / CREATE ACCOUNT BUTTON
                       SizedBox(
                         width: double.infinity,
-                        child: OutlinedButton(
+                        child: OutlinedButton.icon(
                           style: OutlinedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(
                               vertical: 15,
@@ -134,20 +141,38 @@ class HomePage extends StatelessWidget {
                               borderRadius: BorderRadius.circular(30),
                             ),
                           ),
+                          icon: const Icon(
+                            Icons.calendar_month,
+                            color: Colors.black,
+                          ),
+                          label: const Text(
+                            "Login / Create Account",
+                            style: TextStyle(
+                              color: Colors.black,
+                            ),
+                          ),
                           onPressed: () {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) =>
-                                    const CustomerPortal(),
+                                builder: (_) => const CustomerLogin(),
                               ),
                             );
                           },
-                          child: const Text(
-                            "Customer Portal",
-                            style: TextStyle(
-                              color: Colors.black,
-                            ),
+                        ),
+                      ),
+
+                      const SizedBox(height: 15),
+
+                      // BACK BUTTON
+                      TextButton(
+                        onPressed: () {
+                          Navigator.pop(context);
+                        },
+                        child: const Text(
+                          "Back",
+                          style: TextStyle(
+                            color: Colors.black54,
                           ),
                         ),
                       ),

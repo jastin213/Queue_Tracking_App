@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
-
+import 'daily_report.dart';
 import 'display_page.dart';
 import 'admin_dashboard.dart';
 import 'history_page.dart';
@@ -8,6 +8,10 @@ import 'home_page.dart';
 import 'admin_settings.dart';
 
 // ================= GLOBAL VARIABLES =================
+
+// Daily report storage
+ValueNotifier<Map<String, List<String>>> dailyHistoryNotifier = ValueNotifier({});
+// Key = date string (MM/DD/YYYY), Value = list of queue numbers served that day
 
 ValueNotifier<List<Map<String, dynamic>>> waitingQueueNotifier =
     ValueNotifier([]);
@@ -25,6 +29,8 @@ int gasCounter = 1;
 int dieselCounter = 1;
 
 const int maxQueueLimit = 80;
+
+
 
 // ================= DATE FORMAT =================
 
@@ -345,6 +351,19 @@ class _AdminPageState extends State<AdminPage> {
     nowServingNotifier.value = null;
 
     setState(() {
+      // Record to daily history
+final customer = nowServingNotifier.value;
+if (customer != null) {
+  final date = customer["date"] ?? "${DateTime.now().month}/${DateTime.now().day}/${DateTime.now().year}";
+  final updatedHistory = Map<String, List<String>>.from(dailyHistoryNotifier.value);
+
+  if (!updatedHistory.containsKey(date)) {
+    updatedHistory[date] = [];
+  }
+  updatedHistory[date]!.add(customer["queue"]);
+
+  dailyHistoryNotifier.value = updatedHistory;
+}
       completedQueue++;
     });
 
@@ -483,6 +502,7 @@ class _AdminPageState extends State<AdminPage> {
       backgroundColor: const Color.fromARGB(255, 227, 242, 248),
 
       // ================= DRAWER =================
+      
 
       drawer: Drawer(
         child: ListView(
@@ -536,7 +556,17 @@ class _AdminPageState extends State<AdminPage> {
                 });
               },
             ),
-
+              ListTile(
+  leading: const Icon(Icons.history),
+  title: const Text("Daily Report"),
+  onTap: () {
+    Navigator.pop(context);
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const DailyReport()),
+    );
+  },
+),
             ListTile(
               leading: const Icon(Icons.history),
               title: Text(text("History", "History")),

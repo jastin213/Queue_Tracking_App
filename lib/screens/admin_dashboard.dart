@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-
 import 'book_appointment.dart';
 import 'admin_page.dart';
 
@@ -12,14 +11,10 @@ class AdminDashboard extends StatefulWidget {
 }
 
 class _AdminDashboardState extends State<AdminDashboard> {
-  // ================= APPROVE BOOKING =================
-
   void approveBooking(Map<String, dynamic> booking) {
-    // Remove from pending
     pendingBookings.value =
         pendingBookings.value.where((b) => b != booking).toList();
 
-    // Add to approved
     final approved = {
       ...booking,
       "status": "Approved",
@@ -30,18 +25,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
       approved,
     ];
 
-    // IMPORTANT:
-    // This adds the approved booking to the waiting queue,
-    // but it keeps the appointment date.
-    // So it will only appear in Admin Queue Panel when that date is selected.
     waitingQueueNotifier.value = [
       ...waitingQueueNotifier.value,
       {
         "queue": approved["queue"],
-        "name": approved["plate"],
+        "name": approved["fullName"] ?? approved["plate"],
         "type": approved["vehicle"],
         "date": approved["date"],
         "source": "Appointment",
+        "municipality": approved["municipality"],
       }
     ];
 
@@ -56,14 +48,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  // ================= REJECT BOOKING =================
-
   void rejectBooking(Map<String, dynamic> booking) {
-    // Remove from pending
     pendingBookings.value =
         pendingBookings.value.where((b) => b != booking).toList();
 
-    // Add to rejected
     rejectedBookings.value = [
       ...rejectedBookings.value,
       {
@@ -83,8 +71,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  // ================= SHOW BOOKING DETAILS =================
-
   void showDetails(Map<String, dynamic> booking) {
     showDialog(
       context: context,
@@ -98,8 +84,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
             height: MediaQuery.of(context).size.height * 0.85,
             child: Column(
               children: [
-                // ================= HEADER =================
-
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(16),
@@ -119,8 +103,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   ),
                 ),
 
-                // ================= CONTENT =================
-
                 Expanded(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.all(16),
@@ -128,6 +110,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         detailRow("Queue Code", booking['queue']),
+                        detailRow("Full Name", booking['fullName']),
+                        detailRow("Municipality", booking['municipality']),
                         detailRow("Plate Number", booking['plate']),
                         detailRow("Vehicle Type", booking['vehicle']),
                         detailRow("Date", booking['date']),
@@ -167,8 +151,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   ),
                 ),
 
-                // ================= ACTION BUTTONS =================
-
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -187,9 +169,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           child: const Text("CLOSE"),
                         ),
                       ),
-
                       const SizedBox(width: 10),
-
                       Expanded(
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
@@ -203,9 +183,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           child: const Text("APPROVE"),
                         ),
                       ),
-
                       const SizedBox(width: 10),
-
                       Expanded(
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
@@ -229,8 +207,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
       },
     );
   }
-
-  // ================= DETAIL ROW =================
 
   Widget detailRow(String label, dynamic value) {
     return Padding(
@@ -256,8 +232,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
       ),
     );
   }
-
-  // ================= DOCUMENT PREVIEW =================
 
   Widget documentPreview({
     required String title,
@@ -291,16 +265,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
               fontWeight: FontWeight.bold,
             ),
           ),
-
           const SizedBox(height: 8),
-
           Text(
             fileName ?? "No file attached",
             overflow: TextOverflow.ellipsis,
           ),
-
           const SizedBox(height: 10),
-
           if (!hasFile)
             const Text(
               "No document uploaded.",
@@ -346,8 +316,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  // ================= INFO CARD =================
-
   Widget infoCard(String title, String value) {
     return Expanded(
       child: Container(
@@ -370,9 +338,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 fontWeight: FontWeight.bold,
               ),
             ),
-
             const SizedBox(height: 10),
-
             Text(
               value,
               style: const TextStyle(
@@ -386,24 +352,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  // ================= UI =================
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 227, 242, 248),
-
       appBar: AppBar(
         title: const Text("Admin Booking Dashboard"),
         backgroundColor: Colors.white,
       ),
-
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // ================= TOP CARDS =================
-
             Row(
               children: [
                 ValueListenableBuilder<List<Map<String, dynamic>>>(
@@ -415,9 +375,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     );
                   },
                 ),
-
                 const SizedBox(width: 10),
-
                 ValueListenableBuilder<List<Map<String, dynamic>>>(
                   valueListenable: approvedBookings,
                   builder: (_, list, __) {
@@ -427,9 +385,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     );
                   },
                 ),
-
                 const SizedBox(width: 10),
-
                 ValueListenableBuilder<List<Map<String, dynamic>>>(
                   valueListenable: rejectedBookings,
                   builder: (_, list, __) {
@@ -443,8 +399,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
             ),
 
             const SizedBox(height: 20),
-
-            // ================= PENDING LIST =================
 
             Expanded(
               child: Container(
@@ -508,15 +462,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                               fontWeight: FontWeight.bold,
                                             ),
                                           ),
-
                                           const SizedBox(height: 5),
-
+                                          Text(
+                                            "${booking['fullName']} • ${booking['municipality']}",
+                                          ),
+                                          const SizedBox(height: 3),
                                           Text(
                                             "${booking['vehicle']} • ${booking['date']}",
                                           ),
-
                                           const SizedBox(height: 3),
-
                                           const Text(
                                             "Status: Pending",
                                             style: TextStyle(
@@ -527,7 +481,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                         ],
                                       ),
                                     ),
-
                                     ElevatedButton(
                                       onPressed: () {
                                         showDetails(booking);
