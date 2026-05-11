@@ -17,24 +17,39 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final String bookingQueue = booking["queue"] ?? "";
     final String bookingDate = booking["date"] ?? "";
 
-    // Check waiting queue including walk-ins and approved appointments
+    bool inIssued =
+        issuedQueueCodesNotifier.value[bookingDate]?.contains(bookingQueue) ??
+            false;
+
     bool inWaitingQueue = waitingQueueNotifier.value.any((customer) {
       return customer["queue"] == bookingQueue &&
           customer["date"] == bookingDate;
     });
 
-    // Check currently served queue
     bool inNowServing = nowServingNotifier.value != null &&
         nowServingNotifier.value!["queue"] == bookingQueue &&
         nowServingNotifier.value!["date"] == bookingDate;
 
-    return inWaitingQueue || inNowServing;
+    return inIssued || inWaitingQueue || inNowServing;
+  }
+
+  void markQueueCodeAsIssuedForBooking(String date, String queueCode) {
+    final updatedIssued =
+        Map<String, List<String>>.from(issuedQueueCodesNotifier.value);
+
+    final issuedList = List<String>.from(updatedIssued[date] ?? []);
+
+    if (!issuedList.contains(queueCode)) {
+      issuedList.add(queueCode);
+    }
+
+    updatedIssued[date] = issuedList;
+    issuedQueueCodesNotifier.value = updatedIssued;
   }
 
   // ================= APPROVE BOOKING =================
 
   bool approveBooking(Map<String, dynamic> booking) {
-    // ✅ PROTECTION AGAINST DUPLICATE QUEUE NUMBER
     if (isQueueAlreadyUsed(booking)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -71,6 +86,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
         "municipality": approved["municipality"],
       }
     ];
+
+    // ✅ Mark approved booking queue as issued
+    markQueueCodeAsIssuedForBooking(
+      approved["date"],
+      approved["queue"],
+    );
 
     setState(() {});
 
@@ -143,7 +164,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     ),
                   ),
                 ),
-
                 Expanded(
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.all(16),
@@ -157,9 +177,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         detailRow("Vehicle Type", booking['vehicle']),
                         detailRow("Date", booking['date']),
                         detailRow("Status", booking['status']),
-
                         const SizedBox(height: 20),
-
                         const Text(
                           "Submitted Documents",
                           style: TextStyle(
@@ -167,21 +185,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-
                         const SizedBox(height: 15),
-
                         documentPreview(
                           title: "Valid ID",
                           path: booking["idPath"],
                           fileName: booking["idFile"],
                         ),
-
                         documentPreview(
                           title: "OR",
                           path: booking["orPath"],
                           fileName: booking["orFile"],
                         ),
-
                         documentPreview(
                           title: "CR",
                           path: booking["crPath"],
@@ -191,7 +205,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     ),
                   ),
                 ),
-
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -210,9 +223,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           child: const Text("CLOSE"),
                         ),
                       ),
-
                       const SizedBox(width: 10),
-
                       Expanded(
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
@@ -222,7 +233,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           onPressed: () {
                             final success = approveBooking(booking);
 
-                            // ✅ Only close dialog if approval succeeded
                             if (success) {
                               Navigator.pop(context);
                             }
@@ -230,9 +240,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           child: const Text("APPROVE"),
                         ),
                       ),
-
                       const SizedBox(width: 10),
-
                       Expanded(
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
@@ -318,16 +326,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
               fontWeight: FontWeight.bold,
             ),
           ),
-
           const SizedBox(height: 8),
-
           Text(
             fileName ?? "No file attached",
             overflow: TextOverflow.ellipsis,
           ),
-
           const SizedBox(height: 10),
-
           if (!hasFile)
             const Text(
               "No document uploaded.",
@@ -436,9 +440,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     );
                   },
                 ),
-
                 const SizedBox(width: 10),
-
                 ValueListenableBuilder<List<Map<String, dynamic>>>(
                   valueListenable: approvedBookings,
                   builder: (_, list, __) {
@@ -448,9 +450,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     );
                   },
                 ),
-
                 const SizedBox(width: 10),
-
                 ValueListenableBuilder<List<Map<String, dynamic>>>(
                   valueListenable: rejectedBookings,
                   builder: (_, list, __) {
@@ -462,9 +462,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 ),
               ],
             ),
-
             const SizedBox(height: 20),
-
             Expanded(
               child: Container(
                 padding: const EdgeInsets.all(16),
@@ -488,9 +486,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-
                     const SizedBox(height: 15),
-
                     Expanded(
                       child: ValueListenableBuilder<List<Map<String, dynamic>>>(
                         valueListenable: pendingBookings,
@@ -527,21 +523,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                               fontWeight: FontWeight.bold,
                                             ),
                                           ),
-
                                           const SizedBox(height: 5),
-
                                           Text(
                                             "${booking['fullName']} • ${booking['municipality']}",
                                           ),
-
                                           const SizedBox(height: 3),
-
                                           Text(
                                             "${booking['vehicle']} • ${booking['date']}",
                                           ),
-
                                           const SizedBox(height: 3),
-
                                           const Text(
                                             "Status: Pending",
                                             style: TextStyle(
@@ -552,7 +542,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                         ],
                                       ),
                                     ),
-
                                     ElevatedButton(
                                       onPressed: () {
                                         showDetails(booking);
@@ -576,4 +565,4 @@ class _AdminDashboardState extends State<AdminDashboard> {
       ),
     );
   }
-} 
+}

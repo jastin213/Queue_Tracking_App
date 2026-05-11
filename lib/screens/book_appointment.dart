@@ -5,14 +5,17 @@ import 'location_data.dart';
 import 'admin_page.dart';
 
 // ================= GLOBAL BOOKING & QUEUE STORAGE =================
+
 ValueNotifier<List<Map<String, dynamic>>> pendingBookings = ValueNotifier([]);
 ValueNotifier<List<Map<String, dynamic>>> approvedBookings = ValueNotifier([]);
 ValueNotifier<List<Map<String, dynamic>>> rejectedBookings = ValueNotifier([]);
 
 // ================= DAILY REPORT =================
+
 ValueNotifier<List<Map<String, dynamic>>> dailyReport = ValueNotifier([]);
 
 // ================= BOOK APPOINTMENT PAGE =================
+
 class BookAppointment extends StatefulWidget {
   const BookAppointment({super.key});
 
@@ -88,7 +91,8 @@ class _BookAppointmentState extends State<BookAppointment> {
     );
   }
 
-  // ================= DYNAMIC QUEUE CODES =================
+  // ================= QUEUE CODE HELPERS =================
+
   List<String> getQueueCodes() {
     String prefix = selectedVehicle == "Gas" ? "G" : "D";
     return List.generate(maxQueueLimit, (index) {
@@ -97,38 +101,42 @@ class _BookAppointmentState extends State<BookAppointment> {
   }
 
   bool isQueueTaken(String code) {
-  if (selectedDate == null) return false;
+    if (selectedDate == null) return false;
 
-  // 1. Already requested booking but not yet approved
-  bool inPending = pendingBookings.value.any(
-    (b) => b["date"] == formattedDate && b["queue"] == code,
-  );
+    bool inIssued =
+        issuedQueueCodesNotifier.value[formattedDate]?.contains(code) ?? false;
 
-  // 2. Already approved booking
-  bool inApproved = approvedBookings.value.any(
-    (b) => b["date"] == formattedDate && b["queue"] == code,
-  );
+    bool inPending = pendingBookings.value.any(
+      (b) => b["date"] == formattedDate && b["queue"] == code,
+    );
 
-  // 3. Already in waiting queue, including walk-ins
-  bool inWaitingQueue = waitingQueueNotifier.value.any(
-    (customer) =>
-        customer["date"] == formattedDate &&
-        customer["queue"] == code,
-  );
+    bool inApproved = approvedBookings.value.any(
+      (b) => b["date"] == formattedDate && b["queue"] == code,
+    );
 
-  // 4. Currently being served
-  bool inNowServing = nowServingNotifier.value != null &&
-      nowServingNotifier.value!["date"] == formattedDate &&
-      nowServingNotifier.value!["queue"] == code;
+    bool inWaitingQueue = waitingQueueNotifier.value.any(
+      (customer) =>
+          customer["date"] == formattedDate && customer["queue"] == code,
+    );
 
-  return inPending || inApproved || inWaitingQueue || inNowServing;
-}
+    bool inNowServing = nowServingNotifier.value != null &&
+        nowServingNotifier.value!["date"] == formattedDate &&
+        nowServingNotifier.value!["queue"] == code;
+
+    return inIssued ||
+        inPending ||
+        inApproved ||
+        inWaitingQueue ||
+        inNowServing;
+  }
 
   String getFirstAvailableQueueCode() {
     final codes = getQueueCodes();
+
     for (var code in codes) {
       if (!isQueueTaken(code)) return code;
     }
+
     return "";
   }
 
@@ -149,7 +157,10 @@ class _BookAppointmentState extends State<BookAppointment> {
   }
 
   Future<void> pickDocument(String type) async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(allowMultiple: false);
+    FilePickerResult? result = await FilePicker.platform.pickFiles(
+      allowMultiple: false,
+    );
+
     if (result != null && result.files.single.path != null) {
       setState(() {
         if (type == "ID") {
@@ -167,52 +178,68 @@ class _BookAppointmentState extends State<BookAppointment> {
   }
 
   Future<void> captureDocument(String type) async {
-    final photo = await picker.pickImage(source: ImageSource.camera, imageQuality: 80);
+    final photo = await picker.pickImage(
+      source: ImageSource.camera,
+      imageQuality: 80,
+    );
+
     if (photo != null) {
       setState(() {
-        if (type == "ID") { idFileName = photo.name; idFilePath = photo.path; }
-        else if (type == "OR") { orFileName = photo.name; orFilePath = photo.path; }
-        else if (type == "CR") { crFileName = photo.name; crFilePath = photo.path; }
+        if (type == "ID") {
+          idFileName = photo.name;
+          idFilePath = photo.path;
+        } else if (type == "OR") {
+          orFileName = photo.name;
+          orFilePath = photo.path;
+        } else if (type == "CR") {
+          crFileName = photo.name;
+          crFilePath = photo.path;
+        }
       });
     }
   }
 
+  // ================= SUBMIT BOOKING =================
+
   void submitBooking() {
     if (selectedDate == null ||
-        fullNameController.text.isEmpty ||
-        plateController.text.isEmpty ||
+        fullNameController.text.trim().isEmpty ||
+        plateController.text.trim().isEmpty ||
         idFilePath == null ||
         orFilePath == null ||
         crFilePath == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Complete all fields and documents.")),
+        const SnackBar(
+          content: Text("Complete all fields and documents."),
+        ),
       );
-
-      if (isQueueTaken(selectedQueueCode)) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(
-      content: Text("This queue code is already taken. Please select another available queue."),
-    ),
-  );
-  return;
-}
       return;
     }
 
-    if (getFirstAvailableQueueCode() == "") {
+    if (getFirstAvailableQueueCode().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("All queue codes are taken today. Please select another date.")),
+        const SnackBar(
+          content: Text(
+            "All queue codes are taken for this date. Please select another date.",
+          ),
+        ),
       );
       return;
     }
+
     if (isQueueTaken(selectedQueueCode)) {
-  ScaffoldMessenger.of(context).showSnackBar(
-    const SnackBar(
-      content: Text("This queue code is already taken. Please select another available queue."),
-    ),
-  );
-  return;
-}
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "This queue code is already taken. Please select another available queue.",
+          ),
+        ),
+      );
+      setState(() {
+        selectedQueueCode = getFirstAvailableQueueCode();
+      });
+      return;
+    }
 
     pendingBookings.value = [
       ...pendingBookings.value,
@@ -234,36 +261,69 @@ class _BookAppointmentState extends State<BookAppointment> {
     ];
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Appointment submitted successfully.")),
+      const SnackBar(
+        content: Text("Appointment submitted successfully."),
+      ),
     );
 
     Navigator.pop(context);
   }
 
-  Widget uploadCard({required String title, required String? fileName, required VoidCallback onPick, required VoidCallback onCamera}) {
+  // ================= UPLOAD CARD =================
+
+  Widget uploadCard({
+    required String title,
+    required String? fileName,
+    required VoidCallback onPick,
+    required VoidCallback onCamera,
+  }) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(border: Border.all(color: Colors.grey), borderRadius: BorderRadius.circular(15)),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey),
+        borderRadius: BorderRadius.circular(15),
+      ),
       child: Column(
         children: [
           const Icon(Icons.upload_file, size: 40),
           const SizedBox(height: 10),
-          Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+          Text(
+            title,
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
           const SizedBox(height: 10),
-          Text(fileName ?? "No file selected", textAlign: TextAlign.center, overflow: TextOverflow.ellipsis),
+          Text(
+            fileName ?? "No file selected",
+            textAlign: TextAlign.center,
+            overflow: TextOverflow.ellipsis,
+          ),
           const SizedBox(height: 15),
           Row(
             children: [
-              Expanded(child: ElevatedButton.icon(onPressed: onPick, icon: const Icon(Icons.attach_file), label: const Text("Choose File"))),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: onPick,
+                  icon: const Icon(Icons.attach_file),
+                  label: const Text("Choose File"),
+                ),
+              ),
               const SizedBox(width: 10),
-              Expanded(child: ElevatedButton.icon(onPressed: onCamera, icon: const Icon(Icons.camera_alt), label: const Text("Take Photo"))),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: onCamera,
+                  icon: const Icon(Icons.camera_alt),
+                  label: const Text("Take Photo"),
+                ),
+              ),
             ],
           )
         ],
       ),
     );
   }
+
+  // ================= UI =================
 
   @override
   Widget build(BuildContext context) {
@@ -275,72 +335,173 @@ class _BookAppointmentState extends State<BookAppointment> {
         padding: const EdgeInsets.all(20),
         child: ListView(
           children: [
-            const Text("Select Appointment Date", style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text(
+              "Select Appointment Date",
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 10),
             ElevatedButton(
               onPressed: pickDate,
-              child: Text(selectedDate == null ? "Choose Date" : formattedDate),
+              child: Text(
+                selectedDate == null ? "Choose Date" : formattedDate,
+              ),
             ),
             const SizedBox(height: 25),
-            TextField(controller: fullNameController, decoration: const InputDecoration(labelText: "Full Name", border: OutlineInputBorder())),
+            TextField(
+              controller: fullNameController,
+              decoration: const InputDecoration(
+                labelText: "Full Name",
+                border: OutlineInputBorder(),
+              ),
+            ),
             const SizedBox(height: 20),
-            const Text("Customer Location", style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text(
+              "Customer Location",
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
               value: selectedMunicipality,
-              decoration: const InputDecoration(border: OutlineInputBorder()),
-              items: albayThirdDistrictLocations.map((loc) => DropdownMenuItem(value: loc.name, child: Text(loc.name))).toList(),
-              onChanged: (v) => setState(() => selectedMunicipality = v!),
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+              ),
+              items: albayThirdDistrictLocations.map((loc) {
+                return DropdownMenuItem(
+                  value: loc.name,
+                  child: Text(loc.name),
+                );
+              }).toList(),
+              onChanged: (v) {
+                setState(() {
+                  selectedMunicipality = v!;
+                });
+              },
             ),
             const SizedBox(height: 25),
-            const Text("Vehicle Type", style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text(
+              "Vehicle Type",
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 10),
             DropdownButtonFormField<String>(
               value: selectedVehicle,
-              decoration: const InputDecoration(border: OutlineInputBorder()),
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+              ),
               items: const [
                 DropdownMenuItem(value: "Gas", child: Text("Gas")),
                 DropdownMenuItem(value: "Diesel", child: Text("Diesel")),
               ],
-              onChanged: (v) => setState(() {
-                selectedVehicle = v!;
-                if (selectedDate != null) selectedQueueCode = getFirstAvailableQueueCode();
-              }),
+              onChanged: (v) {
+                setState(() {
+                  selectedVehicle = v!;
+
+                  if (selectedDate != null) {
+                    selectedQueueCode = getFirstAvailableQueueCode();
+                  } else {
+                    selectedQueueCode =
+                        selectedVehicle == "Gas" ? "G001" : "D001";
+                  }
+                });
+              },
             ),
             const SizedBox(height: 25),
-            const Text("Available Queue Codes", style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text(
+              "Available Queue Codes",
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 10),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: codes.map((code) {
-                bool taken = isQueueTaken(code);
-                bool selected = selectedQueueCode == code;
-                return GestureDetector(
-                  onTap: taken ? null : () => setState(() => selectedQueueCode = code),
-                  child: Container(
-                    width: 80,
-                    height: 60,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: taken ? Colors.grey.shade400 : selected ? Colors.black : Colors.grey.shade200,
-                      borderRadius: BorderRadius.circular(15),
+            if (selectedDate == null)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(15),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(15),
+                  border: Border.all(color: Colors.grey),
+                ),
+                child: const Text(
+                  "Please choose an appointment date first.",
+                  textAlign: TextAlign.center,
+                ),
+              )
+            else
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: codes.map((code) {
+                  bool taken = isQueueTaken(code);
+                  bool selected = selectedQueueCode == code;
+
+                  return GestureDetector(
+                    onTap: taken
+                        ? null
+                        : () {
+                            setState(() {
+                              selectedQueueCode = code;
+                            });
+                          },
+                    child: Container(
+                      width: 80,
+                      height: 60,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: taken
+                            ? Colors.grey.shade400
+                            : selected
+                                ? Colors.black
+                                : Colors.grey.shade200,
+                        borderRadius: BorderRadius.circular(15),
+                      ),
+                      child: Text(
+                        taken ? "Taken" : code,
+                        style: TextStyle(
+                          color: selected ? Colors.white : Colors.black,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
-                    child: Text(taken ? "Taken" : code, style: TextStyle(color: selected ? Colors.white : Colors.black, fontWeight: FontWeight.bold)),
-                  ),
-                );
-              }).toList(),
+                  );
+                }).toList(),
+              ),
+            const SizedBox(height: 25),
+            TextField(
+              controller: plateController,
+              textCapitalization: TextCapitalization.characters,
+              decoration: const InputDecoration(
+                labelText: "Plate Number",
+                border: OutlineInputBorder(),
+              ),
             ),
             const SizedBox(height: 25),
-            TextField(controller: plateController, textCapitalization: TextCapitalization.characters, decoration: const InputDecoration(labelText: "Plate Number", border: OutlineInputBorder())),
-            const SizedBox(height: 25),
-            uploadCard(title: "Upload Valid ID", fileName: idFileName, onPick: () => pickDocument("ID"), onCamera: () => captureDocument("ID")),
+            uploadCard(
+              title: "Upload Valid ID",
+              fileName: idFileName,
+              onPick: () => pickDocument("ID"),
+              onCamera: () => captureDocument("ID"),
+            ),
             const SizedBox(height: 20),
-            uploadCard(title: "Upload OR", fileName: orFileName, onPick: () => pickDocument("OR"), onCamera: () => captureDocument("OR")),
+            uploadCard(
+              title: "Upload OR",
+              fileName: orFileName,
+              onPick: () => pickDocument("OR"),
+              onCamera: () => captureDocument("OR"),
+            ),
             const SizedBox(height: 20),
-            uploadCard(title: "Upload CR", fileName: crFileName, onPick: () => pickDocument("CR"), onCamera: () => captureDocument("CR")),
+            uploadCard(
+              title: "Upload CR",
+              fileName: crFileName,
+              onPick: () => pickDocument("CR"),
+              onCamera: () => captureDocument("CR"),
+            ),
             const SizedBox(height: 30),
-            SizedBox(height: 55, child: ElevatedButton(onPressed: submitBooking, child: const Text("SUBMIT APPOINTMENT"))),
+            SizedBox(
+              height: 55,
+              child: ElevatedButton(
+                onPressed: submitBooking,
+                child: const Text("SUBMIT APPOINTMENT"),
+              ),
+            ),
           ],
         ),
       ),
