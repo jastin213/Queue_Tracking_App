@@ -122,6 +122,20 @@ class _AdminPageState extends State<AdminPage> {
     return null;
   }
 
+  // ================= COMPLETED COUNT BY SELECTED DATE =================
+
+  int completedCountForSelectedDate() {
+    final String selectedDate = selectedQueueDateNotifier.value;
+
+    final passedCount =
+        dailyServedReportNotifier.value[selectedDate]?.length ?? 0;
+
+    final failedCount =
+        dailyFailedReportNotifier.value[selectedDate]?.length ?? 0;
+
+    return passedCount + failedCount;
+  }
+
   // ================= QUEUE CODE HELPERS =================
 
   bool queueCodeExistsOnSelectedDate(String queueCode) {
@@ -790,6 +804,8 @@ class _AdminPageState extends State<AdminPage> {
     required List<Map<String, dynamic>> selectedDateQueue,
     required bool compact,
   }) {
+    final String completedForDate = completedCountForSelectedDate().toString();
+
     if (!compact) {
       return Row(
         children: [
@@ -805,7 +821,7 @@ class _AdminPageState extends State<AdminPage> {
           const SizedBox(width: 10),
           statCard(
             text("Completed", "Tapos Na"),
-            completedQueue.toString(),
+            completedForDate,
           ),
         ],
       );
@@ -825,7 +841,7 @@ class _AdminPageState extends State<AdminPage> {
         ),
         statBox(
           text("Completed", "Tapos Na"),
-          completedQueue.toString(),
+          completedForDate,
         ),
       ],
     );
@@ -957,9 +973,7 @@ class _AdminPageState extends State<AdminPage> {
           ),
           const SizedBox(height: 5),
           Text(
-            displayedNowServing == null
-                ? ""
-                : displayedNowServing['name'],
+            displayedNowServing == null ? "" : displayedNowServing['name'],
             textAlign: TextAlign.center,
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(

@@ -4,8 +4,39 @@ import 'admin_page.dart';
 class DisplayPage extends StatelessWidget {
   const DisplayPage({super.key});
 
+  String todayDate() {
+    final now = DateTime.now();
+    return "${now.month}/${now.day}/${now.year}";
+  }
+
+  Map<String, dynamic>? getTodayNowServing() {
+    final today = todayDate();
+
+    if (nowServingNotifier.value == null) {
+      return null;
+    }
+
+    final customer = nowServingNotifier.value!;
+
+    if (customer["date"] == today) {
+      return customer;
+    }
+
+    return null;
+  }
+
+  List<Map<String, dynamic>> getTodayWaitingQueue() {
+    final today = todayDate();
+
+    return waitingQueueNotifier.value.where((customer) {
+      return customer["date"] == today;
+    }).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final String today = todayDate();
+
     return Scaffold(
       backgroundColor: const Color.fromARGB(255, 227, 242, 248),
       body: SafeArea(
@@ -61,18 +92,34 @@ class DisplayPage extends StatelessWidget {
                           const SizedBox(width: 18),
 
                           Expanded(
-                            child: FittedBox(
-                              fit: BoxFit.scaleDown,
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                "NPJN EMISSION CENTER",
-                                style: TextStyle(
-                                  color: Colors.black,
-                                  fontSize: titleSize,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: 3,
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                FittedBox(
+                                  fit: BoxFit.scaleDown,
+                                  alignment: Alignment.centerLeft,
+                                  child: Text(
+                                    "NPJN EMISSION CENTER",
+                                    style: TextStyle(
+                                      color: Colors.black,
+                                      fontSize: titleSize,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 3,
+                                    ),
+                                  ),
                                 ),
-                              ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  "Queue Display for Today: $today",
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.black54,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
@@ -121,6 +168,8 @@ class DisplayPage extends StatelessWidget {
                             child: ValueListenableBuilder<Map<String, dynamic>?>(
                               valueListenable: nowServingNotifier,
                               builder: (context, customer, _) {
+                                final todayCustomer = getTodayNowServing();
+
                                 return Column(
                                   children: [
                                     Expanded(
@@ -148,9 +197,9 @@ class DisplayPage extends StatelessWidget {
                                         child: FittedBox(
                                           fit: BoxFit.scaleDown,
                                           child: Text(
-                                            customer == null
+                                            todayCustomer == null
                                                 ? "-"
-                                                : customer['queue'],
+                                                : todayCustomer['queue'],
                                             style: TextStyle(
                                               color: Colors.red,
                                               fontSize: queueFontSize,
@@ -169,9 +218,9 @@ class DisplayPage extends StatelessWidget {
                                       child: FittedBox(
                                         fit: BoxFit.scaleDown,
                                         child: Text(
-                                          customer == null
-                                              ? "Please wait for your queue number"
-                                              : customer['name'] ?? "",
+                                          todayCustomer == null
+                                              ? "Please wait for today's queue number"
+                                              : todayCustomer['name'] ?? "",
                                           textAlign: TextAlign.center,
                                           style: const TextStyle(
                                             color: Colors.black87,
@@ -211,20 +260,29 @@ class DisplayPage extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Row(
+                          Row(
                             children: [
-                              Icon(
+                              const Icon(
                                 Icons.groups,
                                 color: Colors.black54,
                               ),
-                              SizedBox(width: 10),
-                              Text(
+                              const SizedBox(width: 10),
+                              const Text(
                                 "NEXT IN LINE",
                                 style: TextStyle(
                                   color: Colors.black54,
                                   fontSize: 20,
                                   fontWeight: FontWeight.bold,
                                   letterSpacing: 1,
+                                ),
+                              ),
+                              const Spacer(),
+                              Text(
+                                today,
+                                style: const TextStyle(
+                                  color: Colors.black45,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
                                 ),
                               ),
                             ],
@@ -237,10 +295,12 @@ class DisplayPage extends StatelessWidget {
                                 List<Map<String, dynamic>>>(
                               valueListenable: waitingQueueNotifier,
                               builder: (context, queueList, _) {
-                                if (queueList.isEmpty) {
+                                final todayQueue = getTodayWaitingQueue();
+
+                                if (todayQueue.isEmpty) {
                                   return const Center(
                                     child: Text(
-                                      "No waiting queue",
+                                      "No waiting queue for today",
                                       style: TextStyle(
                                         color: Colors.black45,
                                         fontSize: 26,
@@ -250,7 +310,7 @@ class DisplayPage extends StatelessWidget {
                                   );
                                 }
 
-                                final visibleList = queueList.take(8).toList();
+                                final visibleList = todayQueue.take(8).toList();
 
                                 return GridView.builder(
                                   physics:
