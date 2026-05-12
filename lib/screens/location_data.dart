@@ -47,3 +47,10 @@ final List<MunicipalityLocation> albayThirdDistrictLocations = [
     lon: 123.4856,
   ),
 ];
+
+MunicipalityLocation getMunicipalityLocation(String municipality) {
+  return albayThirdDistrictLocations.firstWhere(
+    (location) => location.name.toLowerCase() == municipality.toLowerCase(),
+    orElse: () => albayThirdDistrictLocations.first,
+  );
+}
