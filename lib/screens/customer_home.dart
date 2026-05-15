@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'track_page.dart';
 import 'book_appointment.dart';
+import 'booking_status_page.dart';
+import 'customer_register.dart';
 
 const Color _backgroundColor = Color(0xFFF1FAFC);
 const Color _primaryColor = Color(0xFF071F35);
@@ -34,58 +36,64 @@ class CustomerHome extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // OVERVIEW CARD
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: _cardColor,
-                  borderRadius: BorderRadius.circular(26),
-                  border: Border.all(color: _borderColor),
-                  boxShadow: [
-                    BoxShadow(
-                      color: _primaryColor.withOpacity(0.08),
-                      blurRadius: 18,
+              ValueListenableBuilder<String>(
+                valueListenable: loggedInCustomerNameNotifier,
+                builder: (context, name, _) {
+                  return Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: _cardColor,
+                      borderRadius: BorderRadius.circular(26),
+                      border: Border.all(color: _borderColor),
+                      boxShadow: [
+                        BoxShadow(
+                          color: _primaryColor.withOpacity(0.08),
+                          blurRadius: 18,
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      height: 58,
-                      width: 58,
-                      decoration: BoxDecoration(
-                        color: _primaryColor,
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      child: const Icon(
-                        Icons.directions_car_rounded,
-                        color: Colors.white,
-                        size: 32,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          height: 58,
+                          width: 58,
+                          decoration: BoxDecoration(
+                            color: _primaryColor,
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          child: const Icon(
+                            Icons.directions_car_rounded,
+                            color: Colors.white,
+                            size: 32,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          name.isEmpty
+                              ? "NPJN Emission Testing Center"
+                              : "Welcome, $name",
+                          style: const TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            color: _primaryColor,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          "Book your emission test appointment, track your queue number, and check your booking confirmation.",
+                          style: TextStyle(
+                            fontSize: 14.5,
+                            height: 1.5,
+                            color: _mutedTextColor,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      "NPJN Emission Testing Center",
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        color: _primaryColor,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      "Book your emission test appointment, track your queue number, and check your estimated waiting time before visiting the center.",
-                      style: TextStyle(
-                        fontSize: 14.5,
-                        height: 1.5,
-                        color: _mutedTextColor,
-                      ),
-                    ),
-                  ],
-                ),
+                  );
+                },
               ),
 
               const SizedBox(height: 24),
@@ -102,7 +110,6 @@ class CustomerHome extends StatelessWidget {
 
               const SizedBox(height: 14),
 
-              // TRACK QUEUE BUTTON
               _ActionCard(
                 icon: Icons.search_rounded,
                 title: "Track My Queue",
@@ -119,7 +126,6 @@ class CustomerHome extends StatelessWidget {
 
               const SizedBox(height: 16),
 
-              // BOOK APPOINTMENT BUTTON
               _ActionCard(
                 icon: Icons.calendar_month_rounded,
                 title: "Book Appointment",
@@ -134,9 +140,26 @@ class CustomerHome extends StatelessWidget {
                 },
               ),
 
+              const SizedBox(height: 16),
+
+              _ActionCard(
+                icon: Icons.notifications_active_rounded,
+                title: "My Booking Status",
+                subtitle:
+                    "Check if your appointment is pending, approved, or rejected.",
+                isFilled: false,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const BookingStatusPage(),
+                    ),
+                  );
+                },
+              ),
+
               const SizedBox(height: 24),
 
-              // SERVICES OFFERED
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(18),
@@ -184,7 +207,6 @@ class CustomerHome extends StatelessWidget {
 
               const SizedBox(height: 18),
 
-              // CENTER INFORMATION
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(18),

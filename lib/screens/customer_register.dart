@@ -7,6 +7,16 @@ const Color _borderColor = Color(0xFFD8E8EE);
 const Color _mutedTextColor = Color(0xFF6E7E88);
 const Color _softPrimaryColor = Color(0xFFEAF4F8);
 
+// ================= TEMPORARY LOCAL CUSTOMER ACCOUNT STORAGE =================
+// This works while the app is running.
+// Later, Firebase/backend/local database can replace this.
+
+ValueNotifier<List<Map<String, String>>> registeredCustomers = ValueNotifier([]);
+
+// Stores the currently logged-in customer name.
+// Used by CustomerHome and My Booking Status screen.
+ValueNotifier<String> loggedInCustomerNameNotifier = ValueNotifier("");
+
 class CustomerRegister extends StatefulWidget {
   const CustomerRegister({super.key});
 
@@ -37,16 +47,41 @@ class _CustomerRegisterState extends State<CustomerRegister> {
     super.dispose();
   }
 
-  void register() {
-    if (fullNameController.text.isEmpty ||
-        addressList.isEmpty ||
-        passwordController.text.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Complete all fields")));
+  bool accountAlreadyExists(String fullName) {
+    return registeredCustomers.value.any((account) {
+      return account["fullName"]!.toLowerCase().trim() ==
+          fullName.toLowerCase().trim();
+    });
+  }
 
+  void register() {
+    final String fullName = fullNameController.text.trim();
+    final String password = passwordController.text.trim();
+
+    if (fullName.isEmpty || selectedAddress.isEmpty || password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Complete all fields")),
+      );
       return;
     }
+
+    if (accountAlreadyExists(fullName)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Account already exists. Please login instead."),
+        ),
+      );
+      return;
+    }
+
+    registeredCustomers.value = [
+      ...registeredCustomers.value,
+      {
+        "fullName": fullName,
+        "municipality": selectedAddress,
+        "password": password,
+      },
+    ];
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text("Account Created Successfully")),
@@ -90,11 +125,11 @@ class _CustomerRegisterState extends State<CustomerRegister> {
       data: Theme.of(context).copyWith(
         scaffoldBackgroundColor: _backgroundColor,
         colorScheme: Theme.of(context).colorScheme.copyWith(
-          primary: _primaryColor,
-          onPrimary: Colors.white,
-          surface: _cardColor,
-          onSurface: _primaryColor,
-        ),
+              primary: _primaryColor,
+              onPrimary: Colors.white,
+              surface: _cardColor,
+              onSurface: _primaryColor,
+            ),
         appBarTheme: const AppBarTheme(
           backgroundColor: _backgroundColor,
           foregroundColor: _primaryColor,
@@ -131,7 +166,6 @@ class _CustomerRegisterState extends State<CustomerRegister> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // HEADER CARD
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(20),
@@ -199,7 +233,6 @@ class _CustomerRegisterState extends State<CustomerRegister> {
 
                 const SizedBox(height: 14),
 
-                // FORM CARD
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(18),
@@ -251,8 +284,10 @@ class _CustomerRegisterState extends State<CustomerRegister> {
                           );
                         }).toList(),
                         onChanged: (value) {
+                          if (value == null) return;
+
                           setState(() {
-                            selectedAddress = value!;
+                            selectedAddress = value;
                           });
                         },
                       ),
@@ -278,7 +313,6 @@ class _CustomerRegisterState extends State<CustomerRegister> {
 
                 const SizedBox(height: 18),
 
-                // REMINDER CARD
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(14),

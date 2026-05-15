@@ -27,17 +27,52 @@ class _CustomerLoginState extends State<CustomerLogin> {
     super.dispose();
   }
 
-  void login() {
-    if (nameController.text.isNotEmpty && passwordController.text.isNotEmpty) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const CustomerHome()),
-      );
-    } else {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Please enter credentials")));
+  Map<String, String>? findAccountByName(String fullName) {
+    try {
+      return registeredCustomers.value.firstWhere((account) {
+        return account["fullName"]!.toLowerCase().trim() ==
+            fullName.toLowerCase().trim();
+      });
+    } catch (_) {
+      return null;
     }
+  }
+
+  void login() {
+    final String fullName = nameController.text.trim();
+    final String password = passwordController.text.trim();
+
+    if (fullName.isEmpty || password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please enter credentials")),
+      );
+      return;
+    }
+
+    final account = findAccountByName(fullName);
+
+    if (account == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Account not found. Please create an account first."),
+        ),
+      );
+      return;
+    }
+
+    if (account["password"] != password) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Incorrect password.")),
+      );
+      return;
+    }
+
+    loggedInCustomerNameNotifier.value = account["fullName"] ?? fullName;
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => const CustomerHome()),
+    );
   }
 
   InputDecoration formDecoration({
@@ -75,11 +110,11 @@ class _CustomerLoginState extends State<CustomerLogin> {
       data: Theme.of(context).copyWith(
         scaffoldBackgroundColor: _backgroundColor,
         colorScheme: Theme.of(context).colorScheme.copyWith(
-          primary: _primaryColor,
-          onPrimary: Colors.white,
-          surface: _cardColor,
-          onSurface: _primaryColor,
-        ),
+              primary: _primaryColor,
+              onPrimary: Colors.white,
+              surface: _cardColor,
+              onSurface: _primaryColor,
+            ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
             backgroundColor: _primaryColor,
@@ -103,7 +138,6 @@ class _CustomerLoginState extends State<CustomerLogin> {
               padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
               child: Column(
                 children: [
-                  // LOGO / HEADER SECTION
                   Container(
                     height: 92,
                     width: 92,
@@ -151,7 +185,6 @@ class _CustomerLoginState extends State<CustomerLogin> {
 
                   const SizedBox(height: 28),
 
-                  // LOGIN CARD
                   Container(
                     width: double.infinity,
                     constraints: const BoxConstraints(maxWidth: 380),
@@ -188,7 +221,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
                               SizedBox(width: 10),
                               Expanded(
                                 child: Text(
-                                  "Enter your customer account credentials.",
+                                  "Enter your registered customer account credentials.",
                                   style: TextStyle(
                                     fontSize: 13,
                                     height: 1.3,
