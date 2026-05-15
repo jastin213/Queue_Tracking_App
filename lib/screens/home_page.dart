@@ -8,155 +8,201 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color.fromARGB(255, 222, 240, 247),
-      body: SafeArea(
-        child: Stack(
-          children: [
-            // Title (top-left)
-            const Positioned(
-              top: 20,
-              left: 20,
-              child: Text(
-                "NPJN Smart Queue",
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1,
-                ),
-              ),
-            ),
-
-            // Center Card
-            Center(
-              child: SingleChildScrollView(
-                child: Container(
-                  width: 300,
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 30,
-                    horizontal: 20,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.95),
-                    borderRadius: BorderRadius.circular(30),
-                    boxShadow: [
-                      // Main deep shadow
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.15),
-                        blurRadius: 30,
-                        spreadRadius: 5,
-                      ),
-
-                      // Soft ambient shadow
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.05),
-                        blurRadius: 10,
-                        spreadRadius: 2,
-                      ),
-
-                      // Light top highlight
-                      BoxShadow(
-                        color: Colors.white.withOpacity(0.7),
-                        blurRadius: 20,
-                        spreadRadius: -5,
-                      ),
-                    ],
-                  ),
+      body: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFFEAF6FB), Color(0xFFF8FCFE)],
+          ),
+        ),
+        child: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: constraints.maxHeight),
                   child: Column(
-                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      // Icon with soft elevated background
+                      const SizedBox(height: 20),
+
+                      // Car Logo
                       Container(
-                        padding: const EdgeInsets.all(18),
+                        width: 96,
+                        height: 96,
                         decoration: BoxDecoration(
-                          color: Colors.grey.shade200,
-                          borderRadius: BorderRadius.circular(20),
+                          color: const Color(0xFF0F2A44),
+                          borderRadius: BorderRadius.circular(30),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0),
-                              blurRadius: 10,
-                            ),
-                            BoxShadow(
-                              color: Colors.white.withOpacity(0.7),
-                              blurRadius: 10,
+                              color: const Color(0xFF0F2A44).withOpacity(0.22),
+                              blurRadius: 28,
                             ),
                           ],
                         ),
                         child: const Icon(
-                          Icons.directions_car,
-                          size: 40,
+                          Icons.directions_car_rounded,
+                          size: 50,
+                          color: Colors.white,
                         ),
                       ),
 
-                      const SizedBox(height: 30),
+                      const SizedBox(height: 24),
 
-                      // Admin Login Button
-                      SizedBox(
+                      // App Title
+                      const Text(
+                        "NPJN Smart Queue",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 27,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF102A43),
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+
+                      const SizedBox(height: 8),
+
+                      const Text(
+                        "Emission Testing Center",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF5B7083),
+                        ),
+                      ),
+
+                      const SizedBox(height: 36),
+
+                      // Main Card
+                      Container(
                         width: double.infinity,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.black,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 15,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30),
-                            ),
-                            elevation: 8,
-                            shadowColor: Colors.black.withOpacity(0.4),
+                        constraints: const BoxConstraints(maxWidth: 370),
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(28),
+                          border: Border.all(
+                            color: const Color(0xFFDCEAF2),
+                            width: 1.2,
                           ),
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => const AdminLogin(),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.08),
+                              blurRadius: 26,
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text(
+                              "Select Portal",
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF102A43),
                               ),
-                            );
-                          },
-                          child: const Text("Admin Login"),
+                            ),
+
+                            const SizedBox(height: 22),
+
+                            // Customer Portal Button
+                            SizedBox(
+                              width: double.infinity,
+                              height: 56,
+                              child: ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF0F2A44),
+                                  foregroundColor: Colors.white,
+                                  elevation: 0,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(18),
+                                  ),
+                                ),
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          const CustomerPortal(),
+                                    ),
+                                  );
+                                },
+                                child: const Text(
+                                  "Customer Portal",
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                            const SizedBox(height: 14),
+
+                            // Admin Login Button
+                            SizedBox(
+                              width: double.infinity,
+                              height: 56,
+                              child: OutlinedButton(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: const Color(0xFF0F2A44),
+                                  side: const BorderSide(
+                                    color: Color(0xFF0F2A44),
+                                    width: 1.3,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(18),
+                                  ),
+                                ),
+                                onPressed: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => const AdminLogin(),
+                                    ),
+                                  );
+                                },
+                                child: const Text(
+                                  "Admin Login",
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
 
-                      const SizedBox(height: 15),
+                      const SizedBox(height: 28),
 
-                      // Customer Portal Button
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton(
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 15,
-                            ),
-                            side: const BorderSide(
-                              color: Colors.black54,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(30),
-                            ),
-                          ),
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    const CustomerPortal(),
-                              ),
-                            );
-                          },
-                          child: const Text(
-                            "Customer Portal",
-                            style: TextStyle(
-                              color: Colors.black,
-                            ),
-                          ),
+                      const Text(
+                        "Queue • Appointment • Tracking",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF6B7C8F),
+                          letterSpacing: 0.3,
                         ),
                       ),
+
+                      const SizedBox(height: 20),
                     ],
                   ),
                 ),
-              ),
-            ),
-          ],
+              );
+            },
+          ),
         ),
       ),
     );

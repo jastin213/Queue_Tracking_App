@@ -4,6 +4,15 @@ import 'package:file_picker/file_picker.dart';
 import 'location_data.dart';
 import 'admin_page.dart';
 
+// ================= COLOR THEME =================
+
+const Color _backgroundColor = Color(0xFFF1FAFC);
+const Color _primaryColor = Color(0xFF071F35);
+const Color _cardColor = Colors.white;
+const Color _borderColor = Color(0xFFD8E8EE);
+const Color _mutedTextColor = Color(0xFF6E7E88);
+const Color _softPrimaryColor = Color(0xFFEAF4F8);
+
 // ================= GLOBAL BOOKING & QUEUE STORAGE =================
 
 ValueNotifier<List<Map<String, dynamic>>> pendingBookings = ValueNotifier([]);
@@ -66,25 +75,62 @@ class _BookAppointmentState extends State<BookAppointment> {
       context: context,
       barrierDismissible: false,
       builder: (_) => AlertDialog(
-        title: const Text("Booking Policy"),
+        backgroundColor: _cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        title: const Text(
+          "Booking Policy",
+          style: TextStyle(fontWeight: FontWeight.bold, color: _primaryColor),
+        ),
         content: const SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text("Before booking, please follow these policies:"),
-              SizedBox(height: 10),
-              Text("1. Provide your full name."),
-              Text("2. Provide your OR and CR."),
-              Text("3. Provide a valid ID."),
-              Text("4. Be present when your queue is called."),
-              Text("5. If you miss your turn, you will be moved to the bottom."),
+              Text(
+                "Before booking, please confirm the following:",
+                style: TextStyle(color: _mutedTextColor),
+              ),
+              SizedBox(height: 14),
+              Text(
+                "1. Provide your full name.",
+                style: TextStyle(color: _primaryColor),
+              ),
+              SizedBox(height: 6),
+              Text(
+                "2. Upload a valid ID, OR, and CR.",
+                style: TextStyle(color: _primaryColor),
+              ),
+              SizedBox(height: 6),
+              Text(
+                "3. Be present when your queue is called.",
+                style: TextStyle(color: _primaryColor),
+              ),
+              SizedBox(height: 6),
+              Text(
+                "4. Missed turns will be moved to the bottom of the queue.",
+                style: TextStyle(color: _primaryColor),
+              ),
             ],
           ),
         ),
+        actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
         actions: [
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("I AGREE"),
+          SizedBox(
+            height: 45,
+            width: double.infinity,
+            child: ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _primaryColor,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              onPressed: () => Navigator.pop(context),
+              child: const Text(
+                "I UNDERSTAND",
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
           ),
         ],
       ),
@@ -119,7 +165,8 @@ class _BookAppointmentState extends State<BookAppointment> {
           customer["date"] == formattedDate && customer["queue"] == code,
     );
 
-    bool inNowServing = nowServingNotifier.value != null &&
+    bool inNowServing =
+        nowServingNotifier.value != null &&
         nowServingNotifier.value!["date"] == formattedDate &&
         nowServingNotifier.value!["queue"] == code;
 
@@ -146,6 +193,19 @@ class _BookAppointmentState extends State<BookAppointment> {
       initialDate: DateTime.now(),
       firstDate: DateTime.now(),
       lastDate: DateTime(2030),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: _primaryColor,
+              onPrimary: Colors.white,
+              surface: _cardColor,
+              onSurface: _primaryColor,
+            ),
+          ),
+          child: child!,
+        );
+      },
     );
 
     if (picked != null) {
@@ -209,9 +269,7 @@ class _BookAppointmentState extends State<BookAppointment> {
         orFilePath == null ||
         crFilePath == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Complete all fields and documents."),
-        ),
+        const SnackBar(content: Text("Complete all fields and documents.")),
       );
       return;
     }
@@ -257,16 +315,323 @@ class _BookAppointmentState extends State<BookAppointment> {
         "idPath": idFilePath,
         "orPath": orFilePath,
         "crPath": crFilePath,
-      }
+      },
     ];
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text("Appointment submitted successfully."),
-      ),
+      const SnackBar(content: Text("Appointment submitted successfully.")),
     );
 
     Navigator.pop(context);
+  }
+
+  // ================= UI HELPERS =================
+
+  Widget sectionTitle({
+    required String number,
+    required String title,
+    required IconData icon,
+    String? subtitle,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: _primaryColor,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              number,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Icon(icon, size: 24, color: _primaryColor),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold,
+                    color: _primaryColor,
+                  ),
+                ),
+                if (subtitle != null) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: _mutedTextColor,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget sectionCard({required List<Widget> children}) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 24),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _cardColor,
+        border: Border.all(color: _borderColor),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(color: _primaryColor.withOpacity(0.06), blurRadius: 14),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: children,
+      ),
+    );
+  }
+
+  Widget fieldLabel(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        text,
+        style: const TextStyle(
+          fontWeight: FontWeight.bold,
+          color: _primaryColor,
+        ),
+      ),
+    );
+  }
+
+  InputDecoration formDecoration(String hint) {
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: const TextStyle(color: _mutedTextColor),
+      filled: true,
+      fillColor: _backgroundColor,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: _borderColor),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: _primaryColor, width: 1.5),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+    );
+  }
+
+  Widget policyReminder() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 18),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _cardColor,
+        border: Border.all(color: _borderColor),
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(color: _primaryColor.withOpacity(0.05), blurRadius: 12),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: _softPrimaryColor,
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Icon(Icons.policy_outlined, color: _primaryColor),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text(
+              "Please review the booking policy before submitting your appointment.",
+              style: TextStyle(
+                fontSize: 13,
+                color: _mutedTextColor,
+                height: 1.3,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: showBookingPolicy,
+            child: const Text(
+              "Review",
+              style: TextStyle(
+                color: _primaryColor,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget dateButton() {
+    return SizedBox(
+      width: double.infinity,
+      height: 54,
+      child: OutlinedButton.icon(
+        onPressed: pickDate,
+        icon: const Icon(Icons.calendar_month_outlined, color: _primaryColor),
+        label: Text(
+          selectedDate == null ? "Choose Appointment Date" : formattedDate,
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            color: _primaryColor,
+          ),
+        ),
+        style: OutlinedButton.styleFrom(
+          alignment: Alignment.center,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          side: const BorderSide(color: _borderColor),
+          backgroundColor: _backgroundColor,
+        ),
+      ),
+    );
+  }
+
+  Widget queueMessageBox(String message) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(
+        color: _softPrimaryColor,
+        borderRadius: BorderRadius.circular(15),
+        border: Border.all(color: _borderColor),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.info_outline, size: 22, color: _primaryColor),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              textAlign: TextAlign.left,
+              style: const TextStyle(color: _primaryColor, height: 1.3),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget queueCodesView(List<String> codes) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: _softPrimaryColor,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: _borderColor),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                selectedQueueCode.isEmpty
+                    ? Icons.warning_amber_rounded
+                    : Icons.check_circle_outline,
+                size: 22,
+                color: _primaryColor,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  selectedQueueCode.isEmpty
+                      ? "No available queue code for this date."
+                      : "Selected queue code: $selectedQueueCode",
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: _primaryColor,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: codes.map((code) {
+            bool taken = isQueueTaken(code);
+            bool selected = selectedQueueCode == code;
+
+            return GestureDetector(
+              onTap: taken
+                  ? null
+                  : () {
+                      setState(() {
+                        selectedQueueCode = code;
+                      });
+                    },
+              child: Container(
+                width: 74,
+                height: 44,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: taken
+                      ? const Color(0xFFE3E9EC)
+                      : selected
+                      ? _primaryColor
+                      : _cardColor,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: selected
+                        ? _primaryColor
+                        : taken
+                        ? const Color(0xFFD1DCE1)
+                        : _borderColor,
+                    width: selected ? 1.5 : 1,
+                  ),
+                ),
+                child: Text(
+                  taken ? "Taken" : code,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: selected
+                        ? Colors.white
+                        : taken
+                        ? _mutedTextColor
+                        : _primaryColor,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
   }
 
   // ================= UPLOAD CARD =================
@@ -277,47 +642,98 @@ class _BookAppointmentState extends State<BookAppointment> {
     required VoidCallback onPick,
     required VoidCallback onCamera,
   }) {
+    final bool hasFile = fileName != null;
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey),
-        borderRadius: BorderRadius.circular(15),
+        border: Border.all(
+          color: hasFile ? _primaryColor : _borderColor,
+          width: hasFile ? 1.3 : 1,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        color: hasFile ? _softPrimaryColor : _backgroundColor,
       ),
       child: Column(
         children: [
-          const Icon(Icons.upload_file, size: 40),
-          const SizedBox(height: 10),
-          Text(
-            title,
-            style: const TextStyle(fontWeight: FontWeight.bold),
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: _cardColor,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _borderColor),
+                ),
+                child: Icon(
+                  hasFile ? Icons.check_circle_outline : Icons.upload_file,
+                  color: _primaryColor,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: _primaryColor,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      fileName ?? "No file uploaded",
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: _mutedTextColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 10),
-          Text(
-            fileName ?? "No file selected",
-            textAlign: TextAlign.center,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 15),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
-                child: ElevatedButton.icon(
+                child: OutlinedButton.icon(
                   onPressed: onPick,
-                  icon: const Icon(Icons.attach_file),
+                  icon: const Icon(Icons.attach_file, size: 18),
                   label: const Text("Choose File"),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _primaryColor,
+                    side: const BorderSide(color: _primaryColor),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: ElevatedButton.icon(
+                child: OutlinedButton.icon(
                   onPressed: onCamera,
-                  icon: const Icon(Icons.camera_alt),
+                  icon: const Icon(Icons.camera_alt, size: 18),
                   label: const Text("Take Photo"),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _primaryColor,
+                    side: const BorderSide(color: _primaryColor),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
                 ),
               ),
             ],
-          )
+          ),
         ],
       ),
     );
@@ -329,180 +745,208 @@ class _BookAppointmentState extends State<BookAppointment> {
   Widget build(BuildContext context) {
     List<String> codes = getQueueCodes();
 
-    return Scaffold(
-      appBar: AppBar(title: const Text("Book Appointment")),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: ListView(
-          children: [
-            const Text(
-              "Select Appointment Date",
-              style: TextStyle(fontWeight: FontWeight.bold),
+    return Theme(
+      data: Theme.of(context).copyWith(
+        scaffoldBackgroundColor: _backgroundColor,
+        colorScheme: Theme.of(context).colorScheme.copyWith(
+          primary: _primaryColor,
+          onPrimary: Colors.white,
+          surface: _cardColor,
+          onSurface: _primaryColor,
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: _backgroundColor,
+          foregroundColor: _primaryColor,
+          elevation: 0,
+          centerTitle: false,
+          titleTextStyle: TextStyle(
+            color: _primaryColor,
+            fontSize: 20,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.5,
+          ),
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _primaryColor,
+            foregroundColor: Colors.white,
+            elevation: 3,
+            shadowColor: _primaryColor.withOpacity(0.18),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
             ),
-            const SizedBox(height: 10),
-            ElevatedButton(
-              onPressed: pickDate,
-              child: Text(
-                selectedDate == null ? "Choose Date" : formattedDate,
-              ),
+            textStyle: const TextStyle(
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.8,
             ),
-            const SizedBox(height: 25),
-            TextField(
-              controller: fullNameController,
-              decoration: const InputDecoration(
-                labelText: "Full Name",
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 20),
-            const Text(
-              "Customer Location",
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 10),
-            DropdownButtonFormField<String>(
-              value: selectedMunicipality,
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-              ),
-              items: albayThirdDistrictLocations.map((loc) {
-                return DropdownMenuItem(
-                  value: loc.name,
-                  child: Text(loc.name),
-                );
-              }).toList(),
-              onChanged: (v) {
-                setState(() {
-                  selectedMunicipality = v!;
-                });
-              },
-            ),
-            const SizedBox(height: 25),
-            const Text(
-              "Vehicle Type",
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 10),
-            DropdownButtonFormField<String>(
-              value: selectedVehicle,
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-              ),
-              items: const [
-                DropdownMenuItem(value: "Gas", child: Text("Gas")),
-                DropdownMenuItem(value: "Diesel", child: Text("Diesel")),
+          ),
+        ),
+      ),
+      child: Scaffold(
+        appBar: AppBar(title: const Text("Book Appointment")),
+        bottomNavigationBar: SafeArea(
+          top: false,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+            decoration: BoxDecoration(
+              color: _cardColor,
+              border: const Border(top: BorderSide(color: _borderColor)),
+              boxShadow: [
+                BoxShadow(
+                  color: _primaryColor.withOpacity(0.08),
+                  blurRadius: 14,
+                ),
               ],
-              onChanged: (v) {
-                setState(() {
-                  selectedVehicle = v!;
-
-                  if (selectedDate != null) {
-                    selectedQueueCode = getFirstAvailableQueueCode();
-                  } else {
-                    selectedQueueCode =
-                        selectedVehicle == "Gas" ? "G001" : "D001";
-                  }
-                });
-              },
             ),
-            const SizedBox(height: 25),
-            const Text(
-              "Available Queue Codes",
-              style: TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 10),
-            if (selectedDate == null)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(15),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade100,
-                  borderRadius: BorderRadius.circular(15),
-                  border: Border.all(color: Colors.grey),
-                ),
-                child: const Text(
-                  "Please choose an appointment date first.",
-                  textAlign: TextAlign.center,
-                ),
-              )
-            else
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: codes.map((code) {
-                  bool taken = isQueueTaken(code);
-                  bool selected = selectedQueueCode == code;
-
-                  return GestureDetector(
-                    onTap: taken
-                        ? null
-                        : () {
-                            setState(() {
-                              selectedQueueCode = code;
-                            });
-                          },
-                    child: Container(
-                      width: 80,
-                      height: 60,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: taken
-                            ? Colors.grey.shade400
-                            : selected
-                                ? Colors.black
-                                : Colors.grey.shade200,
-                        borderRadius: BorderRadius.circular(15),
-                      ),
-                      child: Text(
-                        taken ? "Taken" : code,
-                        style: TextStyle(
-                          color: selected ? Colors.white : Colors.black,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-            const SizedBox(height: 25),
-            TextField(
-              controller: plateController,
-              textCapitalization: TextCapitalization.characters,
-              decoration: const InputDecoration(
-                labelText: "Plate Number",
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 25),
-            uploadCard(
-              title: "Upload Valid ID",
-              fileName: idFileName,
-              onPick: () => pickDocument("ID"),
-              onCamera: () => captureDocument("ID"),
-            ),
-            const SizedBox(height: 20),
-            uploadCard(
-              title: "Upload OR",
-              fileName: orFileName,
-              onPick: () => pickDocument("OR"),
-              onCamera: () => captureDocument("OR"),
-            ),
-            const SizedBox(height: 20),
-            uploadCard(
-              title: "Upload CR",
-              fileName: crFileName,
-              onPick: () => pickDocument("CR"),
-              onCamera: () => captureDocument("CR"),
-            ),
-            const SizedBox(height: 30),
-            SizedBox(
+            child: SizedBox(
               height: 55,
               child: ElevatedButton(
                 onPressed: submitBooking,
                 child: const Text("SUBMIT APPOINTMENT"),
               ),
             ),
-          ],
+          ),
+        ),
+        body: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 26),
+            children: [
+              policyReminder(),
+
+              sectionTitle(
+                number: "1",
+                title: "Appointment Details",
+                subtitle:
+                    "Choose the date, location, vehicle type, and queue code.",
+                icon: Icons.event_available_outlined,
+              ),
+              sectionCard(
+                children: [
+                  fieldLabel("Appointment Date"),
+                  dateButton(),
+                  const SizedBox(height: 18),
+
+                  fieldLabel("Customer Location"),
+                  DropdownButtonFormField<String>(
+                    value: selectedMunicipality,
+                    decoration: formDecoration("Select Location"),
+                    dropdownColor: _cardColor,
+                    iconEnabledColor: _primaryColor,
+                    style: const TextStyle(color: _primaryColor),
+                    items: albayThirdDistrictLocations.map((loc) {
+                      return DropdownMenuItem(
+                        value: loc.name,
+                        child: Text(loc.name),
+                      );
+                    }).toList(),
+                    onChanged: (v) {
+                      setState(() {
+                        selectedMunicipality = v!;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 18),
+
+                  fieldLabel("Vehicle Type"),
+                  DropdownButtonFormField<String>(
+                    value: selectedVehicle,
+                    decoration: formDecoration("Select Vehicle Type"),
+                    dropdownColor: _cardColor,
+                    iconEnabledColor: _primaryColor,
+                    style: const TextStyle(color: _primaryColor),
+                    items: const [
+                      DropdownMenuItem(value: "Gas", child: Text("Gas")),
+                      DropdownMenuItem(value: "Diesel", child: Text("Diesel")),
+                    ],
+                    onChanged: (v) {
+                      setState(() {
+                        selectedVehicle = v!;
+
+                        if (selectedDate != null) {
+                          selectedQueueCode = getFirstAvailableQueueCode();
+                        } else {
+                          selectedQueueCode = selectedVehicle == "Gas"
+                              ? "G001"
+                              : "D001";
+                        }
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 18),
+
+                  fieldLabel("Available Queue Codes"),
+                  if (selectedDate == null)
+                    queueMessageBox(
+                      "Please choose an appointment date first to view available queue codes.",
+                    )
+                  else
+                    queueCodesView(codes),
+                ],
+              ),
+
+              sectionTitle(
+                number: "2",
+                title: "Customer Information",
+                subtitle: "Enter the customer name and vehicle plate number.",
+                icon: Icons.person_outline,
+              ),
+              sectionCard(
+                children: [
+                  fieldLabel("Full Name"),
+                  TextField(
+                    controller: fullNameController,
+                    style: const TextStyle(color: _primaryColor),
+                    decoration: formDecoration("Enter full name"),
+                  ),
+                  const SizedBox(height: 18),
+
+                  fieldLabel("Plate Number"),
+                  TextField(
+                    controller: plateController,
+                    textCapitalization: TextCapitalization.characters,
+                    style: const TextStyle(color: _primaryColor),
+                    decoration: formDecoration("Enter plate number"),
+                  ),
+                ],
+              ),
+
+              sectionTitle(
+                number: "3",
+                title: "Required Documents",
+                subtitle:
+                    "Upload or capture a photo of each required document.",
+                icon: Icons.folder_copy_outlined,
+              ),
+              sectionCard(
+                children: [
+                  uploadCard(
+                    title: "Valid ID",
+                    fileName: idFileName,
+                    onPick: () => pickDocument("ID"),
+                    onCamera: () => captureDocument("ID"),
+                  ),
+                  const SizedBox(height: 14),
+
+                  uploadCard(
+                    title: "Official Receipt (OR)",
+                    fileName: orFileName,
+                    onPick: () => pickDocument("OR"),
+                    onCamera: () => captureDocument("OR"),
+                  ),
+                  const SizedBox(height: 14),
+
+                  uploadCard(
+                    title: "Certificate of Registration (CR)",
+                    fileName: crFileName,
+                    onPick: () => pickDocument("CR"),
+                    onCamera: () => captureDocument("CR"),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 80),
+            ],
+          ),
         ),
       ),
     );

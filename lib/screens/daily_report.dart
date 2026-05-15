@@ -2,6 +2,15 @@ import 'package:flutter/material.dart';
 import 'admin_page.dart';
 import 'book_appointment.dart';
 
+// ================= COLOR THEME =================
+
+const Color _backgroundColor = Color(0xFFF1FAFC);
+const Color _primaryColor = Color(0xFF071F35);
+const Color _cardColor = Colors.white;
+const Color _borderColor = Color(0xFFD8E8EE);
+const Color _mutedTextColor = Color(0xFF6E7E88);
+const Color _softPrimaryColor = Color(0xFFEAF4F8);
+
 class DailyReport extends StatefulWidget {
   const DailyReport({super.key});
 
@@ -84,6 +93,19 @@ class _DailyReportState extends State<DailyReport> {
       initialDate: parseDate(selectedDate),
       firstDate: DateTime(2020),
       lastDate: DateTime(2030),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: _primaryColor,
+              onPrimary: Colors.white,
+              surface: _cardColor,
+              onSurface: _primaryColor,
+            ),
+          ),
+          child: child!,
+        );
+      },
     );
 
     if (picked != null) {
@@ -172,8 +194,7 @@ class _DailyReportState extends State<DailyReport> {
       ensureMonth(key);
 
       monthly[key]!["approved"] = monthly[key]!["approved"]! + 1;
-      monthly[key]!["bookingActivity"] =
-          monthly[key]!["bookingActivity"]! + 1;
+      monthly[key]!["bookingActivity"] = monthly[key]!["bookingActivity"]! + 1;
     }
 
     for (var booking in rejectedBookings.value) {
@@ -183,8 +204,7 @@ class _DailyReportState extends State<DailyReport> {
       ensureMonth(key);
 
       monthly[key]!["rejected"] = monthly[key]!["rejected"]! + 1;
-      monthly[key]!["bookingActivity"] =
-          monthly[key]!["bookingActivity"]! + 1;
+      monthly[key]!["bookingActivity"] = monthly[key]!["bookingActivity"]! + 1;
     }
 
     for (var booking in pendingBookings.value) {
@@ -194,8 +214,7 @@ class _DailyReportState extends State<DailyReport> {
       ensureMonth(key);
 
       monthly[key]!["pending"] = monthly[key]!["pending"]! + 1;
-      monthly[key]!["bookingActivity"] =
-          monthly[key]!["bookingActivity"]! + 1;
+      monthly[key]!["bookingActivity"] = monthly[key]!["bookingActivity"]! + 1;
     }
 
     return monthly;
@@ -276,167 +295,114 @@ class _DailyReportState extends State<DailyReport> {
 
     final totalServed = passedList.length + failedList.length;
 
-    return Scaffold(
-      backgroundColor: const Color.fromARGB(255, 227, 242, 248),
-      appBar: AppBar(
-        title: const Text("Daily Report / History"),
-        backgroundColor: Colors.white,
+    return Theme(
+      data: Theme.of(context).copyWith(
+        scaffoldBackgroundColor: _backgroundColor,
+        colorScheme: Theme.of(context).colorScheme.copyWith(
+          primary: _primaryColor,
+          onPrimary: Colors.white,
+          surface: _cardColor,
+          onSurface: _primaryColor,
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: _backgroundColor,
+          foregroundColor: _primaryColor,
+          elevation: 0,
+          centerTitle: false,
+          titleTextStyle: TextStyle(
+            color: _primaryColor,
+            fontSize: 20,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.4,
+          ),
+        ),
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final bool wide = constraints.maxWidth >= 850;
+      child: Scaffold(
+        appBar: AppBar(title: const Text("Daily Report")),
+        body: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final bool wide = constraints.maxWidth >= 850;
 
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              children: [
-                buildSeasonalDetectionCard(wide),
+              return SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
+                child: Column(
+                  children: [
+                    buildDateSelector(),
 
-                const SizedBox(height: 15),
+                    const SizedBox(height: 14),
 
-                // ================= CALENDAR SELECTOR =================
+                    buildSeasonalDetectionCard(wide),
 
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: cardDecoration(),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.calendar_month),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          "Report Date: $selectedDate",
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      ElevatedButton(
-                        onPressed: pickReportDate,
-                        child: const Text("Choose Date"),
-                      ),
-                    ],
-                  ),
+                    const SizedBox(height: 14),
+
+                    buildSummarySection(
+                      wide: wide,
+                      totalServed: totalServed,
+                      passed: passedList.length,
+                      failed: failedList.length,
+                      approved: approvedList.length,
+                      rejected: rejectedList.length,
+                      pending: pendingList.length,
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    buildReportDetails(
+                      date: selectedDate,
+                      totalServed: totalServed,
+                      passedList: passedList,
+                      failedList: failedList,
+                      approvedList: approvedList,
+                      rejectedList: rejectedList,
+                      pendingList: pendingList,
+                    ),
+                  ],
                 ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
 
-                const SizedBox(height: 15),
+  // ================= DATE SELECTOR =================
 
-                // ================= SELECTED DATE SUMMARY =================
-
-                if (wide)
-                  Row(
-                    children: [
-                      summaryCard(
-                        title: "Served",
-                        value: "$totalServed",
-                        subtitle: "Passed + Failed",
-                      ),
-                      const SizedBox(width: 10),
-                      summaryCard(
-                        title: "Passed",
-                        value: "${passedList.length}",
-                        subtitle: "Successful",
-                      ),
-                      const SizedBox(width: 10),
-                      summaryCard(
-                        title: "Failed",
-                        value: "${failedList.length}",
-                        subtitle: "Failed",
-                      ),
-                      const SizedBox(width: 10),
-                      summaryCard(
-                        title: "Approved",
-                        value: "${approvedList.length}",
-                        subtitle: "Bookings",
-                      ),
-                      const SizedBox(width: 10),
-                      summaryCard(
-                        title: "Rejected",
-                        value: "${rejectedList.length}",
-                        subtitle: "Bookings",
-                      ),
-                      const SizedBox(width: 10),
-                      summaryCard(
-                        title: "Pending",
-                        value: "${pendingList.length}",
-                        subtitle: "Bookings",
-                      ),
-                    ],
-                  )
-                else
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: [
-                      summaryBox(
-                        title: "Served",
-                        value: "$totalServed",
-                        subtitle: "Passed + Failed",
-                      ),
-                      summaryBox(
-                        title: "Passed",
-                        value: "${passedList.length}",
-                        subtitle: "Successful",
-                      ),
-                      summaryBox(
-                        title: "Failed",
-                        value: "${failedList.length}",
-                        subtitle: "Failed",
-                      ),
-                      summaryBox(
-                        title: "Approved",
-                        value: "${approvedList.length}",
-                        subtitle: "Bookings",
-                      ),
-                      summaryBox(
-                        title: "Rejected",
-                        value: "${rejectedList.length}",
-                        subtitle: "Bookings",
-                      ),
-                      summaryBox(
-                        title: "Pending",
-                        value: "${pendingList.length}",
-                        subtitle: "Bookings",
-                      ),
-                    ],
-                  ),
-
-                const SizedBox(height: 20),
-
-                // ================= REPORT DETAILS =================
-
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: cardDecoration(),
-                  child: !hasAnyRecordForDate(selectedDate)
-                      ? Padding(
-                          padding: const EdgeInsets.all(30),
-                          child: Center(
-                            child: Text(
-                              "No report records for $selectedDate.",
-                              style: const TextStyle(
-                                color: Colors.grey,
-                              ),
-                            ),
-                          ),
-                        )
-                      : reportDateCard(
-                          date: selectedDate,
-                          totalServed: totalServed,
-                          passedList: passedList,
-                          failedList: failedList,
-                          approvedList: approvedList,
-                          rejectedList: rejectedList,
-                          pendingList: pendingList,
-                        ),
-                ),
-              ],
+  Widget buildDateSelector() {
+    return cardContainer(
+      child: Row(
+        children: [
+          iconBox(Icons.calendar_month_rounded),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              "Report Date: $selectedDate",
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: _primaryColor,
+                fontWeight: FontWeight.w800,
+                fontSize: 15,
+              ),
             ),
-          );
-        },
+          ),
+          const SizedBox(width: 10),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _primaryColor,
+              foregroundColor: Colors.white,
+              elevation: 2,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
+            onPressed: pickReportDate,
+            child: const Text(
+              "Change",
+              style: TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -464,112 +430,96 @@ class _DailyReportState extends State<DailyReport> {
     Color statusColor;
 
     if (monthly.length < 2 || average == 0) {
-      statusTitle = "Not Enough Historical Data";
-      statusMessage =
-          "Seasonal Detection will become more accurate after more monthly reports are recorded.";
-      statusIcon = Icons.info_outline;
+      statusTitle = "Not Enough Data";
+      statusMessage = "More monthly records are needed.";
+      statusIcon = Icons.info_outline_rounded;
       statusColor = Colors.blue;
     } else if (peak) {
-      statusTitle = "SEASONAL PEAK DETECTED";
-      statusMessage =
-          "This month is $aboveAverage% higher than the usual monthly average.";
+      statusTitle = "Seasonal Peak";
+      statusMessage = "$aboveAverage% above average this month.";
       statusIcon = Icons.warning_amber_rounded;
       statusColor = Colors.orange;
     } else {
-      statusTitle = "Normal Queue Volume";
-      statusMessage =
-          "This month is within the normal range based on available report history.";
-      statusIcon = Icons.check_circle_outline;
+      statusTitle = "Normal Volume";
+      statusMessage = "Queue volume is within normal range.";
+      statusIcon = Icons.check_circle_outline_rounded;
       statusColor = Colors.green;
     }
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(18),
-      decoration: cardDecoration(),
+    return cardContainer(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // HEADER
-
-          Row(
-            children: [
-              Icon(
-                statusIcon,
-                color: statusColor,
-                size: 30,
-              ),
-              const SizedBox(width: 10),
-              const Expanded(
-                child: Text(
-                  "Seasonal Detection",
-                  style: TextStyle(
-                    fontSize: 19,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ],
+          sectionHeader(
+            icon: Icons.trending_up_rounded,
+            title: "Seasonal Detection",
           ),
 
-          const SizedBox(height: 15),
+          const SizedBox(height: 14),
 
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: statusColor.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: statusColor.withOpacity(0.4),
-              ),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: statusColor.withOpacity(0.35)),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            child: Row(
               children: [
-                Text(
-                  statusTitle,
-                  style: TextStyle(
-                    color: statusColor,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  statusMessage,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: Colors.black87,
+                Icon(statusIcon, color: statusColor, size: 28),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        statusTitle,
+                        style: TextStyle(
+                          color: statusColor,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 15,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        statusMessage,
+                        style: const TextStyle(
+                          color: _mutedTextColor,
+                          fontSize: 13,
+                          height: 1.3,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
 
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
 
           if (wide)
             Row(
               children: [
                 seasonalMiniCard(
-                  "Current Month",
-                  currentMonthTotal.toString(),
-                  monthLabelFromKey(currentKey),
+                  title: "Current",
+                  value: currentMonthTotal.toString(),
+                  subtitle: monthLabelFromKey(currentKey),
                 ),
                 const SizedBox(width: 10),
                 seasonalMiniCard(
-                  "Monthly Average",
-                  average.toStringAsFixed(1),
-                  "Based on report history",
+                  title: "Average",
+                  value: average.toStringAsFixed(1),
+                  subtitle: "Monthly served",
                 ),
                 const SizedBox(width: 10),
                 seasonalMiniCard(
-                  "Peak Month",
-                  peakMonth == null
+                  title: "Peak",
+                  value: peakMonth == null
                       ? "-"
                       : "${peakMonth.value['totalServed']}",
-                  peakMonth == null
+                  subtitle: peakMonth == null
                       ? "No data"
                       : monthLabelFromKey(peakMonth.key),
                 ),
@@ -581,55 +531,35 @@ class _DailyReportState extends State<DailyReport> {
               runSpacing: 10,
               children: [
                 seasonalMiniBox(
-                  "Current Month",
-                  currentMonthTotal.toString(),
-                  monthLabelFromKey(currentKey),
+                  title: "Current",
+                  value: currentMonthTotal.toString(),
+                  subtitle: monthLabelFromKey(currentKey),
                 ),
                 seasonalMiniBox(
-                  "Monthly Average",
-                  average.toStringAsFixed(1),
-                  "Based on history",
+                  title: "Average",
+                  value: average.toStringAsFixed(1),
+                  subtitle: "Monthly served",
                 ),
                 seasonalMiniBox(
-                  "Peak Month",
-                  peakMonth == null
+                  title: "Peak",
+                  value: peakMonth == null
                       ? "-"
                       : "${peakMonth.value['totalServed']}",
-                  peakMonth == null
+                  subtitle: peakMonth == null
                       ? "No data"
                       : monthLabelFromKey(peakMonth.key),
                 ),
               ],
             ),
 
-          const SizedBox(height: 18),
+          const SizedBox(height: 16),
 
-          sectionTitle("Recommendation"),
+          sectionHeader(icon: Icons.bar_chart_rounded, title: "Monthly Trend"),
 
-          Text(
-            peak
-                ? "• Add staff or assign backup personnel\n"
-                    "• Monitor queue volume earlier than usual\n"
-                    "• Prepare documents, printers, parking, and inspection lanes\n"
-                    "• Consider opening earlier during peak days"
-                : "• Continue monitoring daily queue reports\n"
-                    "• Use this trend as more historical data is collected\n"
-                    "• Prepare early if the monthly total rises above normal",
-            style: const TextStyle(
-              fontSize: 13,
-              height: 1.5,
-            ),
-          ),
-
-          const SizedBox(height: 18),
-
-          sectionTitle("Monthly Queue Trend"),
+          const SizedBox(height: 12),
 
           monthly.isEmpty
-              ? const Text(
-                  "No monthly trend data yet.",
-                  style: TextStyle(color: Colors.grey),
-                )
+              ? emptyBox("No monthly trend data yet.")
               : buildMonthlyTrend(monthly),
         ],
       ),
@@ -658,13 +588,14 @@ class _DailyReportState extends State<DailyReport> {
           child: Row(
             children: [
               SizedBox(
-                width: 115,
+                width: 88,
                 child: Text(
                   monthLabelFromKey(entry.key),
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 12,
-                    fontWeight: FontWeight.bold,
+                    fontWeight: FontWeight.w800,
+                    color: _primaryColor,
                   ),
                 ),
               ),
@@ -672,18 +603,18 @@ class _DailyReportState extends State<DailyReport> {
                 child: Stack(
                   children: [
                     Container(
-                      height: 18,
+                      height: 16,
                       decoration: BoxDecoration(
-                        color: Colors.grey.shade200,
+                        color: _softPrimaryColor,
                         borderRadius: BorderRadius.circular(20),
                       ),
                     ),
                     FractionallySizedBox(
                       widthFactor: percentage,
                       child: Container(
-                        height: 18,
+                        height: 16,
                         decoration: BoxDecoration(
-                          color: Colors.black87,
+                          color: _primaryColor,
                           borderRadius: BorderRadius.circular(20),
                         ),
                       ),
@@ -693,12 +624,13 @@ class _DailyReportState extends State<DailyReport> {
               ),
               const SizedBox(width: 10),
               SizedBox(
-                width: 45,
+                width: 36,
                 child: Text(
                   "$total",
                   textAlign: TextAlign.right,
                   style: const TextStyle(
-                    fontWeight: FontWeight.bold,
+                    color: _primaryColor,
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
               ),
@@ -709,71 +641,13 @@ class _DailyReportState extends State<DailyReport> {
     );
   }
 
-  Widget seasonalMiniCard(String title, String value, String subtitle) {
-    return Expanded(
-      child: seasonalMiniContent(title, value, subtitle),
-    );
-  }
-
-  Widget seasonalMiniBox(String title, String value, String subtitle) {
-    return SizedBox(
-      width: 170,
-      child: seasonalMiniContent(title, value, subtitle),
-    );
-  }
-
-  Widget seasonalMiniContent(String title, String value, String subtitle) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade300),
-      ),
-      child: Column(
-        children: [
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 12,
-            ),
-          ),
-          const SizedBox(height: 8),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              value,
-              style: const TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            subtitle,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Colors.grey,
-              fontSize: 11,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ================= SUMMARY CARD =================
-
-  Widget summaryCard({
+  Widget seasonalMiniCard({
     required String title,
     required String value,
     required String subtitle,
   }) {
     return Expanded(
-      child: summaryContent(
+      child: seasonalMiniContent(
         title: title,
         value: value,
         subtitle: subtitle,
@@ -781,14 +655,14 @@ class _DailyReportState extends State<DailyReport> {
     );
   }
 
-  Widget summaryBox({
+  Widget seasonalMiniBox({
     required String title,
     required String value,
     required String subtitle,
   }) {
     return SizedBox(
       width: 150,
-      child: summaryContent(
+      child: seasonalMiniContent(
         title: title,
         value: value,
         subtitle: subtitle,
@@ -796,31 +670,38 @@ class _DailyReportState extends State<DailyReport> {
     );
   }
 
-  Widget summaryContent({
+  Widget seasonalMiniContent({
     required String title,
     required String value,
     required String subtitle,
   }) {
     return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: cardDecoration(),
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: _softPrimaryColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _borderColor),
+      ),
       child: Column(
         children: [
           Text(
             title,
             textAlign: TextAlign.center,
             style: const TextStyle(
-              fontWeight: FontWeight.bold,
+              color: _primaryColor,
+              fontWeight: FontWeight.w800,
+              fontSize: 12,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 7),
           FittedBox(
             fit: BoxFit.scaleDown,
             child: Text(
               value,
               style: const TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
+                color: _primaryColor,
+                fontSize: 25,
+                fontWeight: FontWeight.w900,
               ),
             ),
           ),
@@ -828,9 +709,11 @@ class _DailyReportState extends State<DailyReport> {
           Text(
             subtitle,
             textAlign: TextAlign.center,
+            overflow: TextOverflow.ellipsis,
             style: const TextStyle(
+              color: _mutedTextColor,
               fontSize: 11,
-              color: Colors.grey,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],
@@ -838,9 +721,129 @@ class _DailyReportState extends State<DailyReport> {
     );
   }
 
-  // ================= REPORT DATE CARD =================
+  // ================= SUMMARY SECTION =================
 
-  Widget reportDateCard({
+  Widget buildSummarySection({
+    required bool wide,
+    required int totalServed,
+    required int passed,
+    required int failed,
+    required int approved,
+    required int rejected,
+    required int pending,
+  }) {
+    final cards = [
+      summaryContent(
+        title: "Served",
+        value: "$totalServed",
+        icon: Icons.groups_rounded,
+        color: _primaryColor,
+      ),
+      summaryContent(
+        title: "Passed",
+        value: "$passed",
+        icon: Icons.check_circle_outline_rounded,
+        color: Colors.green,
+      ),
+      summaryContent(
+        title: "Failed",
+        value: "$failed",
+        icon: Icons.cancel_outlined,
+        color: Colors.red,
+      ),
+      summaryContent(
+        title: "Approved",
+        value: "$approved",
+        icon: Icons.verified_outlined,
+        color: Colors.green,
+      ),
+      summaryContent(
+        title: "Rejected",
+        value: "$rejected",
+        icon: Icons.block_rounded,
+        color: Colors.red,
+      ),
+      summaryContent(
+        title: "Pending",
+        value: "$pending",
+        icon: Icons.pending_actions_rounded,
+        color: Colors.orange,
+      ),
+    ];
+
+    if (wide) {
+      return Row(
+        children: cards.map((card) {
+          return Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(right: 10),
+              child: card,
+            ),
+          );
+        }).toList(),
+      );
+    }
+
+    return Wrap(
+      spacing: 10,
+      runSpacing: 10,
+      alignment: WrapAlignment.center,
+      children: cards.map((card) {
+        return SizedBox(width: 150, child: card);
+      }).toList(),
+    );
+  }
+
+  Widget summaryContent({
+    required String title,
+    required String value,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: cardDecoration(),
+      child: Column(
+        children: [
+          Container(
+            height: 40,
+            width: 40,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icon, color: color, size: 23),
+          ),
+          const SizedBox(height: 9),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: _primaryColor,
+              fontWeight: FontWeight.w800,
+              fontSize: 12.5,
+            ),
+          ),
+          const SizedBox(height: 6),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              style: const TextStyle(
+                color: _primaryColor,
+                fontSize: 27,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ================= REPORT DETAILS =================
+
+  Widget buildReportDetails({
     required String date,
     required int totalServed,
     required List<Map<String, dynamic>> passedList,
@@ -849,135 +852,140 @@ class _DailyReportState extends State<DailyReport> {
     required List<Map<String, dynamic>> rejectedList,
     required List<Map<String, dynamic>> pendingList,
   }) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: Colors.grey.shade300,
-        ),
-      ),
+    if (!hasAnyRecordForDate(date)) {
+      return cardContainer(child: emptyBox("No report records for $date."));
+    }
+
+    return cardContainer(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            "$date: $totalServed served",
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
+          sectionHeader(
+            icon: Icons.receipt_long_rounded,
+            title: "Report Details",
           ),
 
           const SizedBox(height: 12),
 
-          Text(
-            "Passed: ${passedList.length}   Failed: ${failedList.length}   Approved: ${approvedList.length}   Rejected: ${rejectedList.length}   Pending: ${pendingList.length}",
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 13,
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: _softPrimaryColor,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: _borderColor),
+            ),
+            child: Text(
+              "$date  •  $totalServed served",
+              style: const TextStyle(
+                color: _primaryColor,
+                fontWeight: FontWeight.w900,
+                fontSize: 15,
+              ),
             ),
           ),
 
-          const SizedBox(height: 15),
+          const SizedBox(height: 14),
 
-          sectionTitle("Queue Summary"),
+          buildCompactSection(
+            title: "Served Queue",
+            icon: Icons.confirmation_number_rounded,
+            children: [
+              if (passedList.isEmpty && failedList.isEmpty)
+                emptyBox("No served queue records."),
+              if (passedList.isNotEmpty)
+                queueList(
+                  label: "Passed",
+                  list: passedList,
+                  color: Colors.green,
+                ),
+              if (failedList.isNotEmpty)
+                queueList(label: "Failed", list: failedList, color: Colors.red),
+            ],
+          ),
 
-          if (passedList.isEmpty && failedList.isEmpty)
-            const Text(
-              "No served queue records.",
-              style: TextStyle(color: Colors.grey),
-            ),
+          const SizedBox(height: 12),
 
-          if (passedList.isNotEmpty)
-            queueWrap(
-              label: "Passed",
-              list: passedList,
-            ),
-
-          if (failedList.isNotEmpty)
-            queueWrap(
-              label: "Failed",
-              list: failedList,
-            ),
-
-          const SizedBox(height: 15),
-
-          sectionTitle("Booking History"),
-
-          if (approvedList.isEmpty &&
-              rejectedList.isEmpty &&
-              pendingList.isEmpty)
-            const Text(
-              "No booking records.",
-              style: TextStyle(color: Colors.grey),
-            ),
-
-          if (approvedList.isNotEmpty)
-            bookingList(
-              label: "Approved Bookings",
-              list: approvedList,
-            ),
-
-          if (rejectedList.isNotEmpty)
-            bookingList(
-              label: "Rejected Bookings",
-              list: rejectedList,
-            ),
-
-          if (pendingList.isNotEmpty)
-            bookingList(
-              label: "Pending Bookings",
-              list: pendingList,
-            ),
+          buildCompactSection(
+            title: "Booking Records",
+            icon: Icons.event_available_rounded,
+            children: [
+              if (approvedList.isEmpty &&
+                  rejectedList.isEmpty &&
+                  pendingList.isEmpty)
+                emptyBox("No booking records."),
+              if (approvedList.isNotEmpty)
+                bookingList(
+                  label: "Approved",
+                  list: approvedList,
+                  color: Colors.green,
+                ),
+              if (rejectedList.isNotEmpty)
+                bookingList(
+                  label: "Rejected",
+                  list: rejectedList,
+                  color: Colors.red,
+                ),
+              if (pendingList.isNotEmpty)
+                bookingList(
+                  label: "Pending",
+                  list: pendingList,
+                  color: Colors.orange,
+                ),
+            ],
+          ),
         ],
       ),
     );
   }
 
-  // ================= SECTION TITLE =================
-
-  Widget sectionTitle(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Text(
-        title,
-        style: const TextStyle(
-          fontWeight: FontWeight.bold,
-          fontSize: 15,
-        ),
+  Widget buildCompactSection({
+    required String title,
+    required IconData icon,
+    required List<Widget> children,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _cardColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          sectionHeader(icon: icon, title: title),
+          const SizedBox(height: 12),
+          ...children,
+        ],
       ),
     );
   }
 
-  // ================= QUEUE WRAP =================
+  // ================= QUEUE LIST =================
 
-  Widget queueWrap({
+  Widget queueList({
     required String label,
     required List<Map<String, dynamic>> list,
+    required Color color,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            "$label:",
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 13,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
+          statusLabel(label, list.length, color),
+          const SizedBox(height: 8),
+          Column(
             children: list.map((customer) {
-              return Chip(
-                label: Text(
-                  "${customer['queue']} - ${customer['name'] ?? ''}",
-                ),
+              return compactRecordTile(
+                leading: customer["queue"] ?? "-",
+                title: customer["name"] ?? "-",
+                subtitle: customer["time"] == null
+                    ? customer["type"] ?? ""
+                    : "${customer["type"] ?? ""} • ${customer["time"]}",
+                color: color,
               );
             }).toList(),
           ),
@@ -991,33 +999,23 @@ class _DailyReportState extends State<DailyReport> {
   Widget bookingList({
     required String label,
     required List<Map<String, dynamic>> list,
+    required Color color,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            "$label:",
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 13,
-            ),
-          ),
-          const SizedBox(height: 6),
+          statusLabel(label, list.length, color),
+          const SizedBox(height: 8),
           Column(
             children: list.map((booking) {
-              return Container(
-                width: double.infinity,
-                margin: const EdgeInsets.only(bottom: 6),
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  "${booking['queue']} • ${booking['fullName']} • ${booking['vehicle']} • ${booking['plate']}",
-                ),
+              return compactRecordTile(
+                leading: booking["queue"] ?? "-",
+                title: booking["fullName"] ?? "-",
+                subtitle:
+                    "${booking["vehicle"] ?? "-"} • ${booking["plate"] ?? "-"}",
+                color: color,
               );
             }).toList(),
           ),
@@ -1026,18 +1024,171 @@ class _DailyReportState extends State<DailyReport> {
     );
   }
 
-  // ================= COMMON DECORATION =================
+  Widget compactRecordTile({
+    required String leading,
+    required String title,
+    required String subtitle,
+    required Color color,
+  }) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _softPrimaryColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _borderColor),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 58,
+            height: 42,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Text(
+              leading,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: color,
+                fontWeight: FontWeight.w900,
+                fontSize: 13,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _primaryColor,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _mutedTextColor,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget statusLabel(String label, int count, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        "$label: $count",
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.w900,
+          fontSize: 12,
+        ),
+      ),
+    );
+  }
+
+  // ================= COMMON WIDGETS =================
+
+  Widget cardContainer({required Widget child}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: cardDecoration(),
+      child: child,
+    );
+  }
 
   BoxDecoration cardDecoration() {
     return BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(20),
+      color: _cardColor,
+      borderRadius: BorderRadius.circular(22),
+      border: Border.all(color: _borderColor),
       boxShadow: [
-        BoxShadow(
-          color: Colors.black.withOpacity(0.08),
-          blurRadius: 10,
+        BoxShadow(color: _primaryColor.withOpacity(0.06), blurRadius: 14),
+      ],
+    );
+  }
+
+  Widget iconBox(IconData icon) {
+    return Container(
+      height: 42,
+      width: 42,
+      decoration: BoxDecoration(
+        color: _softPrimaryColor,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _borderColor),
+      ),
+      child: Icon(icon, color: _primaryColor, size: 23),
+    );
+  }
+
+  Widget sectionHeader({required IconData icon, required String title}) {
+    return Row(
+      children: [
+        Icon(icon, color: _primaryColor, size: 22),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            title,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: _primaryColor,
+              fontWeight: FontWeight.w900,
+              fontSize: 16,
+            ),
+          ),
         ),
       ],
+    );
+  }
+
+  Widget emptyBox(String message) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: _softPrimaryColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _borderColor),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.inbox_rounded, color: _primaryColor, size: 36),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: _mutedTextColor,
+              fontWeight: FontWeight.w700,
+              height: 1.3,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

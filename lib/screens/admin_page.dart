@@ -7,24 +7,36 @@ import 'admin_dashboard.dart';
 import 'home_page.dart';
 import 'admin_settings.dart';
 
+// ================= COLOR THEME =================
+
+const Color _backgroundColor = Color(0xFFF1FAFC);
+const Color _primaryColor = Color(0xFF071F35);
+const Color _cardColor = Colors.white;
+const Color _borderColor = Color(0xFFD8E8EE);
+const Color _mutedTextColor = Color(0xFF6E7E88);
+const Color _softPrimaryColor = Color(0xFFEAF4F8);
+
 // ================= GLOBAL VARIABLES =================
 
 ValueNotifier<Map<String, List<Map<String, dynamic>>>>
-    dailyServedReportNotifier = ValueNotifier({});
+dailyServedReportNotifier = ValueNotifier({});
 
 ValueNotifier<Map<String, List<Map<String, dynamic>>>>
-    dailyFailedReportNotifier = ValueNotifier({});
+dailyFailedReportNotifier = ValueNotifier({});
 
-ValueNotifier<Map<String, List<String>>> dailyHistoryNotifier =
-    ValueNotifier({});
+ValueNotifier<Map<String, List<String>>> dailyHistoryNotifier = ValueNotifier(
+  {},
+);
 
-ValueNotifier<List<Map<String, dynamic>>> waitingQueueNotifier =
-    ValueNotifier([]);
+ValueNotifier<List<Map<String, dynamic>>> waitingQueueNotifier = ValueNotifier(
+  [],
+);
 
 ValueNotifier<Map<String, dynamic>?> nowServingNotifier = ValueNotifier(null);
 
-ValueNotifier<String> selectedQueueDateNotifier =
-    ValueNotifier(formatDate(DateTime.now()));
+ValueNotifier<String> selectedQueueDateNotifier = ValueNotifier(
+  formatDate(DateTime.now()),
+);
 
 ValueNotifier<Map<String, List<String>>> issuedQueueCodesNotifier =
     ValueNotifier({});
@@ -91,6 +103,19 @@ class _AdminPageState extends State<AdminPage> {
       initialDate: DateTime.now(),
       firstDate: DateTime.now().subtract(const Duration(days: 1)),
       lastDate: DateTime(2030),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: _primaryColor,
+              onPrimary: Colors.white,
+              surface: _cardColor,
+              onSurface: _primaryColor,
+            ),
+          ),
+          child: child!,
+        );
+      },
     );
 
     if (picked != null) {
@@ -110,8 +135,7 @@ class _AdminPageState extends State<AdminPage> {
   bool isNowServingForSelectedDate() {
     if (nowServingNotifier.value == null) return false;
 
-    return nowServingNotifier.value!["date"] ==
-        selectedQueueDateNotifier.value;
+    return nowServingNotifier.value!["date"] == selectedQueueDateNotifier.value;
   }
 
   Map<String, dynamic>? getDisplayedNowServing() {
@@ -143,14 +167,14 @@ class _AdminPageState extends State<AdminPage> {
 
     bool alreadyIssued =
         issuedQueueCodesNotifier.value[selectedDate]?.contains(queueCode) ??
-            false;
+        false;
 
     bool inWaiting = waitingQueueNotifier.value.any((customer) {
-      return customer["date"] == selectedDate &&
-          customer["queue"] == queueCode;
+      return customer["date"] == selectedDate && customer["queue"] == queueCode;
     });
 
-    bool inNowServing = nowServingNotifier.value != null &&
+    bool inNowServing =
+        nowServingNotifier.value != null &&
         nowServingNotifier.value!["date"] == selectedDate &&
         nowServingNotifier.value!["queue"] == queueCode;
 
@@ -180,8 +204,9 @@ class _AdminPageState extends State<AdminPage> {
   }
 
   void markQueueCodeAsIssued(String date, String queueCode) {
-    final updatedIssued =
-        Map<String, List<String>>.from(issuedQueueCodesNotifier.value);
+    final updatedIssued = Map<String, List<String>>.from(
+      issuedQueueCodesNotifier.value,
+    );
 
     final issuedList = List<String>.from(updatedIssued[date] ?? []);
 
@@ -201,22 +226,62 @@ class _AdminPageState extends State<AdminPage> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
+        backgroundColor: _cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
         title: Text(
           text("Generate $type Queue", "Gumawa ng $type Queue"),
+          style: const TextStyle(
+            color: _primaryColor,
+            fontWeight: FontWeight.w800,
+          ),
         ),
         content: TextField(
           controller: nameController,
+          style: const TextStyle(
+            color: _primaryColor,
+            fontWeight: FontWeight.w600,
+          ),
           decoration: InputDecoration(
             labelText: text("Customer Name", "Pangalan ng Customer"),
-            border: const OutlineInputBorder(),
+            labelStyle: const TextStyle(color: _mutedTextColor),
+            prefixIcon: const Icon(
+              Icons.person_outline_rounded,
+              color: _primaryColor,
+            ),
+            filled: true,
+            fillColor: _backgroundColor,
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: const BorderSide(color: _borderColor),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(16),
+              borderSide: const BorderSide(color: _primaryColor, width: 1.5),
+            ),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
           ),
         ),
+        actionsPadding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
         actions: [
-          TextButton(
+          OutlinedButton(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: _primaryColor,
+              side: const BorderSide(color: _primaryColor),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
             onPressed: () => Navigator.pop(context),
             child: Text(text("Cancel", "Kanselahin")),
           ),
           ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _primaryColor,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
             onPressed: () {
               generateQueue(type, nameController.text.trim());
               Navigator.pop(context);
@@ -277,8 +342,9 @@ class _AdminPageState extends State<AdminPage> {
       return;
     }
 
-    final updatedQueue =
-        List<Map<String, dynamic>>.from(waitingQueueNotifier.value);
+    final updatedQueue = List<Map<String, dynamic>>.from(
+      waitingQueueNotifier.value,
+    );
 
     updatedQueue.add({
       "queue": queueNumber,
@@ -311,8 +377,9 @@ class _AdminPageState extends State<AdminPage> {
   // ================= CALL CUSTOMER =================
 
   void callCustomer(Map<String, dynamic> customer) async {
-    final updatedQueue =
-        List<Map<String, dynamic>>.from(waitingQueueNotifier.value);
+    final updatedQueue = List<Map<String, dynamic>>.from(
+      waitingQueueNotifier.value,
+    );
 
     updatedQueue.remove(customer);
 
@@ -356,20 +423,14 @@ class _AdminPageState extends State<AdminPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            text(
-              "No customer to skip",
-              "Walang customer na i-skip",
-            ),
+            text("No customer to skip", "Walang customer na i-skip"),
           ),
         ),
       );
       return;
     }
 
-    final skippedCustomer = {
-      ...customer,
-      "source": "Skipped / No Show",
-    };
+    final skippedCustomer = {...customer, "source": "Skipped / No Show"};
 
     waitingQueueNotifier.value = [
       ...waitingQueueNotifier.value,
@@ -413,13 +474,13 @@ class _AdminPageState extends State<AdminPage> {
 
     final String date = customer["date"] ?? selectedQueueDateNotifier.value;
 
-    final updatedServed =
-        Map<String, List<Map<String, dynamic>>>.from(
+    final updatedServed = Map<String, List<Map<String, dynamic>>>.from(
       dailyServedReportNotifier.value,
     );
 
-    final servedList =
-        List<Map<String, dynamic>>.from(updatedServed[date] ?? []);
+    final servedList = List<Map<String, dynamic>>.from(
+      updatedServed[date] ?? [],
+    );
 
     servedList.add({
       ...customer,
@@ -430,8 +491,9 @@ class _AdminPageState extends State<AdminPage> {
     updatedServed[date] = servedList;
     dailyServedReportNotifier.value = updatedServed;
 
-    final updatedOldHistory =
-        Map<String, List<String>>.from(dailyHistoryNotifier.value);
+    final updatedOldHistory = Map<String, List<String>>.from(
+      dailyHistoryNotifier.value,
+    );
 
     final oldList = List<String>.from(updatedOldHistory[date] ?? []);
 
@@ -479,13 +541,13 @@ class _AdminPageState extends State<AdminPage> {
 
     final String date = customer["date"] ?? selectedQueueDateNotifier.value;
 
-    final updatedFailed =
-        Map<String, List<Map<String, dynamic>>>.from(
+    final updatedFailed = Map<String, List<Map<String, dynamic>>>.from(
       dailyFailedReportNotifier.value,
     );
 
-    final failedList =
-        List<Map<String, dynamic>>.from(updatedFailed[date] ?? []);
+    final failedList = List<Map<String, dynamic>>.from(
+      updatedFailed[date] ?? [],
+    );
 
     failedList.add({
       ...customer,
@@ -515,8 +577,9 @@ class _AdminPageState extends State<AdminPage> {
   // ================= CANCEL QUEUE =================
 
   void cancelQueue(Map<String, dynamic> customer) {
-    final updatedQueue =
-        List<Map<String, dynamic>>.from(waitingQueueNotifier.value);
+    final updatedQueue = List<Map<String, dynamic>>.from(
+      waitingQueueNotifier.value,
+    );
 
     updatedQueue.remove(customer);
 
@@ -542,19 +605,43 @@ class _AdminPageState extends State<AdminPage> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text(text("Reset System", "I-reset ang System")),
+        backgroundColor: _cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        title: Text(
+          text("Reset System", "I-reset ang System"),
+          style: const TextStyle(
+            color: _primaryColor,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
         content: Text(
           text(
             "This will clear all queues and start a new day.",
             "Mabubura ang lahat ng queue at magsisimula ng bagong araw.",
           ),
+          style: const TextStyle(color: _mutedTextColor, height: 1.4),
         ),
+        actionsPadding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
         actions: [
-          TextButton(
+          OutlinedButton(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: _primaryColor,
+              side: const BorderSide(color: _primaryColor),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
             onPressed: () => Navigator.pop(context),
             child: Text(text("Cancel", "Kanselahin")),
           ),
           ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+            ),
             onPressed: () {
               waitingQueueNotifier.value = [];
               nowServingNotifier.value = null;
@@ -603,67 +690,104 @@ class _AdminPageState extends State<AdminPage> {
     List<Map<String, dynamic>> selectedDateQueue = getQueueForSelectedDate();
     Map<String, dynamic>? displayedNowServing = getDisplayedNowServing();
 
-    return Scaffold(
-      backgroundColor: const Color.fromARGB(255, 227, 242, 248),
-      drawer: buildDrawer(),
-      appBar: AppBar(
-        title: Text(text("Admin Control Panel", "Admin Control Panel")),
-        backgroundColor: Colors.white,
+    return Theme(
+      data: Theme.of(context).copyWith(
+        scaffoldBackgroundColor: _backgroundColor,
+        colorScheme: Theme.of(context).colorScheme.copyWith(
+          primary: _primaryColor,
+          onPrimary: Colors.white,
+          surface: _cardColor,
+          onSurface: _primaryColor,
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: _backgroundColor,
+          foregroundColor: _primaryColor,
+          elevation: 0,
+          centerTitle: false,
+          titleTextStyle: TextStyle(
+            color: _primaryColor,
+            fontSize: 20,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.4,
+          ),
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _primaryColor,
+            foregroundColor: Colors.white,
+            elevation: 2,
+            shadowColor: _primaryColor.withOpacity(0.16),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+            textStyle: const TextStyle(
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.4,
+            ),
+          ),
+        ),
       ),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final bool wide = isWideScreen(constraints.maxWidth);
-            final bool tablet = isTabletScreen(constraints.maxWidth);
+      child: Scaffold(
+        backgroundColor: _backgroundColor,
+        drawer: buildDrawer(),
+        appBar: AppBar(
+          title: Text(text("Admin Control Panel", "Admin Control Panel")),
+        ),
+        body: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final bool wide = isWideScreen(constraints.maxWidth);
+              final bool tablet = isTabletScreen(constraints.maxWidth);
 
-            return Padding(
-              padding: EdgeInsets.all(wide ? 20 : 12),
-              child: Column(
-                children: [
-                  buildDateSelector(),
-                  const SizedBox(height: 14),
-                  buildStatsSection(
-                    selectedDateQueue: selectedDateQueue,
-                    compact: !wide,
-                  ),
-                  const SizedBox(height: 18),
-                  Expanded(
-                    child: wide || tablet
-                        ? Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              SizedBox(
-                                width: wide ? 230 : 205,
-                                child: buildLeftPanel(),
-                              ),
-                              const SizedBox(width: 18),
-                              Expanded(
-                                child: buildRightPanel(
-                                  selectedDateQueue: selectedDateQueue,
-                                  displayedNowServing: displayedNowServing,
-                                  fixedListHeight: false,
-                                ),
-                              ),
-                            ],
-                          )
-                        : SingleChildScrollView(
-                            child: Column(
+              return Padding(
+                padding: EdgeInsets.all(wide ? 20 : 12),
+                child: Column(
+                  children: [
+                    buildDateSelector(),
+                    const SizedBox(height: 14),
+                    buildStatsSection(
+                      selectedDateQueue: selectedDateQueue,
+                      compact: !wide,
+                    ),
+                    const SizedBox(height: 18),
+                    Expanded(
+                      child: wide || tablet
+                          ? Row(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                buildLeftPanel(),
-                                const SizedBox(height: 16),
-                                buildRightPanel(
-                                  selectedDateQueue: selectedDateQueue,
-                                  displayedNowServing: displayedNowServing,
-                                  fixedListHeight: true,
+                                SizedBox(
+                                  width: wide ? 245 : 215,
+                                  child: buildLeftPanel(),
+                                ),
+                                const SizedBox(width: 18),
+                                Expanded(
+                                  child: buildRightPanel(
+                                    selectedDateQueue: selectedDateQueue,
+                                    displayedNowServing: displayedNowServing,
+                                    fixedListHeight: false,
+                                  ),
                                 ),
                               ],
+                            )
+                          : SingleChildScrollView(
+                              child: Column(
+                                children: [
+                                  buildLeftPanel(),
+                                  const SizedBox(height: 16),
+                                  buildRightPanel(
+                                    selectedDateQueue: selectedDateQueue,
+                                    displayedNowServing: displayedNowServing,
+                                    fixedListHeight: true,
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                  ),
-                ],
-              ),
-            );
-          },
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
         ),
       ),
     );
@@ -673,98 +797,123 @@ class _AdminPageState extends State<AdminPage> {
 
   Widget buildDrawer() {
     return Drawer(
+      backgroundColor: _backgroundColor,
       child: ListView(
         padding: EdgeInsets.zero,
         children: [
           DrawerHeader(
-            decoration: const BoxDecoration(
-              color: Colors.black,
-            ),
+            decoration: const BoxDecoration(color: _primaryColor),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                const Icon(
-                  Icons.admin_panel_settings,
-                  color: Colors.white,
-                  size: 50,
+                Container(
+                  height: 56,
+                  width: 56,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.14),
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: const Icon(
+                    Icons.admin_panel_settings_rounded,
+                    color: Colors.white,
+                    size: 34,
+                  ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 12),
                 Text(
                   text("Admin Panel", "Admin Panel"),
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 22,
-                    fontWeight: FontWeight.bold,
+                    fontWeight: FontWeight.w800,
                   ),
                 ),
               ],
             ),
           ),
-          ListTile(
-            leading: const Icon(Icons.queue),
-            title: Text(text("Queue Panel", "Queue Panel")),
+          drawerTile(
+            icon: Icons.queue_rounded,
+            title: text("Queue Panel", "Queue Panel"),
             onTap: () {
               Navigator.pop(context);
             },
           ),
-          ListTile(
-            leading: const Icon(Icons.dashboard),
-            title: Text(text("Booking Dashboard", "Booking Dashboard")),
+          drawerTile(
+            icon: Icons.dashboard_rounded,
+            title: text("Booking Dashboard", "Booking Dashboard"),
             onTap: () {
               Navigator.pop(context);
               Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => const AdminDashboard(),
-                ),
+                MaterialPageRoute(builder: (_) => const AdminDashboard()),
               ).then((_) {
                 setState(() {});
               });
             },
           ),
-          ListTile(
-            leading: const Icon(Icons.assessment),
-            title: Text(text("Daily Report", "Daily Report")),
+          drawerTile(
+            icon: Icons.assessment_rounded,
+            title: text("Daily Report", "Daily Report"),
             onTap: () {
               Navigator.pop(context);
               Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => const DailyReport(),
-                ),
+                MaterialPageRoute(builder: (_) => const DailyReport()),
               );
             },
           ),
-          ListTile(
-            leading: const Icon(Icons.settings),
-            title: Text(text("Settings", "Settings")),
+          drawerTile(
+            icon: Icons.settings_rounded,
+            title: text("Settings", "Settings"),
             onTap: () {
               Navigator.pop(context);
               Navigator.push(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => const AdminSettings(),
-                ),
+                MaterialPageRoute(builder: (_) => const AdminSettings()),
               ).then((_) {
                 setState(() {});
               });
             },
           ),
-          ListTile(
-            leading: const Icon(Icons.logout),
-            title: Text(text("Logout", "Logout")),
+          const Divider(color: _borderColor, height: 24),
+          drawerTile(
+            icon: Icons.logout_rounded,
+            title: text("Logout", "Logout"),
+            isLogout: true,
             onTap: () {
               Navigator.pushAndRemoveUntil(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => const HomePage(),
-                ),
+                MaterialPageRoute(builder: (_) => const HomePage()),
                 (route) => false,
               );
             },
           ),
         ],
+      ),
+    );
+  }
+
+  Widget drawerTile({
+    required IconData icon,
+    required String title,
+    required VoidCallback onTap,
+    bool isLogout = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      child: ListTile(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        tileColor: _cardColor,
+        leading: Icon(icon, color: isLogout ? Colors.red : _primaryColor),
+        title: Text(
+          title,
+          style: TextStyle(
+            color: isLogout ? Colors.red : _primaryColor,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        onTap: onTap,
       ),
     );
   }
@@ -775,8 +924,8 @@ class _AdminPageState extends State<AdminPage> {
     return cardContainer(
       child: Row(
         children: [
-          const Icon(Icons.calendar_month),
-          const SizedBox(width: 10),
+          iconBox(Icons.calendar_month_rounded),
+          const SizedBox(width: 12),
           Expanded(
             child: Text(
               text(
@@ -785,10 +934,13 @@ class _AdminPageState extends State<AdminPage> {
               ),
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                fontWeight: FontWeight.bold,
+                fontWeight: FontWeight.w800,
+                color: _primaryColor,
+                fontSize: 15,
               ),
             ),
           ),
+          const SizedBox(width: 10),
           ElevatedButton(
             onPressed: pickQueueDate,
             child: Text(text("Change Date", "Palitan")),
@@ -819,10 +971,7 @@ class _AdminPageState extends State<AdminPage> {
             selectedDateQueue.length.toString(),
           ),
           const SizedBox(width: 10),
-          statCard(
-            text("Completed", "Tapos Na"),
-            completedForDate,
-          ),
+          statCard(text("Completed", "Tapos Na"), completedForDate),
         ],
       );
     }
@@ -830,6 +979,7 @@ class _AdminPageState extends State<AdminPage> {
     return Wrap(
       spacing: 10,
       runSpacing: 10,
+      alignment: WrapAlignment.center,
       children: [
         statBox(
           text("Total Queue", "Kabuuang Queue"),
@@ -839,10 +989,7 @@ class _AdminPageState extends State<AdminPage> {
           text("Waiting Queue", "Naghihintay"),
           selectedDateQueue.length.toString(),
         ),
-        statBox(
-          text("Completed", "Tapos Na"),
-          completedForDate,
-        ),
+        statBox(text("Completed", "Tapos Na"), completedForDate),
       ],
     );
   }
@@ -856,64 +1003,75 @@ class _AdminPageState extends State<AdminPage> {
         cardContainer(
           child: Column(
             children: [
-              Text(
-                text("Generate Queue", "Gumawa ng Queue"),
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                ),
+              sectionHeader(
+                icon: Icons.confirmation_number_rounded,
+                title: text("Generate Queue", "Gumawa ng Queue"),
               ),
               const SizedBox(height: 15),
               SizedBox(
                 width: double.infinity,
-                child: ElevatedButton(
+                height: 48,
+                child: ElevatedButton.icon(
                   onPressed: () {
                     showGenerateDialog("Gas");
                   },
-                  child: const Text("GAS"),
+                  icon: const Icon(Icons.directions_car_rounded),
+                  label: const Text("GAS"),
                 ),
               ),
               const SizedBox(height: 10),
               SizedBox(
                 width: double.infinity,
-                child: ElevatedButton(
+                height: 48,
+                child: ElevatedButton.icon(
                   onPressed: () {
                     showGenerateDialog("Diesel");
                   },
-                  child: const Text("DIESEL"),
+                  icon: const Icon(Icons.local_shipping_rounded),
+                  label: const Text("DIESEL"),
                 ),
               ),
             ],
           ),
         ),
         const SizedBox(height: 16),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton.icon(
-            icon: const Icon(Icons.tv),
-            label: Text(text("DISPLAY PAGE", "DISPLAY PAGE")),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => const DisplayPage(),
+        cardContainer(
+          child: Column(
+            children: [
+              sectionHeader(
+                icon: Icons.tune_rounded,
+                title: text("Quick Actions", "Quick Actions"),
+              ),
+              const SizedBox(height: 15),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.tv_rounded),
+                  label: Text(text("DISPLAY PAGE", "DISPLAY PAGE")),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const DisplayPage()),
+                    );
+                  },
                 ),
-              );
-            },
-          ),
-        ),
-        const SizedBox(height: 10),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton.icon(
-            icon: const Icon(Icons.restart_alt),
-            label: Text(text("DAILY RESET", "DAILY RESET")),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-            ),
-            onPressed: resetDay,
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.restart_alt_rounded),
+                  label: Text(text("DAILY RESET", "DAILY RESET")),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: resetDay,
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -936,9 +1094,7 @@ class _AdminPageState extends State<AdminPage> {
                 height: 430,
                 child: buildWaitingQueueCard(selectedDateQueue),
               )
-            : Expanded(
-                child: buildWaitingQueueCard(selectedDateQueue),
-              ),
+            : Expanded(child: buildWaitingQueueCard(selectedDateQueue)),
       ],
     );
   }
@@ -949,35 +1105,49 @@ class _AdminPageState extends State<AdminPage> {
     return cardContainer(
       child: Column(
         children: [
-          Text(
-            text("NOW SERVING", "KASALUKUYANG TINATAWAG"),
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
-            ),
+          sectionHeader(
+            icon: Icons.campaign_rounded,
+            title: text("NOW SERVING", "KASALUKUYANG TINATAWAG"),
+            centered: true,
           ),
-          const SizedBox(height: 15),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              displayedNowServing == null
-                  ? "-"
-                  : displayedNowServing['queue'],
-              style: const TextStyle(
-                fontSize: 48,
-                fontWeight: FontWeight.bold,
-                color: Colors.red,
-              ),
+          const SizedBox(height: 16),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
+            decoration: BoxDecoration(
+              color: _softPrimaryColor,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: _borderColor),
             ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            displayedNowServing == null ? "" : displayedNowServing['name'],
-            textAlign: TextAlign.center,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontSize: 18,
+            child: Column(
+              children: [
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    displayedNowServing == null
+                        ? "-"
+                        : displayedNowServing['queue'],
+                    style: const TextStyle(
+                      fontSize: 54,
+                      fontWeight: FontWeight.w900,
+                      color: Colors.red,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  displayedNowServing == null
+                      ? text("No customer currently called", "Walang tinatawag")
+                      : displayedNowServing['name'],
+                  textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                    color: _primaryColor,
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 18),
@@ -986,26 +1156,10 @@ class _AdminPageState extends State<AdminPage> {
             spacing: 10,
             runSpacing: 10,
             children: [
-              miniButton(
-                Icons.volume_up,
-                Colors.blue,
-                callAgain,
-              ),
-              miniButton(
-                Icons.skip_next,
-                Colors.orange,
-                skipCustomer,
-              ),
-              miniButton(
-                Icons.check,
-                Colors.green,
-                markPassed,
-              ),
-              miniButton(
-                Icons.close,
-                Colors.red,
-                markFailed,
-              ),
+              miniButton(Icons.volume_up_rounded, Colors.blue, callAgain),
+              miniButton(Icons.skip_next_rounded, Colors.orange, skipCustomer),
+              miniButton(Icons.check_rounded, Colors.green, markPassed),
+              miniButton(Icons.close_rounded, Colors.red, markFailed),
             ],
           ),
         ],
@@ -1020,25 +1174,46 @@ class _AdminPageState extends State<AdminPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            text(
+          sectionHeader(
+            icon: Icons.groups_rounded,
+            title: text(
               "Waiting Queue - ${selectedQueueDateNotifier.value}",
               "Waiting Queue - ${selectedQueueDateNotifier.value}",
-            ),
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 16,
             ),
           ),
           const SizedBox(height: 15),
           Expanded(
             child: selectedDateQueue.isEmpty
                 ? Center(
-                    child: Text(
-                      text(
-                        "No queue for this date",
-                        "Walang queue sa petsang ito",
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(22),
+                      decoration: BoxDecoration(
+                        color: _softPrimaryColor,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: _borderColor),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.inbox_rounded,
+                            color: _primaryColor,
+                            size: 42,
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            text(
+                              "No queue for this date",
+                              "Walang queue sa petsang ito",
+                            ),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: _primaryColor,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   )
@@ -1049,10 +1224,11 @@ class _AdminPageState extends State<AdminPage> {
 
                       return Container(
                         margin: const EdgeInsets.only(bottom: 10),
-                        padding: const EdgeInsets.all(12),
+                        padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: Colors.grey.shade100,
-                          borderRadius: BorderRadius.circular(15),
+                          color: _softPrimaryColor,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(color: _borderColor),
                         ),
                         child: LayoutBuilder(
                           builder: (context, constraints) {
@@ -1063,11 +1239,11 @@ class _AdminPageState extends State<AdminPage> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   buildQueueInfo(customer),
-                                  const SizedBox(height: 10),
+                                  const SizedBox(height: 12),
                                   Row(
                                     children: [
                                       miniButton(
-                                        Icons.volume_up,
+                                        Icons.volume_up_rounded,
                                         Colors.blue,
                                         () {
                                           callCustomer(customer);
@@ -1075,7 +1251,7 @@ class _AdminPageState extends State<AdminPage> {
                                       ),
                                       const SizedBox(width: 8),
                                       miniButton(
-                                        Icons.close,
+                                        Icons.close_rounded,
                                         Colors.red,
                                         () {
                                           cancelQueue(customer);
@@ -1089,24 +1265,18 @@ class _AdminPageState extends State<AdminPage> {
 
                             return Row(
                               children: [
-                                Expanded(
-                                  child: buildQueueInfo(customer),
-                                ),
+                                Expanded(child: buildQueueInfo(customer)),
                                 miniButton(
-                                  Icons.volume_up,
+                                  Icons.volume_up_rounded,
                                   Colors.blue,
                                   () {
                                     callCustomer(customer);
                                   },
                                 ),
                                 const SizedBox(width: 8),
-                                miniButton(
-                                  Icons.close,
-                                  Colors.red,
-                                  () {
-                                    cancelQueue(customer);
-                                  },
-                                ),
+                                miniButton(Icons.close_rounded, Colors.red, () {
+                                  cancelQueue(customer);
+                                }),
                               ],
                             );
                           },
@@ -1121,27 +1291,70 @@ class _AdminPageState extends State<AdminPage> {
   }
 
   Widget buildQueueInfo(Map<String, dynamic> customer) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Row(
       children: [
-        Text(
-          customer['queue'],
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
+        Container(
+          height: 52,
+          width: 52,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: _primaryColor,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Text(
+            customer['queue']?.toString().substring(0, 1) ?? "-",
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
+            ),
           ),
         ),
-        Text(
-          customer['name'],
-          overflow: TextOverflow.ellipsis,
-        ),
-        Text(
-          customer['source'] ?? "",
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            fontSize: 12,
-            color: Colors.grey,
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                customer['queue'],
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                  color: _primaryColor,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                customer['name'],
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: _mutedTextColor,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: _cardColor,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: _borderColor),
+                ),
+                child: Text(
+                  customer['source'] ?? "",
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: _mutedTextColor,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -1150,119 +1363,150 @@ class _AdminPageState extends State<AdminPage> {
 
   // ================= CARD =================
 
-  Widget cardContainer({
-    required Widget child,
-  }) {
+  Widget cardContainer({required Widget child}) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.96),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: Colors.black.withOpacity(0.04),
-        ),
+        color: _cardColor,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _borderColor),
         boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 10,
-          ),
+          BoxShadow(color: _primaryColor.withOpacity(0.06), blurRadius: 14),
         ],
       ),
       child: child,
     );
   }
 
-  // ================= STAT CARD =================
-
-  Widget statCard(
-    String title,
-    String value,
-  ) {
-    return Expanded(
-      child: cardContainer(
-        child: Column(
-          children: [
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 10),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ],
-        ),
+  Widget iconBox(IconData icon) {
+    return Container(
+      height: 42,
+      width: 42,
+      decoration: BoxDecoration(
+        color: _softPrimaryColor,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _borderColor),
       ),
+      child: Icon(icon, color: _primaryColor, size: 23),
     );
   }
 
-  Widget statBox(
-    String title,
-    String value,
-  ) {
-    return SizedBox(
-      width: 160,
-      child: cardContainer(
-        child: Column(
-          children: [
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-              ),
+  Widget sectionHeader({
+    required IconData icon,
+    required String title,
+    bool centered = false,
+  }) {
+    return Row(
+      mainAxisAlignment: centered
+          ? MainAxisAlignment.center
+          : MainAxisAlignment.start,
+      children: [
+        Icon(icon, color: _primaryColor, size: 22),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            title,
+            textAlign: centered ? TextAlign.center : TextAlign.start,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontWeight: FontWeight.w900,
+              fontSize: 16,
+              color: _primaryColor,
             ),
-            const SizedBox(height: 10),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 26,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-          ],
+          ),
         ),
+      ],
+    );
+  }
+
+  // ================= STAT CARD =================
+
+  Widget statCard(String title, String value) {
+    return Expanded(child: statContent(title, value));
+  }
+
+  Widget statBox(String title, String value) {
+    return SizedBox(width: 160, child: statContent(title, value));
+  }
+
+  Widget statContent(String title, String value) {
+    IconData icon = Icons.confirmation_number_rounded;
+    Color accentColor = _primaryColor;
+
+    if (title.contains("Waiting") || title.contains("Naghihintay")) {
+      icon = Icons.groups_rounded;
+      accentColor = Colors.orange;
+    } else if (title.contains("Completed") || title.contains("Tapos")) {
+      icon = Icons.check_circle_outline_rounded;
+      accentColor = Colors.green;
+    }
+
+    return cardContainer(
+      child: Column(
+        children: [
+          Container(
+            height: 42,
+            width: 42,
+            decoration: BoxDecoration(
+              color: accentColor.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Icon(icon, color: accentColor, size: 24),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontWeight: FontWeight.w800,
+              color: _primaryColor,
+              fontSize: 13,
+            ),
+          ),
+          const SizedBox(height: 8),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.w900,
+                color: _primaryColor,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
   // ================= MINI BUTTON =================
 
-  Widget miniButton(
-    IconData icon,
-    Color color,
-    VoidCallback onPressed,
-  ) {
-    return SizedBox(
-      width: 40,
-      height: 40,
-      child: ElevatedButton(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: color,
-          foregroundColor: Colors.white,
-          padding: EdgeInsets.zero,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+  Widget miniButton(IconData icon, Color color, VoidCallback onPressed) {
+    return Tooltip(
+      message: icon == Icons.volume_up_rounded
+          ? text("Call", "Tawagin")
+          : icon == Icons.skip_next_rounded
+          ? text("Skip", "I-skip")
+          : icon == Icons.check_rounded
+          ? text("Passed", "Passed")
+          : text("Cancel / Failed", "Cancel / Failed"),
+      child: SizedBox(
+        width: 42,
+        height: 42,
+        child: ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: color,
+            foregroundColor: Colors.white,
+            padding: EdgeInsets.zero,
+            elevation: 2,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(13),
+            ),
           ),
-        ),
-        onPressed: onPressed,
-        child: Icon(
-          icon,
-          size: 18,
+          onPressed: onPressed,
+          child: Icon(icon, size: 19),
         ),
       ),
     );
