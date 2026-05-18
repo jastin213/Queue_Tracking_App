@@ -19,10 +19,10 @@ const Color _softPrimaryColor = Color(0xFFEAF4F8);
 // ================= GLOBAL VARIABLES =================
 
 ValueNotifier<Map<String, List<Map<String, dynamic>>>>
-dailyServedReportNotifier = ValueNotifier({});
+    dailyServedReportNotifier = ValueNotifier({});
 
 ValueNotifier<Map<String, List<Map<String, dynamic>>>>
-dailyFailedReportNotifier = ValueNotifier({});
+    dailyFailedReportNotifier = ValueNotifier({});
 
 ValueNotifier<Map<String, List<String>>> dailyHistoryNotifier = ValueNotifier(
   {},
@@ -167,7 +167,7 @@ class _AdminPageState extends State<AdminPage> {
 
     bool alreadyIssued =
         issuedQueueCodesNotifier.value[selectedDate]?.contains(queueCode) ??
-        false;
+            false;
 
     bool inWaiting = waitingQueueNotifier.value.any((customer) {
       return customer["date"] == selectedDate && customer["queue"] == queueCode;
@@ -738,52 +738,59 @@ class _AdminPageState extends State<AdminPage> {
             builder: (context, constraints) {
               final bool wide = isWideScreen(constraints.maxWidth);
               final bool tablet = isTabletScreen(constraints.maxWidth);
+              final double pagePadding = wide ? 20 : 12;
 
-              return Padding(
-                padding: EdgeInsets.all(wide ? 20 : 12),
-                child: Column(
-                  children: [
-                    buildDateSelector(),
-                    const SizedBox(height: 14),
-                    buildStatsSection(
-                      selectedDateQueue: selectedDateQueue,
-                      compact: !wide,
-                    ),
-                    const SizedBox(height: 18),
-                    Expanded(
-                      child: wide || tablet
-                          ? Row(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                SizedBox(
-                                  width: wide ? 245 : 215,
-                                  child: buildLeftPanel(),
-                                ),
-                                const SizedBox(width: 18),
-                                Expanded(
-                                  child: buildRightPanel(
-                                    selectedDateQueue: selectedDateQueue,
-                                    displayedNowServing: displayedNowServing,
-                                    fixedListHeight: false,
-                                  ),
-                                ),
-                              ],
-                            )
-                          : SingleChildScrollView(
-                              child: Column(
-                                children: [
-                                  buildLeftPanel(),
-                                  const SizedBox(height: 16),
-                                  buildRightPanel(
-                                    selectedDateQueue: selectedDateQueue,
-                                    displayedNowServing: displayedNowServing,
-                                    fixedListHeight: true,
-                                  ),
-                                ],
+              final double waitingListHeight = wide || tablet
+                  ? (constraints.maxHeight - 420).clamp(360.0, 720.0)
+                  : 430.0;
+
+              return SingleChildScrollView(
+                padding: EdgeInsets.all(pagePadding),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: constraints.maxHeight - (pagePadding * 2),
+                  ),
+                  child: Column(
+                    children: [
+                      buildDateSelector(),
+                      const SizedBox(height: 14),
+                      buildStatsSection(
+                        selectedDateQueue: selectedDateQueue,
+                        compact: !wide,
+                      ),
+                      const SizedBox(height: 18),
+                      if (wide || tablet)
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(
+                              width: wide ? 245 : 215,
+                              child: buildLeftPanel(),
+                            ),
+                            const SizedBox(width: 18),
+                            Expanded(
+                              child: buildRightPanel(
+                                selectedDateQueue: selectedDateQueue,
+                                displayedNowServing: displayedNowServing,
+                                waitingListHeight: waitingListHeight,
                               ),
                             ),
-                    ),
-                  ],
+                          ],
+                        )
+                      else
+                        Column(
+                          children: [
+                            buildLeftPanel(),
+                            const SizedBox(height: 16),
+                            buildRightPanel(
+                              selectedDateQueue: selectedDateQueue,
+                              displayedNowServing: displayedNowServing,
+                              waitingListHeight: waitingListHeight,
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
                 ),
               );
             },
@@ -1083,18 +1090,17 @@ class _AdminPageState extends State<AdminPage> {
   Widget buildRightPanel({
     required List<Map<String, dynamic>> selectedDateQueue,
     required Map<String, dynamic>? displayedNowServing,
-    required bool fixedListHeight,
+    required double waitingListHeight,
   }) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         buildNowServingCard(displayedNowServing),
         const SizedBox(height: 18),
-        fixedListHeight
-            ? SizedBox(
-                height: 430,
-                child: buildWaitingQueueCard(selectedDateQueue),
-              )
-            : Expanded(child: buildWaitingQueueCard(selectedDateQueue)),
+        SizedBox(
+          height: waitingListHeight,
+          child: buildWaitingQueueCard(selectedDateQueue),
+        ),
       ],
     );
   }
@@ -1398,9 +1404,8 @@ class _AdminPageState extends State<AdminPage> {
     bool centered = false,
   }) {
     return Row(
-      mainAxisAlignment: centered
-          ? MainAxisAlignment.center
-          : MainAxisAlignment.start,
+      mainAxisAlignment:
+          centered ? MainAxisAlignment.center : MainAxisAlignment.start,
       children: [
         Icon(icon, color: _primaryColor, size: 22),
         const SizedBox(width: 8),
@@ -1488,10 +1493,10 @@ class _AdminPageState extends State<AdminPage> {
       message: icon == Icons.volume_up_rounded
           ? text("Call", "Tawagin")
           : icon == Icons.skip_next_rounded
-          ? text("Skip", "I-skip")
-          : icon == Icons.check_rounded
-          ? text("Passed", "Passed")
-          : text("Cancel / Failed", "Cancel / Failed"),
+              ? text("Skip", "I-skip")
+              : icon == Icons.check_rounded
+                  ? text("Passed", "Passed")
+                  : text("Cancel / Failed", "Cancel / Failed"),
       child: SizedBox(
         width: 42,
         height: 42,

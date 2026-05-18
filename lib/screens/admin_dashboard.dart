@@ -1,4 +1,5 @@
-import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'book_appointment.dart';
 import 'admin_page.dart';
@@ -28,7 +29,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
     bool inIssued =
         issuedQueueCodesNotifier.value[bookingDate]?.contains(bookingQueue) ??
-        false;
+            false;
 
     bool inWaitingQueue = waitingQueueNotifier.value.any((customer) {
       return customer["queue"] == bookingQueue &&
@@ -73,9 +74,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       return false;
     }
 
-    pendingBookings.value = pendingBookings.value
-        .where((b) => b != booking)
-        .toList();
+    pendingBookings.value =
+        pendingBookings.value.where((b) => b != booking).toList();
 
     final approved = {...booking, "status": "Approved"};
 
@@ -93,7 +93,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
       },
     ];
 
-    // ✅ Mark approved booking queue as issued
     markQueueCodeAsIssuedForBooking(approved["date"], approved["queue"]);
 
     setState(() {});
@@ -110,9 +109,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
   // ================= REJECT BOOKING =================
 
   void rejectBooking(Map<String, dynamic> booking) {
-    pendingBookings.value = pendingBookings.value
-        .where((b) => b != booking)
-        .toList();
+    pendingBookings.value =
+        pendingBookings.value.where((b) => b != booking).toList();
 
     rejectedBookings.value = [
       ...rejectedBookings.value,
@@ -121,9 +119,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
     setState(() {});
 
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text("${booking['queue']} rejected")));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("${booking['queue']} rejected")),
+    );
   }
 
   // ================= SHOW DETAILS =================
@@ -147,7 +145,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   padding: const EdgeInsets.fromLTRB(18, 14, 10, 14),
                   decoration: const BoxDecoration(
                     color: _primaryColor,
-                    borderRadius: BorderRadius.vertical(),
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(22),
+                    ),
                   ),
                   child: Row(
                     children: [
@@ -220,18 +220,21 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
                         documentPreview(
                           title: "Valid ID",
-                          path: booking["idPath"],
                           fileName: booking["idFile"],
+                          bytes: booking["idBytes"],
+                          path: booking["idPath"],
                         ),
                         documentPreview(
                           title: "OR",
-                          path: booking["orPath"],
                           fileName: booking["orFile"],
+                          bytes: booking["orBytes"],
+                          path: booking["orPath"],
                         ),
                         documentPreview(
                           title: "CR",
-                          path: booking["crPath"],
                           fileName: booking["crFile"],
+                          bytes: booking["crBytes"],
+                          path: booking["crPath"],
                         ),
                       ],
                     ),
@@ -243,7 +246,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   decoration: const BoxDecoration(
                     color: _cardColor,
                     border: Border(top: BorderSide(color: _borderColor)),
-                    borderRadius: BorderRadius.vertical(),
+                    borderRadius: BorderRadius.vertical(
+                      bottom: Radius.circular(22),
+                    ),
                   ),
                   child: Row(
                     children: [
@@ -340,18 +345,26 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   // ================= DOCUMENT PREVIEW =================
 
+  bool isImageFile(String? fileName) {
+    if (fileName == null) return false;
+
+    final lower = fileName.toLowerCase();
+
+    return lower.endsWith(".jpg") ||
+        lower.endsWith(".jpeg") ||
+        lower.endsWith(".png");
+  }
+
   Widget documentPreview({
     required String title,
-    required String? path,
     required String? fileName,
+    required dynamic bytes,
+    required String? path,
   }) {
-    bool hasFile = path != null && path.isNotEmpty;
-
-    bool isImage =
-        hasFile &&
-        (path.toLowerCase().endsWith(".jpg") ||
-            path.toLowerCase().endsWith(".jpeg") ||
-            path.toLowerCase().endsWith(".png"));
+    final Uint8List? imageBytes = bytes is Uint8List ? bytes : null;
+    final bool hasFile =
+        (fileName != null && fileName.isNotEmpty) || imageBytes != null;
+    final bool canPreviewImage = imageBytes != null && isImageFile(fileName);
 
     return Container(
       width: double.infinity,
@@ -403,11 +416,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
               "No document uploaded.",
               style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600),
             )
-          else if (isImage)
+          else if (canPreviewImage)
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
-              child: Image.file(
-                File(path),
+              child: Image.memory(
+                imageBytes,
                 height: 180,
                 width: double.infinity,
                 fit: BoxFit.cover,
@@ -439,7 +452,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 border: Border.all(color: _borderColor),
               ),
               child: const Text(
-                "File attached. Preview is available only for images.",
+                "File attached. Preview is available only for JPG, JPEG, and PNG images.",
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: _mutedTextColor,
@@ -528,11 +541,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
       data: Theme.of(context).copyWith(
         scaffoldBackgroundColor: _backgroundColor,
         colorScheme: Theme.of(context).colorScheme.copyWith(
-          primary: _primaryColor,
-          onPrimary: Colors.white,
-          surface: _cardColor,
-          onSurface: _primaryColor,
-        ),
+              primary: _primaryColor,
+              onPrimary: Colors.white,
+              surface: _cardColor,
+              onSurface: _primaryColor,
+            ),
         appBarTheme: const AppBarTheme(
           backgroundColor: _backgroundColor,
           foregroundColor: _primaryColor,
@@ -594,18 +607,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         return infoCard("Pending", list.length.toString());
                       },
                     ),
-
                     const SizedBox(width: 10),
-
                     ValueListenableBuilder<List<Map<String, dynamic>>>(
                       valueListenable: approvedBookings,
                       builder: (_, list, __) {
                         return infoCard("Approved", list.length.toString());
                       },
                     ),
-
                     const SizedBox(width: 10),
-
                     ValueListenableBuilder<List<Map<String, dynamic>>>(
                       valueListenable: rejectedBookings,
                       builder: (_, list, __) {
@@ -659,7 +668,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         const SizedBox(height: 14),
 
                         Expanded(
-                          child: ValueListenableBuilder<List<Map<String, dynamic>>>(
+                          child:
+                              ValueListenableBuilder<List<Map<String, dynamic>>>(
                             valueListenable: pendingBookings,
                             builder: (context, bookings, _) {
                               if (bookings.isEmpty) {
@@ -716,9 +726,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                           alignment: Alignment.center,
                                           decoration: BoxDecoration(
                                             color: _primaryColor,
-                                            borderRadius: BorderRadius.circular(
-                                              16,
-                                            ),
+                                            borderRadius:
+                                                BorderRadius.circular(16),
                                           ),
                                           child: Text(
                                             booking['queue']
@@ -748,9 +757,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                                   color: _primaryColor,
                                                 ),
                                               ),
-
                                               const SizedBox(height: 5),
-
                                               Text(
                                                 "${booking['fullName']} • ${booking['municipality']}",
                                                 style: const TextStyle(
@@ -758,9 +765,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                                   fontWeight: FontWeight.w600,
                                                 ),
                                               ),
-
                                               const SizedBox(height: 3),
-
                                               Text(
                                                 "${booking['vehicle']} • ${booking['date']}",
                                                 style: const TextStyle(
@@ -768,15 +773,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                                   fontSize: 13,
                                                 ),
                                               ),
-
                                               const SizedBox(height: 6),
-
                                               Container(
                                                 padding:
                                                     const EdgeInsets.symmetric(
-                                                      horizontal: 10,
-                                                      vertical: 5,
-                                                    ),
+                                                  horizontal: 10,
+                                                  vertical: 5,
+                                                ),
                                                 decoration: BoxDecoration(
                                                   color: Colors.orange
                                                       .withOpacity(0.12),
@@ -788,7 +791,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                                   style: TextStyle(
                                                     color: Colors.orange,
                                                     fontSize: 12,
-                                                    fontWeight: FontWeight.w800,
+                                                    fontWeight:
+                                                        FontWeight.w800,
                                                   ),
                                                 ),
                                               ),

@@ -1,8 +1,13 @@
+import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
+
 import 'location_data.dart';
 import 'admin_page.dart';
+import 'customer_register.dart';
 
 // ================= COLOR THEME =================
 
@@ -50,11 +55,22 @@ class _BookAppointmentState extends State<BookAppointment> {
   String? orFilePath;
   String? crFilePath;
 
+  Uint8List? idFileBytes;
+  Uint8List? orFileBytes;
+  Uint8List? crFileBytes;
+
   static const int maxQueueLimit = 80;
+
+  String get loggedInCustomerName => loggedInCustomerNameNotifier.value.trim();
 
   @override
   void initState() {
     super.initState();
+
+    if (loggedInCustomerName.isNotEmpty) {
+      fullNameController.text = loggedInCustomerName;
+    }
+
     WidgetsBinding.instance.addPostFrameCallback((_) => showBookingPolicy());
   }
 
@@ -70,6 +86,10 @@ class _BookAppointmentState extends State<BookAppointment> {
     return "${selectedDate!.month}/${selectedDate!.day}/${selectedDate!.year}";
   }
 
+  String normalizeName(String value) {
+    return value.trim().replaceAll(RegExp(r'\s+'), ' ');
+  }
+
   void showBookingPolicy() {
     showDialog(
       context: context,
@@ -79,7 +99,10 @@ class _BookAppointmentState extends State<BookAppointment> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
         title: const Text(
           "Booking Policy",
-          style: TextStyle(fontWeight: FontWeight.bold, color: _primaryColor),
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: _primaryColor,
+          ),
         ),
         content: const SingleChildScrollView(
           child: Column(
@@ -141,6 +164,7 @@ class _BookAppointmentState extends State<BookAppointment> {
 
   List<String> getQueueCodes() {
     String prefix = selectedVehicle == "Gas" ? "G" : "D";
+
     return List.generate(maxQueueLimit, (index) {
       return "$prefix${(index + 1).toString().padLeft(3, '0')}";
     });
@@ -216,58 +240,111 @@ class _BookAppointmentState extends State<BookAppointment> {
     }
   }
 
-  Future<void> pickDocument(String type) async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(
-      allowMultiple: false,
-    );
+  // ================= DOCUMENT PICKING =================
 
-    if (result != null && result.files.single.path != null) {
+  Future<void> pickDocument(String type) async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        allowMultiple: false,
+        withData: true,
+        type: FileType.custom,
+        allowedExtensions: [
+          "jpg",
+          "jpeg",
+          "png",
+          "pdf",
+        ],
+      );
+
+      if (result == null) return;
+
+      final file = result.files.single;
+      final Uint8List? bytes = file.bytes;
+
+      if (bytes == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Unable to read selected file. Please try again."),
+          ),
+        );
+        return;
+      }
+
+      final String? safePath = kIsWeb ? null : file.path;
+
       setState(() {
         if (type == "ID") {
-          idFileName = result.files.single.name;
-          idFilePath = result.files.single.path!;
+          idFileName = file.name;
+          idFilePath = safePath;
+          idFileBytes = bytes;
         } else if (type == "OR") {
-          orFileName = result.files.single.name;
-          orFilePath = result.files.single.path!;
+          orFileName = file.name;
+          orFilePath = safePath;
+          orFileBytes = bytes;
         } else if (type == "CR") {
-          crFileName = result.files.single.name;
-          crFilePath = result.files.single.path!;
+          crFileName = file.name;
+          crFilePath = safePath;
+          crFileBytes = bytes;
         }
       });
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("File upload failed: $e")),
+      );
     }
   }
 
   Future<void> captureDocument(String type) async {
-    final photo = await picker.pickImage(
-      source: ImageSource.camera,
-      imageQuality: 80,
-    );
+    try {
+      final XFile? photo = await picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 80,
+      );
 
-    if (photo != null) {
+      if (photo == null) return;
+
+      final Uint8List bytes = await photo.readAsBytes();
+      final String? safePath = kIsWeb ? null : photo.path;
+
       setState(() {
         if (type == "ID") {
           idFileName = photo.name;
-          idFilePath = photo.path;
+          idFilePath = safePath;
+          idFileBytes = bytes;
         } else if (type == "OR") {
           orFileName = photo.name;
-          orFilePath = photo.path;
+          orFilePath = safePath;
+          orFileBytes = bytes;
         } else if (type == "CR") {
           crFileName = photo.name;
-          crFilePath = photo.path;
+          crFilePath = safePath;
+          crFileBytes = bytes;
         }
       });
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "Camera is unavailable or permission was denied. Please choose a file instead. $e",
+          ),
+        ),
+      );
     }
   }
 
   // ================= SUBMIT BOOKING =================
 
   void submitBooking() {
+    final String customerName = loggedInCustomerName.isNotEmpty
+        ? normalizeName(loggedInCustomerName)
+        : normalizeName(fullNameController.text);
+
     if (selectedDate == null ||
-        fullNameController.text.trim().isEmpty ||
+        customerName.isEmpty ||
         plateController.text.trim().isEmpty ||
-        idFilePath == null ||
-        orFilePath == null ||
-        crFilePath == null) {
+        idFileBytes == null ||
+        orFileBytes == null ||
+        crFileBytes == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Complete all fields and documents.")),
       );
@@ -293,16 +370,18 @@ class _BookAppointmentState extends State<BookAppointment> {
           ),
         ),
       );
+
       setState(() {
         selectedQueueCode = getFirstAvailableQueueCode();
       });
+
       return;
     }
 
     pendingBookings.value = [
       ...pendingBookings.value,
       {
-        "fullName": fullNameController.text.trim(),
+        "fullName": customerName,
         "municipality": selectedMunicipality,
         "plate": plateController.text.trim().toUpperCase(),
         "vehicle": selectedVehicle,
@@ -315,6 +394,9 @@ class _BookAppointmentState extends State<BookAppointment> {
         "idPath": idFilePath,
         "orPath": orFilePath,
         "crPath": crFilePath,
+        "idBytes": idFileBytes,
+        "orBytes": orFileBytes,
+        "crBytes": crFileBytes,
       },
     ];
 
@@ -435,6 +517,10 @@ class _BookAppointmentState extends State<BookAppointment> {
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
         borderSide: const BorderSide(color: _primaryColor, width: 1.5),
+      ),
+      disabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: _borderColor),
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
     );
@@ -602,15 +688,15 @@ class _BookAppointmentState extends State<BookAppointment> {
                   color: taken
                       ? const Color(0xFFE3E9EC)
                       : selected
-                      ? _primaryColor
-                      : _cardColor,
+                          ? _primaryColor
+                          : _cardColor,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: selected
                         ? _primaryColor
                         : taken
-                        ? const Color(0xFFD1DCE1)
-                        : _borderColor,
+                            ? const Color(0xFFD1DCE1)
+                            : _borderColor,
                     width: selected ? 1.5 : 1,
                   ),
                 ),
@@ -621,8 +707,8 @@ class _BookAppointmentState extends State<BookAppointment> {
                     color: selected
                         ? Colors.white
                         : taken
-                        ? _mutedTextColor
-                        : _primaryColor,
+                            ? _mutedTextColor
+                            : _primaryColor,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -722,7 +808,7 @@ class _BookAppointmentState extends State<BookAppointment> {
                 child: OutlinedButton.icon(
                   onPressed: onCamera,
                   icon: const Icon(Icons.camera_alt, size: 18),
-                  label: const Text("Take Photo"),
+                  label: Text(kIsWeb ? "Camera / Photo" : "Take Photo"),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: _primaryColor,
                     side: const BorderSide(color: _primaryColor),
@@ -749,11 +835,11 @@ class _BookAppointmentState extends State<BookAppointment> {
       data: Theme.of(context).copyWith(
         scaffoldBackgroundColor: _backgroundColor,
         colorScheme: Theme.of(context).colorScheme.copyWith(
-          primary: _primaryColor,
-          onPrimary: Colors.white,
-          surface: _cardColor,
-          onSurface: _primaryColor,
-        ),
+              primary: _primaryColor,
+              onPrimary: Colors.white,
+              surface: _cardColor,
+              onSurface: _primaryColor,
+            ),
         appBarTheme: const AppBarTheme(
           backgroundColor: _backgroundColor,
           foregroundColor: _primaryColor,
@@ -840,11 +926,13 @@ class _BookAppointmentState extends State<BookAppointment> {
                       );
                     }).toList(),
                     onChanged: (v) {
+                      if (v == null) return;
                       setState(() {
-                        selectedMunicipality = v!;
+                        selectedMunicipality = v;
                       });
                     },
                   ),
+
                   const SizedBox(height: 18),
 
                   fieldLabel("Vehicle Type"),
@@ -859,19 +947,21 @@ class _BookAppointmentState extends State<BookAppointment> {
                       DropdownMenuItem(value: "Diesel", child: Text("Diesel")),
                     ],
                     onChanged: (v) {
+                      if (v == null) return;
+
                       setState(() {
-                        selectedVehicle = v!;
+                        selectedVehicle = v;
 
                         if (selectedDate != null) {
                           selectedQueueCode = getFirstAvailableQueueCode();
                         } else {
-                          selectedQueueCode = selectedVehicle == "Gas"
-                              ? "G001"
-                              : "D001";
+                          selectedQueueCode =
+                              selectedVehicle == "Gas" ? "G001" : "D001";
                         }
                       });
                     },
                   ),
+
                   const SizedBox(height: 18),
 
                   fieldLabel("Available Queue Codes"),
@@ -887,7 +977,8 @@ class _BookAppointmentState extends State<BookAppointment> {
               sectionTitle(
                 number: "2",
                 title: "Customer Information",
-                subtitle: "Enter the customer name and vehicle plate number.",
+                subtitle:
+                    "The booking name is linked to the logged-in customer account.",
                 icon: Icons.person_outline,
               ),
               sectionCard(
@@ -895,9 +986,29 @@ class _BookAppointmentState extends State<BookAppointment> {
                   fieldLabel("Full Name"),
                   TextField(
                     controller: fullNameController,
+                    readOnly: loggedInCustomerName.isNotEmpty,
                     style: const TextStyle(color: _primaryColor),
-                    decoration: formDecoration("Enter full name"),
+                    decoration: formDecoration("Enter full name").copyWith(
+                      suffixIcon: loggedInCustomerName.isNotEmpty
+                          ? const Icon(
+                              Icons.lock_outline_rounded,
+                              color: _primaryColor,
+                            )
+                          : null,
+                    ),
                   ),
+                  if (loggedInCustomerName.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    const Text(
+                      "This name is locked to your logged-in account so your booking status will appear correctly.",
+                      style: TextStyle(
+                        color: _mutedTextColor,
+                        fontSize: 12.5,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+
                   const SizedBox(height: 18),
 
                   fieldLabel("Plate Number"),
