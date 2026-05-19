@@ -79,12 +79,16 @@ class _DailyReportState extends State<DailyReport> {
       "December",
     ];
 
+    if (month < 1 || month > 12) return key;
+
     return "${monthNames[month - 1]} $year";
   }
 
+  // FIXED:
+  // Before, this used DateTime.now().
+  // Now, Seasonal Detection follows the selected report date.
   String currentMonthKey() {
-    final now = DateTime.now();
-    return "${now.year}-${now.month.toString().padLeft(2, '0')}";
+    return monthKeyFromDate(selectedDate);
   }
 
   Future<void> pickReportDate() async {
@@ -194,7 +198,8 @@ class _DailyReportState extends State<DailyReport> {
       ensureMonth(key);
 
       monthly[key]!["approved"] = monthly[key]!["approved"]! + 1;
-      monthly[key]!["bookingActivity"] = monthly[key]!["bookingActivity"]! + 1;
+      monthly[key]!["bookingActivity"] =
+          monthly[key]!["bookingActivity"]! + 1;
     }
 
     for (var booking in rejectedBookings.value) {
@@ -204,7 +209,8 @@ class _DailyReportState extends State<DailyReport> {
       ensureMonth(key);
 
       monthly[key]!["rejected"] = monthly[key]!["rejected"]! + 1;
-      monthly[key]!["bookingActivity"] = monthly[key]!["bookingActivity"]! + 1;
+      monthly[key]!["bookingActivity"] =
+          monthly[key]!["bookingActivity"]! + 1;
     }
 
     for (var booking in pendingBookings.value) {
@@ -214,7 +220,8 @@ class _DailyReportState extends State<DailyReport> {
       ensureMonth(key);
 
       monthly[key]!["pending"] = monthly[key]!["pending"]! + 1;
-      monthly[key]!["bookingActivity"] = monthly[key]!["bookingActivity"]! + 1;
+      monthly[key]!["bookingActivity"] =
+          monthly[key]!["bookingActivity"]! + 1;
     }
 
     return monthly;
@@ -299,11 +306,11 @@ class _DailyReportState extends State<DailyReport> {
       data: Theme.of(context).copyWith(
         scaffoldBackgroundColor: _backgroundColor,
         colorScheme: Theme.of(context).colorScheme.copyWith(
-          primary: _primaryColor,
-          onPrimary: Colors.white,
-          surface: _cardColor,
-          onSurface: _primaryColor,
-        ),
+              primary: _primaryColor,
+              onPrimary: Colors.white,
+              surface: _cardColor,
+              onSurface: _primaryColor,
+            ),
         appBarTheme: const AppBarTheme(
           backgroundColor: _backgroundColor,
           foregroundColor: _primaryColor,
@@ -329,13 +336,9 @@ class _DailyReportState extends State<DailyReport> {
                 child: Column(
                   children: [
                     buildDateSelector(),
-
                     const SizedBox(height: 14),
-
                     buildSeasonalDetectionCard(wide),
-
                     const SizedBox(height: 14),
-
                     buildSummarySection(
                       wide: wide,
                       totalServed: totalServed,
@@ -345,9 +348,7 @@ class _DailyReportState extends State<DailyReport> {
                       rejected: rejectedList.length,
                       pending: pendingList.length,
                     ),
-
                     const SizedBox(height: 16),
-
                     buildReportDetails(
                       date: selectedDate,
                       totalServed: totalServed,
@@ -414,14 +415,17 @@ class _DailyReportState extends State<DailyReport> {
     final currentKey = currentMonthKey();
     final currentMonthTotal = monthly[currentKey]?["totalServed"] ?? 0;
     final average = getAverageMonthlyServed(monthly, currentKey);
+
     final peak = isSeasonalPeak(
       currentMonthTotal: currentMonthTotal,
       average: average,
     );
+
     final aboveAverage = percentageAboveAverage(
       currentMonthTotal: currentMonthTotal,
       average: average,
     );
+
     final peakMonth = getPeakMonth(monthly);
 
     String statusTitle;
@@ -435,8 +439,9 @@ class _DailyReportState extends State<DailyReport> {
       statusIcon = Icons.info_outline_rounded;
       statusColor = Colors.blue;
     } else if (peak) {
-      statusTitle = "Seasonal Peak";
-      statusMessage = "$aboveAverage% above average this month.";
+      statusTitle = "Seasonal Peak Detected";
+      statusMessage =
+          "${monthLabelFromKey(currentKey)} is $aboveAverage% above the usual monthly average.";
       statusIcon = Icons.warning_amber_rounded;
       statusColor = Colors.orange;
     } else {
@@ -454,9 +459,7 @@ class _DailyReportState extends State<DailyReport> {
             icon: Icons.trending_up_rounded,
             title: "Seasonal Detection",
           ),
-
           const SizedBox(height: 14),
-
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(14),
@@ -496,9 +499,7 @@ class _DailyReportState extends State<DailyReport> {
               ],
             ),
           ),
-
           const SizedBox(height: 14),
-
           if (wide)
             Row(
               children: [
@@ -551,13 +552,9 @@ class _DailyReportState extends State<DailyReport> {
                 ),
               ],
             ),
-
           const SizedBox(height: 16),
-
           sectionHeader(icon: Icons.bar_chart_rounded, title: "Monthly Trend"),
-
           const SizedBox(height: 12),
-
           monthly.isEmpty
               ? emptyBox("No monthly trend data yet.")
               : buildMonthlyTrend(monthly),
@@ -774,9 +771,11 @@ class _DailyReportState extends State<DailyReport> {
     if (wide) {
       return Row(
         children: cards.map((card) {
+          final isLast = cards.last == card;
+
           return Expanded(
             child: Padding(
-              padding: const EdgeInsets.only(right: 10),
+              padding: EdgeInsets.only(right: isLast ? 0 : 10),
               child: card,
             ),
           );
@@ -864,9 +863,7 @@ class _DailyReportState extends State<DailyReport> {
             icon: Icons.receipt_long_rounded,
             title: "Report Details",
           ),
-
           const SizedBox(height: 12),
-
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(14),
@@ -876,73 +873,65 @@ class _DailyReportState extends State<DailyReport> {
               border: Border.all(color: _borderColor),
             ),
             child: Text(
-              "$date  •  $totalServed served",
+              "Summary for $date: $totalServed served, ${passedList.length} passed, ${failedList.length} failed, ${approvedList.length} approved booking(s), ${rejectedList.length} rejected booking(s), and ${pendingList.length} pending booking(s).",
               style: const TextStyle(
                 color: _primaryColor,
-                fontWeight: FontWeight.w900,
-                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                height: 1.4,
               ),
             ),
           ),
-
-          const SizedBox(height: 14),
-
-          buildCompactSection(
-            title: "Served Queue",
-            icon: Icons.confirmation_number_rounded,
-            children: [
-              if (passedList.isEmpty && failedList.isEmpty)
-                emptyBox("No served queue records."),
-              if (passedList.isNotEmpty)
-                queueList(
-                  label: "Passed",
-                  list: passedList,
-                  color: Colors.green,
-                ),
-              if (failedList.isNotEmpty)
-                queueList(label: "Failed", list: failedList, color: Colors.red),
-            ],
+          const SizedBox(height: 16),
+          reportListSection(
+            title: "Passed Customers",
+            icon: Icons.check_circle_outline_rounded,
+            color: Colors.green,
+            records: passedList,
+            emptyText: "No passed customers for this date.",
           ),
-
-          const SizedBox(height: 12),
-
-          buildCompactSection(
-            title: "Booking Records",
-            icon: Icons.event_available_rounded,
-            children: [
-              if (approvedList.isEmpty &&
-                  rejectedList.isEmpty &&
-                  pendingList.isEmpty)
-                emptyBox("No booking records."),
-              if (approvedList.isNotEmpty)
-                bookingList(
-                  label: "Approved",
-                  list: approvedList,
-                  color: Colors.green,
-                ),
-              if (rejectedList.isNotEmpty)
-                bookingList(
-                  label: "Rejected",
-                  list: rejectedList,
-                  color: Colors.red,
-                ),
-              if (pendingList.isNotEmpty)
-                bookingList(
-                  label: "Pending",
-                  list: pendingList,
-                  color: Colors.orange,
-                ),
-            ],
+          const SizedBox(height: 14),
+          reportListSection(
+            title: "Failed Customers",
+            icon: Icons.cancel_outlined,
+            color: Colors.red,
+            records: failedList,
+            emptyText: "No failed customers for this date.",
+          ),
+          const SizedBox(height: 14),
+          reportListSection(
+            title: "Approved Bookings",
+            icon: Icons.verified_outlined,
+            color: Colors.green,
+            records: approvedList,
+            emptyText: "No approved bookings for this date.",
+          ),
+          const SizedBox(height: 14),
+          reportListSection(
+            title: "Rejected Bookings",
+            icon: Icons.block_rounded,
+            color: Colors.red,
+            records: rejectedList,
+            emptyText: "No rejected bookings for this date.",
+          ),
+          const SizedBox(height: 14),
+          reportListSection(
+            title: "Pending Bookings",
+            icon: Icons.pending_actions_rounded,
+            color: Colors.orange,
+            records: pendingList,
+            emptyText: "No pending bookings for this date.",
           ),
         ],
       ),
     );
   }
 
-  Widget buildCompactSection({
+  Widget reportListSection({
     required String title,
     required IconData icon,
-    required List<Widget> children,
+    required Color color,
+    required List<Map<String, dynamic>> records,
+    required String emptyText,
   }) {
     return Container(
       width: double.infinity,
@@ -955,85 +944,71 @@ class _DailyReportState extends State<DailyReport> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          sectionHeader(icon: icon, title: title),
+          Row(
+            children: [
+              Icon(icon, color: color, size: 22),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    color: _primaryColor,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  "${records.length}",
+                  style: TextStyle(
+                    color: color,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 12),
-          ...children,
+          if (records.isEmpty)
+            emptyBox(emptyText)
+          else
+            Column(
+              children: records.map((record) {
+                return reportRecordTile(record);
+              }).toList(),
+            ),
         ],
       ),
     );
   }
 
-  // ================= QUEUE LIST =================
+  Widget reportRecordTile(Map<String, dynamic> record) {
+    final queue = record["queue"]?.toString() ?? "-";
+    final name = record["name"]?.toString() ??
+        record["fullName"]?.toString() ??
+        record["plate"]?.toString() ??
+        "-";
+    final vehicle = record["type"]?.toString() ??
+        record["vehicle"]?.toString() ??
+        "-";
+    final source = record["source"]?.toString() ??
+        record["status"]?.toString() ??
+        "-";
+    final time = record["time"]?.toString();
 
-  Widget queueList({
-    required String label,
-    required List<Map<String, dynamic>> list,
-    required Color color,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          statusLabel(label, list.length, color),
-          const SizedBox(height: 8),
-          Column(
-            children: list.map((customer) {
-              return compactRecordTile(
-                leading: customer["queue"] ?? "-",
-                title: customer["name"] ?? "-",
-                subtitle: customer["time"] == null
-                    ? customer["type"] ?? ""
-                    : "${customer["type"] ?? ""} • ${customer["time"]}",
-                color: color,
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ================= BOOKING LIST =================
-
-  Widget bookingList({
-    required String label,
-    required List<Map<String, dynamic>> list,
-    required Color color,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          statusLabel(label, list.length, color),
-          const SizedBox(height: 8),
-          Column(
-            children: list.map((booking) {
-              return compactRecordTile(
-                leading: booking["queue"] ?? "-",
-                title: booking["fullName"] ?? "-",
-                subtitle:
-                    "${booking["vehicle"] ?? "-"} • ${booking["plate"] ?? "-"}",
-                color: color,
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget compactRecordTile({
-    required String leading,
-    required String title,
-    required String subtitle,
-    required Color color,
-  }) {
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(13),
       decoration: BoxDecoration(
         color: _softPrimaryColor,
         borderRadius: BorderRadius.circular(16),
@@ -1042,21 +1017,19 @@ class _DailyReportState extends State<DailyReport> {
       child: Row(
         children: [
           Container(
-            width: 58,
-            height: 42,
+            height: 46,
+            width: 46,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: color.withOpacity(0.12),
+              color: _primaryColor,
               borderRadius: BorderRadius.circular(14),
             ),
             child: Text(
-              leading,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: color,
+              queue.isNotEmpty ? queue.substring(0, 1) : "-",
+              style: const TextStyle(
+                color: Colors.white,
                 fontWeight: FontWeight.w900,
-                fontSize: 13,
+                fontSize: 18,
               ),
             ),
           ),
@@ -1066,17 +1039,17 @@ class _DailyReportState extends State<DailyReport> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  title,
+                  "$queue - $name",
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: _primaryColor,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 14.5,
                   ),
                 ),
-                const SizedBox(height: 3),
+                const SizedBox(height: 4),
                 Text(
-                  subtitle,
+                  "$vehicle • $source${time == null ? "" : " • $time"}",
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     color: _mutedTextColor,
@@ -1092,25 +1065,7 @@ class _DailyReportState extends State<DailyReport> {
     );
   }
 
-  Widget statusLabel(String label, int count, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        "$label: $count",
-        style: TextStyle(
-          color: color,
-          fontWeight: FontWeight.w900,
-          fontSize: 12,
-        ),
-      ),
-    );
-  }
-
-  // ================= COMMON WIDGETS =================
+  // ================= REUSABLE UI =================
 
   Widget cardContainer({required Widget child}) {
     return Container(
@@ -1127,7 +1082,10 @@ class _DailyReportState extends State<DailyReport> {
       borderRadius: BorderRadius.circular(22),
       border: Border.all(color: _borderColor),
       boxShadow: [
-        BoxShadow(color: _primaryColor.withOpacity(0.06), blurRadius: 14),
+        BoxShadow(
+          color: _primaryColor.withOpacity(0.06),
+          blurRadius: 14,
+        ),
       ],
     );
   }
@@ -1145,7 +1103,10 @@ class _DailyReportState extends State<DailyReport> {
     );
   }
 
-  Widget sectionHeader({required IconData icon, required String title}) {
+  Widget sectionHeader({
+    required IconData icon,
+    required String title,
+  }) {
     return Row(
       children: [
         Icon(icon, color: _primaryColor, size: 22),
@@ -1156,8 +1117,8 @@ class _DailyReportState extends State<DailyReport> {
             overflow: TextOverflow.ellipsis,
             style: const TextStyle(
               color: _primaryColor,
-              fontWeight: FontWeight.w900,
               fontSize: 16,
+              fontWeight: FontWeight.w900,
             ),
           ),
         ),
@@ -1168,26 +1129,20 @@ class _DailyReportState extends State<DailyReport> {
   Widget emptyBox(String message) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: _softPrimaryColor,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: _borderColor),
       ),
-      child: Column(
-        children: [
-          const Icon(Icons.inbox_rounded, color: _primaryColor, size: 36),
-          const SizedBox(height: 8),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: _mutedTextColor,
-              fontWeight: FontWeight.w700,
-              height: 1.3,
-            ),
-          ),
-        ],
+      child: Text(
+        message,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: _mutedTextColor,
+          fontWeight: FontWeight.w600,
+          height: 1.3,
+        ),
       ),
     );
   }
