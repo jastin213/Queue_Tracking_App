@@ -98,7 +98,7 @@ class _BookAppointmentState extends State<BookAppointment> {
         backgroundColor: _cardColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
         title: const Text(
-          "Booking Policy",
+          "Appointment Policy",
           style: TextStyle(
             fontWeight: FontWeight.bold,
             color: _primaryColor,
@@ -109,7 +109,7 @@ class _BookAppointmentState extends State<BookAppointment> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                "Before booking, please confirm the following:",
+                "Before booking an appointment, please confirm the following:",
                 style: TextStyle(color: _mutedTextColor),
               ),
               SizedBox(height: 14),
@@ -1000,7 +1000,7 @@ class _BookAppointmentState extends State<BookAppointment> {
                   if (loggedInCustomerName.isNotEmpty) ...[
                     const SizedBox(height: 8),
                     const Text(
-                      "This name is locked to your logged-in account so your booking status will appear correctly.",
+                      "This name is locked to your logged-in account so your appointment status will appear correctly.",
                       style: TextStyle(
                         color: _mutedTextColor,
                         fontSize: 12.5,

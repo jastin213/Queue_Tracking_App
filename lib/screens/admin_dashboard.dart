@@ -153,7 +153,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     children: [
                       Expanded(
                         child: Text(
-                          "Booking Details - ${booking['queue']}",
+                          "Appointment Details - ${booking['queue']}",
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 18,
@@ -560,7 +560,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         ),
       ),
       child: Scaffold(
-        appBar: AppBar(title: const Text("Admin Booking Dashboard")),
+        appBar: AppBar(title: const Text("Admin Appointment Dashboard")),
         body: SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
@@ -585,7 +585,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          "Booking Overview",
+                          "Appointment Overview",
                           style: TextStyle(
                             color: _primaryColor,
                             fontSize: 16,
@@ -692,7 +692,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                         ),
                                         SizedBox(height: 10),
                                         Text(
-                                          "No pending bookings",
+                                          "No pending Appointments",
                                           style: TextStyle(
                                             color: _primaryColor,
                                             fontWeight: FontWeight.w800,

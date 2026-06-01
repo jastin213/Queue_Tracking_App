@@ -81,7 +81,7 @@ class BookingStatusPage extends StatelessWidget {
       ),
       child: Scaffold(
         appBar: AppBar(
-          title: const Text("My Booking Status"),
+          title: const Text("My Appointment Status"),
         ),
         body: SafeArea(
           child: ValueListenableBuilder<String>(
@@ -206,7 +206,7 @@ class BookingStatusPage extends StatelessWidget {
           ),
           SizedBox(height: 12),
           Text(
-            "No booking found",
+            "No Appointment found",
             textAlign: TextAlign.center,
             style: TextStyle(
               color: _primaryColor,
@@ -216,7 +216,7 @@ class BookingStatusPage extends StatelessWidget {
           ),
           SizedBox(height: 8),
           Text(
-            "After you book an appointment, your booking status will appear here as Pending, Approved, or Rejected.",
+            "After you book an appointment, your appointment status will appear here as Pending, Approved, or Rejected.",
             textAlign: TextAlign.center,
             style: TextStyle(
               color: _mutedTextColor,
@@ -322,7 +322,7 @@ class BookingStatusPage extends StatelessWidget {
                 ),
               ),
               child: const Text(
-                "Your booking is approved. Use your queue code when tracking your queue.",
+                "Your Appointment is approved. Use your queue code when tracking your queue.",
                 style: TextStyle(
                   color: Colors.green,
                   fontWeight: FontWeight.w800,

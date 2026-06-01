@@ -1,4 +1,10 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+
 import 'admin_page.dart';
 import 'book_appointment.dart';
 
@@ -84,11 +90,12 @@ class _DailyReportState extends State<DailyReport> {
     return "${monthNames[month - 1]} $year";
   }
 
-  // FIXED:
-  // Before, this used DateTime.now().
-  // Now, Seasonal Detection follows the selected report date.
   String currentMonthKey() {
     return monthKeyFromDate(selectedDate);
+  }
+
+  String safeFileDate(String date) {
+    return date.replaceAll("/", "-");
   }
 
   Future<void> pickReportDate() async {
@@ -153,6 +160,54 @@ class _DailyReportState extends State<DailyReport> {
         getApprovedByDate(date).isNotEmpty ||
         getRejectedByDate(date).isNotEmpty ||
         getPendingByDate(date).isNotEmpty;
+  }
+
+  List<Map<String, dynamic>> getPassedByMonth(String monthKey) {
+    final List<Map<String, dynamic>> records = [];
+
+    dailyServedReportNotifier.value.forEach((date, list) {
+      if (monthKeyFromDate(date) == monthKey) {
+        records.addAll(list);
+      }
+    });
+
+    return records;
+  }
+
+  List<Map<String, dynamic>> getFailedByMonth(String monthKey) {
+    final List<Map<String, dynamic>> records = [];
+
+    dailyFailedReportNotifier.value.forEach((date, list) {
+      if (monthKeyFromDate(date) == monthKey) {
+        records.addAll(list);
+      }
+    });
+
+    return records;
+  }
+
+  List<Map<String, dynamic>> getApprovedByMonth(String monthKey) {
+    return approvedBookings.value.where((booking) {
+      final date = booking["date"]?.toString();
+      if (date == null) return false;
+      return monthKeyFromDate(date) == monthKey;
+    }).toList();
+  }
+
+  List<Map<String, dynamic>> getRejectedByMonth(String monthKey) {
+    return rejectedBookings.value.where((booking) {
+      final date = booking["date"]?.toString();
+      if (date == null) return false;
+      return monthKeyFromDate(date) == monthKey;
+    }).toList();
+  }
+
+  List<Map<String, dynamic>> getPendingByMonth(String monthKey) {
+    return pendingBookings.value.where((booking) {
+      final date = booking["date"]?.toString();
+      if (date == null) return false;
+      return monthKeyFromDate(date) == monthKey;
+    }).toList();
   }
 
   // ================= SEASONAL DETECTION =================
@@ -290,6 +345,380 @@ class _DailyReportState extends State<DailyReport> {
     return percent.round();
   }
 
+  String seasonalStatusText() {
+    final monthly = getMonthlySummary();
+    final currentKey = currentMonthKey();
+    final currentMonthTotal = monthly[currentKey]?["totalServed"] ?? 0;
+    final average = getAverageMonthlyServed(monthly, currentKey);
+    final peak = isSeasonalPeak(
+      currentMonthTotal: currentMonthTotal,
+      average: average,
+    );
+
+    if (monthly.length < 2 || average == 0) {
+      return "Not Enough Data";
+    }
+
+    if (peak) {
+      final aboveAverage = percentageAboveAverage(
+        currentMonthTotal: currentMonthTotal,
+        average: average,
+      );
+
+      return "Seasonal Peak Detected ($aboveAverage% above average)";
+    }
+
+    return "Normal Volume";
+  }
+
+  // ================= PDF HELPERS =================
+
+  pw.TextStyle pdfTitleStyle() {
+    return pw.TextStyle(
+      fontSize: 18,
+      fontWeight: pw.FontWeight.bold,
+      color: PdfColors.blueGrey900,
+    );
+  }
+
+  pw.TextStyle pdfHeaderStyle() {
+    return pw.TextStyle(
+      fontSize: 13,
+      fontWeight: pw.FontWeight.bold,
+      color: PdfColors.blueGrey900,
+    );
+  }
+
+  pw.TextStyle pdfNormalStyle() {
+    return const pw.TextStyle(
+      fontSize: 10,
+      color: PdfColors.blueGrey800,
+    );
+  }
+
+  pw.Widget pdfSummaryBox(String title, String value) {
+    return pw.Container(
+      padding: const pw.EdgeInsets.all(8),
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(color: PdfColors.blueGrey200),
+        borderRadius: pw.BorderRadius.circular(6),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(title, style: pdfNormalStyle()),
+          pw.SizedBox(height: 4),
+          pw.Text(
+            value,
+            style: pw.TextStyle(
+              fontSize: 15,
+              fontWeight: pw.FontWeight.bold,
+              color: PdfColors.blueGrey900,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String recordQueue(Map<String, dynamic> record) {
+    return record["queue"]?.toString() ?? "-";
+  }
+
+  String recordName(Map<String, dynamic> record) {
+    return record["name"]?.toString() ??
+        record["fullName"]?.toString() ??
+        record["plate"]?.toString() ??
+        "-";
+  }
+
+  String recordVehicle(Map<String, dynamic> record) {
+    return record["type"]?.toString() ?? record["vehicle"]?.toString() ?? "-";
+  }
+
+  String recordSource(Map<String, dynamic> record) {
+    return record["source"]?.toString() ??
+        record["status"]?.toString() ??
+        record["result"]?.toString() ??
+        "-";
+  }
+
+  String recordDate(Map<String, dynamic> record) {
+    return record["date"]?.toString() ?? selectedDate;
+  }
+
+  String recordTime(Map<String, dynamic> record) {
+    return record["time"]?.toString() ?? "-";
+  }
+
+  pw.Widget pdfRecordsTable({
+    required String title,
+    required List<Map<String, dynamic>> records,
+  }) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        pw.Text(title, style: pdfHeaderStyle()),
+        pw.SizedBox(height: 6),
+        if (records.isEmpty)
+          pw.Container(
+            width: double.infinity,
+            padding: const pw.EdgeInsets.all(8),
+            decoration: pw.BoxDecoration(
+              border: pw.Border.all(color: PdfColors.blueGrey200),
+              borderRadius: pw.BorderRadius.circular(6),
+            ),
+            child: pw.Text("No records.", style: pdfNormalStyle()),
+          )
+        else
+          pw.Table.fromTextArray(
+            headers: const [
+              "Queue",
+              "Name / Plate",
+              "Vehicle",
+              "Source / Status",
+              "Date",
+              "Time",
+            ],
+            data: records.map((record) {
+              return [
+                recordQueue(record),
+                recordName(record),
+                recordVehicle(record),
+                recordSource(record),
+                recordDate(record),
+                recordTime(record),
+              ];
+            }).toList(),
+            border: pw.TableBorder.all(color: PdfColors.blueGrey100),
+            headerStyle: pw.TextStyle(
+              fontSize: 9,
+              fontWeight: pw.FontWeight.bold,
+              color: PdfColors.white,
+            ),
+            headerDecoration: const pw.BoxDecoration(
+              color: PdfColors.blueGrey800,
+            ),
+            cellStyle: const pw.TextStyle(fontSize: 8),
+            cellAlignment: pw.Alignment.centerLeft,
+            cellPadding: const pw.EdgeInsets.all(5),
+          ),
+        pw.SizedBox(height: 12),
+      ],
+    );
+  }
+
+  Future<Uint8List> buildDailyPdfBytes() async {
+    final passedList = getPassedByDate(selectedDate);
+    final failedList = getFailedByDate(selectedDate);
+    final totalServed = passedList.length + failedList.length;
+
+    final pdf = pw.Document();
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(28),
+        build: (context) {
+          return [
+            pw.Text(
+              "NPJN Emission Center",
+              style: pdfTitleStyle(),
+            ),
+            pw.SizedBox(height: 4),
+            pw.Text(
+              "Daily Report",
+              style: pw.TextStyle(
+                fontSize: 14,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 6),
+            pw.Text("Report Date: $selectedDate", style: pdfNormalStyle()),
+            pw.Text(
+              "Generated: ${DateTime.now()}",
+              style: pdfNormalStyle(),
+            ),
+            pw.SizedBox(height: 16),
+            pw.Text("Summary", style: pdfHeaderStyle()),
+            pw.SizedBox(height: 8),
+            pw.Row(
+              children: [
+                pw.Expanded(
+                  child: pdfSummaryBox("Served", totalServed.toString()),
+                ),
+                pw.SizedBox(width: 8),
+                pw.Expanded(
+                  child: pdfSummaryBox("Passed", passedList.length.toString()),
+                ),
+                pw.SizedBox(width: 8),
+                pw.Expanded(
+                  child: pdfSummaryBox("Failed", failedList.length.toString()),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 18),
+            pdfRecordsTable(
+              title: "Passed Customers",
+              records: passedList,
+            ),
+            pdfRecordsTable(
+              title: "Failed Customers",
+              records: failedList,
+            ),
+          ];
+        },
+      ),
+    );
+
+    return pdf.save();
+  }
+
+  Future<Uint8List> buildMonthlyPdfBytes() async {
+    final monthKey = currentMonthKey();
+    final monthLabel = monthLabelFromKey(monthKey);
+
+    final monthly = getMonthlySummary();
+    final currentMonthTotal = monthly[monthKey]?["totalServed"] ?? 0;
+    final average = getAverageMonthlyServed(monthly, monthKey);
+    final status = seasonalStatusText();
+
+    final passedList = getPassedByMonth(monthKey);
+    final failedList = getFailedByMonth(monthKey);
+
+    final pdf = pw.Document();
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(28),
+        build: (context) {
+          return [
+            pw.Text(
+              "NPJN Emission Center",
+              style: pdfTitleStyle(),
+            ),
+            pw.SizedBox(height: 4),
+            pw.Text(
+              "Monthly Report",
+              style: pw.TextStyle(
+                fontSize: 14,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 6),
+            pw.Text("Selected Month: $monthLabel", style: pdfNormalStyle()),
+            pw.Text(
+              "Generated: ${DateTime.now()}",
+              style: pdfNormalStyle(),
+            ),
+            pw.SizedBox(height: 16),
+            pw.Text("Monthly Summary", style: pdfHeaderStyle()),
+            pw.SizedBox(height: 8),
+            pw.Row(
+              children: [
+                pw.Expanded(
+                  child: pdfSummaryBox(
+                    "Monthly Served",
+                    currentMonthTotal.toString(),
+                  ),
+                ),
+                pw.SizedBox(width: 8),
+                pw.Expanded(
+                  child: pdfSummaryBox(
+                    "Average",
+                    average.toStringAsFixed(1),
+                  ),
+                ),
+                pw.SizedBox(width: 8),
+                pw.Expanded(
+                  child: pdfSummaryBox("Volume Status", status),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 8),
+            pw.Row(
+              children: [
+                pw.Expanded(
+                  child: pdfSummaryBox("Passed", passedList.length.toString()),
+                ),
+                pw.SizedBox(width: 8),
+                pw.Expanded(
+                  child: pdfSummaryBox("Failed", failedList.length.toString()),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 18),
+            pdfRecordsTable(
+              title: "Monthly Passed Customers",
+              records: passedList,
+            ),
+            pdfRecordsTable(
+              title: "Monthly Failed Customers",
+              records: failedList,
+            ),
+          ];
+        },
+      ),
+    );
+
+    return pdf.save();
+  }
+
+  Future<void> downloadDailyPdf() async {
+    final bytes = await buildDailyPdfBytes();
+
+    await Printing.sharePdf(
+      bytes: bytes,
+      filename: "NPJN_Daily_Report_${safeFileDate(selectedDate)}.pdf",
+    );
+  }
+
+  Future<void> downloadMonthlyPdf() async {
+    final bytes = await buildMonthlyPdfBytes();
+
+    await Printing.sharePdf(
+      bytes: bytes,
+      filename: "NPJN_Monthly_Report_${currentMonthKey()}.pdf",
+    );
+  }
+
+  Future<void> printDailyPdf() async {
+    final bytes = await buildDailyPdfBytes();
+
+    await Printing.layoutPdf(
+      name: "NPJN Daily Report ${safeFileDate(selectedDate)}",
+      onLayout: (_) async => bytes,
+    );
+  }
+
+  Future<void> printMonthlyPdf() async {
+    final bytes = await buildMonthlyPdfBytes();
+
+    await Printing.layoutPdf(
+      name: "NPJN Monthly Report ${currentMonthKey()}",
+      onLayout: (_) async => bytes,
+    );
+  }
+
+  Future<void> runPdfAction(Future<void> Function() action) async {
+    try {
+      await action();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("PDF action completed.")),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("PDF action failed: $e")),
+      );
+    }
+  }
+
   // ================= UI =================
 
   @override
@@ -336,6 +765,8 @@ class _DailyReportState extends State<DailyReport> {
                 child: Column(
                   children: [
                     buildDateSelector(),
+                    const SizedBox(height: 14),
+                    buildPdfActionSection(wide),
                     const SizedBox(height: 14),
                     buildSeasonalDetectionCard(wide),
                     const SizedBox(height: 14),
@@ -404,6 +835,104 @@ class _DailyReportState extends State<DailyReport> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // ================= PDF ACTION SECTION =================
+
+  Widget buildPdfActionSection(bool wide) {
+    final buttons = [
+      reportActionButton(
+        icon: Icons.download_rounded,
+        label: "Daily PDF",
+        onPressed: () => runPdfAction(downloadDailyPdf),
+      ),
+      reportActionButton(
+        icon: Icons.print_rounded,
+        label: "Print Daily",
+        onPressed: () => runPdfAction(printDailyPdf),
+      ),
+      reportActionButton(
+        icon: Icons.download_for_offline_rounded,
+        label: "Monthly PDF",
+        onPressed: () => runPdfAction(downloadMonthlyPdf),
+      ),
+      reportActionButton(
+        icon: Icons.print_outlined,
+        label: "Print Monthly",
+        onPressed: () => runPdfAction(printMonthlyPdf),
+      ),
+    ];
+
+    return cardContainer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          sectionHeader(
+            icon: Icons.picture_as_pdf_rounded,
+            title: "PDF Export / Print",
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            "Create downloadable and printable PDF files for passed and failed report records only.",
+            style: TextStyle(
+              color: _mutedTextColor,
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+              height: 1.3,
+            ),
+          ),
+          const SizedBox(height: 14),
+          if (wide)
+            Row(
+              children: buttons.map((button) {
+                final isLast = buttons.last == button;
+
+                return Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(right: isLast ? 0 : 10),
+                    child: button,
+                  ),
+                );
+              }).toList(),
+            )
+          else
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: buttons.map((button) {
+                return SizedBox(width: 155, child: button);
+              }).toList(),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget reportActionButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onPressed,
+  }) {
+    return SizedBox(
+      height: 48,
+      child: ElevatedButton.icon(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: _primaryColor,
+          foregroundColor: Colors.white,
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+        onPressed: onPressed,
+        icon: Icon(icon, size: 20),
+        label: Text(
+          label,
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontWeight: FontWeight.w800),
+        ),
       ),
     );
   }
@@ -899,27 +1428,27 @@ class _DailyReportState extends State<DailyReport> {
           ),
           const SizedBox(height: 14),
           reportListSection(
-            title: "Approved Bookings",
+            title: "Approved Appointments",
             icon: Icons.verified_outlined,
             color: Colors.green,
             records: approvedList,
-            emptyText: "No approved bookings for this date.",
+            emptyText: "No approved Appointments for this date.",
           ),
           const SizedBox(height: 14),
           reportListSection(
-            title: "Rejected Bookings",
+            title: "Rejected Appointments",
             icon: Icons.block_rounded,
             color: Colors.red,
             records: rejectedList,
-            emptyText: "No rejected bookings for this date.",
+            emptyText: "No rejected Appointments for this date.",
           ),
           const SizedBox(height: 14),
           reportListSection(
-            title: "Pending Bookings",
+            title: "Pending Appointments",
             icon: Icons.pending_actions_rounded,
             color: Colors.orange,
             records: pendingList,
-            emptyText: "No pending bookings for this date.",
+            emptyText: "No pending Appointments for this date.",
           ),
         ],
       ),
@@ -997,9 +1526,8 @@ class _DailyReportState extends State<DailyReport> {
         record["fullName"]?.toString() ??
         record["plate"]?.toString() ??
         "-";
-    final vehicle = record["type"]?.toString() ??
-        record["vehicle"]?.toString() ??
-        "-";
+    final vehicle =
+        record["type"]?.toString() ?? record["vehicle"]?.toString() ?? "-";
     final source = record["source"]?.toString() ??
         record["status"]?.toString() ??
         "-";

@@ -83,7 +83,7 @@ class CustomerHome extends StatelessWidget {
                         ),
                         const SizedBox(height: 8),
                         const Text(
-                          "Book your emission test appointment, track your queue number, and check your booking confirmation.",
+                          "Book your emission test appointment, track your queue number, and check your Appointment confirmation.",
                           style: TextStyle(
                             fontSize: 14.5,
                             height: 1.5,
@@ -144,7 +144,7 @@ class CustomerHome extends StatelessWidget {
 
               _ActionCard(
                 icon: Icons.notifications_active_rounded,
-                title: "My Booking Status",
+                title: "My Appointment Status",
                 subtitle:
                     "Check if your appointment is pending, approved, or rejected.",
                 isFilled: false,

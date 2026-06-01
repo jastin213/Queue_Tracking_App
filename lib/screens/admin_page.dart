@@ -848,7 +848,7 @@ class _AdminPageState extends State<AdminPage> {
           ),
           drawerTile(
             icon: Icons.dashboard_rounded,
-            title: text("Booking Dashboard", "Booking Dashboard"),
+            title: text("Appointment Dashboard", "Appointment Dashboard"),
             onTap: () {
               Navigator.pop(context);
               Navigator.push(
