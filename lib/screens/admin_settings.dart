@@ -157,11 +157,11 @@ class _AdminSettingsState extends State<AdminSettings> {
       data: Theme.of(context).copyWith(
         scaffoldBackgroundColor: _backgroundColor,
         colorScheme: Theme.of(context).colorScheme.copyWith(
-          primary: _primaryColor,
-          onPrimary: Colors.white,
-          surface: _cardColor,
-          onSurface: _primaryColor,
-        ),
+              primary: _primaryColor,
+              onPrimary: Colors.white,
+              surface: _cardColor,
+              onSurface: _primaryColor,
+            ),
         appBarTheme: const AppBarTheme(
           backgroundColor: _backgroundColor,
           foregroundColor: _primaryColor,
@@ -178,31 +178,52 @@ class _AdminSettingsState extends State<AdminSettings> {
       child: Scaffold(
         appBar: AppBar(title: const Text("Admin Settings")),
         body: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
-            child: Column(
-              children: [
-                buildVoiceSettings(),
-                const SizedBox(height: 16),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final bool wideWeb = constraints.maxWidth >= 900;
 
-                buildAppLanguageSettings(),
-                const SizedBox(height: 16),
-
-                buildQueueSettings(),
-                const SizedBox(height: 16),
-
-                buildDisplaySettings(),
-                const SizedBox(height: 16),
-
-                buildAppointmentSettings(),
-                const SizedBox(height: 16),
-
-                buildAdminReminders(),
-              ],
-            ),
+              return SingleChildScrollView(
+                padding: EdgeInsets.fromLTRB(
+                  wideWeb ? 24 : 16,
+                  10,
+                  wideWeb ? 24 : 16,
+                  20,
+                ),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: wideWeb ? 900 : double.infinity,
+                    ),
+                    child: buildOneLineSettingsLayout(),
+                  ),
+                ),
+              );
+            },
           ),
         ),
       ),
+    );
+  }
+
+  // ==========================================================================
+  // RESPONSIVE LAYOUT
+  // ==========================================================================
+
+  Widget buildOneLineSettingsLayout() {
+    return Column(
+      children: [
+        buildVoiceSettings(),
+        const SizedBox(height: 16),
+        buildAppLanguageSettings(),
+        const SizedBox(height: 16),
+        buildQueueSettings(),
+        const SizedBox(height: 16),
+        buildDisplaySettings(),
+        const SizedBox(height: 16),
+        buildAppointmentSettings(),
+        const SizedBox(height: 16),
+        buildAdminReminders(),
+      ],
     );
   }
 
@@ -241,9 +262,7 @@ class _AdminSettingsState extends State<AdminSettings> {
               );
             },
           ),
-
           const SizedBox(height: 14),
-
           settingLabel("Voice Speed"),
           ValueListenableBuilder<String>(
             valueListenable: voiceSpeedNotifier,
@@ -269,9 +288,7 @@ class _AdminSettingsState extends State<AdminSettings> {
               );
             },
           ),
-
           const SizedBox(height: 16),
-
           SizedBox(
             width: double.infinity,
             height: 50,
@@ -351,9 +368,7 @@ class _AdminSettingsState extends State<AdminSettings> {
               },
             ),
           ),
-
           const Divider(color: _borderColor),
-
           settingLabel("Daily Queue Limit"),
           ValueListenableBuilder<int>(
             valueListenable: dailyQueueLimitNotifier,
@@ -429,9 +444,7 @@ class _AdminSettingsState extends State<AdminSettings> {
               },
             ),
           ),
-
           const Divider(color: _borderColor),
-
           settingTile(
             icon: Icons.directions_car_rounded,
             title: "Show Vehicle Type",
@@ -450,9 +463,7 @@ class _AdminSettingsState extends State<AdminSettings> {
               },
             ),
           ),
-
           const Divider(color: _borderColor),
-
           settingTile(
             icon: Icons.timer_outlined,
             title: "Show Estimated Waiting Time",
@@ -471,9 +482,7 @@ class _AdminSettingsState extends State<AdminSettings> {
               },
             ),
           ),
-
           const SizedBox(height: 14),
-
           settingLabel("Display Announcement"),
           TextField(
             controller: announcementController,
@@ -484,9 +493,7 @@ class _AdminSettingsState extends State<AdminSettings> {
             ),
             decoration: inputDecoration("Enter display announcement"),
           ),
-
           const SizedBox(height: 12),
-
           SizedBox(
             width: double.infinity,
             height: 50,
@@ -510,7 +517,7 @@ class _AdminSettingsState extends State<AdminSettings> {
     return settingsCard(
       icon: Icons.event_available_rounded,
       title: "Appointment Settings",
-      subtitle: "Control how online bookings are handled.",
+      subtitle: "Control how online appointments are handled.",
       child: settingTile(
         icon: Icons.auto_mode_rounded,
         title: "Auto-Approve Appointments",

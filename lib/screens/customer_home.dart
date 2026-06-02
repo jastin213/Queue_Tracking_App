@@ -83,7 +83,7 @@ class CustomerHome extends StatelessWidget {
                         ),
                         const SizedBox(height: 8),
                         const Text(
-                          "Book your emission test appointment, track your queue number, and check your Appointment confirmation.",
+                          "Book your emission test appointment, check your appointment confirmation, and track your queue number.",
                           style: TextStyle(
                             fontSize: 14.5,
                             height: 1.5,
@@ -110,28 +110,13 @@ class CustomerHome extends StatelessWidget {
 
               const SizedBox(height: 14),
 
-              _ActionCard(
-                icon: Icons.search_rounded,
-                title: "Track My Queue",
-                subtitle:
-                    "Check your queue position and estimated waiting time.",
-                isFilled: true,
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const TrackPage()),
-                  );
-                },
-              ),
-
-              const SizedBox(height: 16),
-
+              // 1. BOOK APPOINTMENT
               _ActionCard(
                 icon: Icons.calendar_month_rounded,
                 title: "Book Appointment",
                 subtitle:
                     "Schedule your emission test before visiting the center.",
-                isFilled: false,
+                isFilled: true,
                 onTap: () {
                   Navigator.push(
                     context,
@@ -142,6 +127,7 @@ class CustomerHome extends StatelessWidget {
 
               const SizedBox(height: 16),
 
+              // 2. MY APPOINTMENT STATUS
               _ActionCard(
                 icon: Icons.notifications_active_rounded,
                 title: "My Appointment Status",
@@ -154,6 +140,23 @@ class CustomerHome extends StatelessWidget {
                     MaterialPageRoute(
                       builder: (_) => const BookingStatusPage(),
                     ),
+                  );
+                },
+              ),
+
+              const SizedBox(height: 16),
+
+              // 3. TRACK MY QUEUE
+              _ActionCard(
+                icon: Icons.search_rounded,
+                title: "Track My Queue",
+                subtitle:
+                    "Check your queue position and estimated waiting time.",
+                isFilled: false,
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const TrackPage()),
                   );
                 },
               ),
