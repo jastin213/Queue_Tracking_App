@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 const Color _backgroundColor = Color(0xFFF1FAFC);
 const Color _primaryColor = Color(0xFF071F35);
@@ -7,15 +9,17 @@ const Color _borderColor = Color(0xFFD8E8EE);
 const Color _mutedTextColor = Color(0xFF6E7E88);
 const Color _softPrimaryColor = Color(0xFFEAF4F8);
 
-// ================= TEMPORARY LOCAL CUSTOMER ACCOUNT STORAGE =================
-// This works while the app is running.
-// Later, Firebase/backend/local database can replace this.
+// ================= CUSTOMER ACCOUNT SESSION STORAGE =================
+//
+// These notifiers are still kept because other pages already use them.
+// The backend now uses Firebase Auth + Firestore.
+// Do not remove these yet because CustomerHome and Appointment Status depend on them.
 
 ValueNotifier<List<Map<String, String>>> registeredCustomers = ValueNotifier([]);
 
-// Stores the currently logged-in customer name.
-// Used by CustomerHome and My Booking Status screen.
 ValueNotifier<String> loggedInCustomerNameNotifier = ValueNotifier("");
+ValueNotifier<String> loggedInCustomerEmailNotifier = ValueNotifier("");
+ValueNotifier<String> loggedInCustomerIdNotifier = ValueNotifier("");
 
 class CustomerRegister extends StatefulWidget {
   const CustomerRegister({super.key});
@@ -26,7 +30,10 @@ class CustomerRegister extends StatefulWidget {
 
 class _CustomerRegisterState extends State<CustomerRegister> {
   final TextEditingController fullNameController = TextEditingController();
+  final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
+
+  bool isLoading = false;
 
   String selectedAddress = "Ligao";
 
@@ -43,51 +50,117 @@ class _CustomerRegisterState extends State<CustomerRegister> {
   @override
   void dispose() {
     fullNameController.dispose();
+    emailController.dispose();
     passwordController.dispose();
     super.dispose();
   }
 
-  bool accountAlreadyExists(String fullName) {
-    return registeredCustomers.value.any((account) {
-      return account["fullName"]!.toLowerCase().trim() ==
-          fullName.toLowerCase().trim();
-    });
+  String getFirebaseErrorMessage(FirebaseAuthException e) {
+    if (e.code == "email-already-in-use") {
+      return "This email is already registered. Please login instead.";
+    }
+
+    if (e.code == "invalid-email") {
+      return "Please enter a valid email address.";
+    }
+
+    if (e.code == "weak-password") {
+      return "Password is too weak. Use at least 6 characters.";
+    }
+
+    if (e.code == "network-request-failed") {
+      return "Network error. Please check your internet connection.";
+    }
+
+    return e.message ?? "Account creation failed.";
   }
 
-  void register() {
+  Future<void> register() async {
     final String fullName = fullNameController.text.trim();
+    final String email = emailController.text.trim();
     final String password = passwordController.text.trim();
 
-    if (fullName.isEmpty || selectedAddress.isEmpty || password.isEmpty) {
+    if (fullName.isEmpty ||
+        email.isEmpty ||
+        selectedAddress.isEmpty ||
+        password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Complete all fields")),
       );
       return;
     }
 
-    if (accountAlreadyExists(fullName)) {
+    if (password.length < 6) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text("Account already exists. Please login instead."),
+          content: Text("Password must be at least 6 characters."),
         ),
       );
       return;
     }
 
-    registeredCustomers.value = [
-      ...registeredCustomers.value,
-      {
+    setState(() {
+      isLoading = true;
+    });
+
+    try {
+      final UserCredential credential =
+          await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      final User? user = credential.user;
+
+      if (user == null) {
+        throw FirebaseAuthException(
+          code: "user-not-created",
+          message: "Account was not created.",
+        );
+      }
+
+      await user.updateDisplayName(fullName);
+
+      await FirebaseFirestore.instance.collection("users").doc(user.uid).set({
+        "uid": user.uid,
         "fullName": fullName,
+        "email": email,
         "municipality": selectedAddress,
-        "password": password,
-      },
-    ];
+        "role": "customer",
+        "createdAt": FieldValue.serverTimestamp(),
+        "updatedAt": FieldValue.serverTimestamp(),
+      });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Account Created Successfully")),
-    );
+      loggedInCustomerNameNotifier.value = fullName;
+      loggedInCustomerEmailNotifier.value = email;
+      loggedInCustomerIdNotifier.value = user.uid;
 
-    Navigator.pop(context);
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Account Created Successfully")),
+      );
+
+      Navigator.pop(context);
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(getFirebaseErrorMessage(e))),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Account creation failed: $e")),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
+    }
   }
 
   InputDecoration formDecoration({
@@ -264,6 +337,22 @@ class _CustomerRegisterState extends State<CustomerRegister> {
 
                       const SizedBox(height: 16),
 
+                      TextField(
+                        controller: emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        style: const TextStyle(
+                          color: _primaryColor,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        decoration: formDecoration(
+                          label: "Email",
+                          hint: "Enter your email address",
+                          icon: Icons.email_outlined,
+                        ),
+                      ),
+
+                      const SizedBox(height: 16),
+
                       DropdownButtonFormField<String>(
                         value: selectedAddress,
                         decoration: formDecoration(
@@ -331,7 +420,7 @@ class _CustomerRegisterState extends State<CustomerRegister> {
                       SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          "Please make sure your information is correct before creating your account.",
+                          "Please use a valid email address. This will be used for secure account login.",
                           style: TextStyle(
                             fontSize: 13,
                             height: 1.3,
@@ -349,8 +438,17 @@ class _CustomerRegisterState extends State<CustomerRegister> {
                   width: double.infinity,
                   height: 55,
                   child: ElevatedButton(
-                    onPressed: register,
-                    child: const Text("CREATE ACCOUNT"),
+                    onPressed: isLoading ? null : register,
+                    child: isLoading
+                        ? const SizedBox(
+                            height: 22,
+                            width: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Text("CREATE ACCOUNT"),
                   ),
                 ),
               ],

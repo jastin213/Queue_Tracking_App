@@ -1,6 +1,6 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
-import 'admin_page.dart';
 import 'ors_service.dart';
 import 'location_data.dart';
 
@@ -13,6 +13,8 @@ class TrackPage extends StatefulWidget {
 
 class _TrackPageState extends State<TrackPage> {
   final TextEditingController queueController = TextEditingController();
+
+  String trackedQueueNumber = "";
 
   String statusText = "";
   String queueNumberText = "";
@@ -39,17 +41,121 @@ class _TrackPageState extends State<TrackPage> {
     super.dispose();
   }
 
+  // ================= DATE HELPERS =================
+
+  String todayDate() {
+    final now = DateTime.now();
+    return "${now.month}/${now.day}/${now.year}";
+  }
+
+  String queueDateId(String date) {
+    return date.replaceAll("/", "-");
+  }
+
+  // ================= FIRESTORE HELPERS =================
+
+  Stream<List<Map<String, dynamic>>> todayQueueStream() {
+    final String today = todayDate();
+
+    return FirebaseFirestore.instance
+        .collection("queues")
+        .doc(queueDateId(today))
+        .collection("items")
+        .orderBy("createdAt")
+        .snapshots()
+        .map((snapshot) {
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+
+        return {
+          ...data,
+          "queueId": data["queueId"] ?? doc.id,
+        };
+      }).toList();
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> getTodayQueueOnce() async {
+    final String today = todayDate();
+
+    final snapshot = await FirebaseFirestore.instance
+        .collection("queues")
+        .doc(queueDateId(today))
+        .collection("items")
+        .orderBy("createdAt")
+        .get();
+
+    return snapshot.docs.map((doc) {
+      final data = doc.data();
+
+      return {
+        ...data,
+        "queueId": data["queueId"] ?? doc.id,
+      };
+    }).toList();
+  }
+
+  Map<String, dynamic>? getNowServing(List<Map<String, dynamic>> items) {
+    final list = items.where((item) {
+      return item["status"]?.toString() == "Now Serving";
+    }).toList();
+
+    if (list.isEmpty) return null;
+
+    return list.last;
+  }
+
+  List<Map<String, dynamic>> getWaitingQueue(List<Map<String, dynamic>> items) {
+    return items.where((item) {
+      final status = item["status"]?.toString() ?? "Waiting";
+      return status == "Waiting" || status == "Skipped";
+    }).toList();
+  }
+
+  Map<String, dynamic>? findQueueItem({
+    required List<Map<String, dynamic>> items,
+    required String queueNumber,
+  }) {
+    try {
+      return items.firstWhere(
+        (item) => item["queue"]?.toString().toUpperCase() == queueNumber,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  bool isMissedQueue({
+    required String input,
+    required Map<String, dynamic>? nowServing,
+  }) {
+    if (nowServing == null) return false;
+
+    final String currentQueue =
+        nowServing["queue"]?.toString().toUpperCase() ?? "";
+
+    if (currentQueue.isEmpty || input.isEmpty) return false;
+
+    final String currentPrefix = currentQueue.substring(0, 1);
+    final String userPrefix = input.substring(0, 1);
+
+    if (currentPrefix != userPrefix) return false;
+
+    final int currentNumber = int.tryParse(currentQueue.substring(1)) ?? 0;
+    final int userNumber = int.tryParse(input.substring(1)) ?? 0;
+
+    return userNumber < currentNumber;
+  }
+
   // ================= CHECK QUEUE =================
 
   Future<void> checkQueue() async {
-    String input = queueController.text.trim().toUpperCase();
-
-    bool found = false;
-
+    final String input = queueController.text.trim().toUpperCase();
     final regex = RegExp(r'^[GD]\d+$');
 
     if (!regex.hasMatch(input)) {
       setState(() {
+        trackedQueueNumber = "";
         statusText = "Invalid Queue Format";
         queueNumberText = input;
         positionText = "Use format like G001 or D001";
@@ -66,55 +172,58 @@ class _TrackPageState extends State<TrackPage> {
       return;
     }
 
-    // ================= WAITING QUEUE =================
+    setState(() {
+      trackedQueueNumber = input;
+      statusText = "";
+      queueNumberText = input;
+      positionText = "";
+      queuePosition = null;
+      estimatedQueueTime = null;
+      travelMinutes = null;
+      leaveInMinutes = null;
+      municipalityText = "";
+      orsStatusText = "";
+      leaveAdviceText = "";
+      calculationText = "";
+    });
 
-    for (var customer in waitingQueueNotifier.value) {
-      if (customer['queue'] == input) {
-        found = true;
+    try {
+      final items = await getTodayQueueOnce();
+      await updateTrackedQueueStateFromItems(
+        input: input,
+        items: items,
+        showNearAlert: true,
+      );
+    } catch (e) {
+      if (!mounted) return;
 
-        int position = waitingQueueNotifier.value.indexOf(customer) + 1;
-
-        int estimatedTime = position * averageServiceTime;
-
-        setState(() {
-          statusText = "Waiting";
-          queueNumberText = input;
-          positionText = "Position $position in line";
-          queuePosition = position;
-          estimatedQueueTime = estimatedTime;
-          travelMinutes = null;
-          leaveInMinutes = null;
-          municipalityText = customer["municipality"] ?? "";
-          orsStatusText = "";
-          leaveAdviceText = "";
-          calculationText = "";
-        });
-
-        if (customer["source"] == "Appointment" &&
-            customer["municipality"] != null) {
-          await calculateSmartEta(
-            municipality: customer["municipality"],
-            estimatedQueueTime: estimatedTime,
-          );
-        }
-
-        if (position <= 5) {
-          showNearTurnDialog();
-        }
-
-        break;
-      }
+      setState(() {
+        statusText = "Unable to check queue";
+        queueNumberText = input;
+        positionText = e.toString();
+        queuePosition = null;
+        estimatedQueueTime = null;
+      });
     }
+  }
 
-    // ================= NOW SERVING =================
+  Future<void> updateTrackedQueueStateFromItems({
+    required String input,
+    required List<Map<String, dynamic>> items,
+    required bool showNearAlert,
+  }) async {
+    final waitingQueue = getWaitingQueue(items);
+    final nowServing = getNowServing(items);
+    final queueItem = findQueueItem(items: items, queueNumber: input);
 
-    if (!found) {
-      if (nowServingNotifier.value != null &&
-          nowServingNotifier.value!['queue'] == input) {
+    if (queueItem == null) {
+      if (isMissedQueue(input: input, nowServing: nowServing)) {
+        if (!mounted) return;
+
         setState(() {
-          statusText = "NOW SERVING";
+          statusText = "Sorry, you missed your queue.";
           queueNumberText = input;
-          positionText = "Please proceed to the testing area";
+          positionText = "Please coordinate with staff.";
           queuePosition = null;
           estimatedQueueTime = null;
           travelMinutes = null;
@@ -125,45 +234,11 @@ class _TrackPageState extends State<TrackPage> {
           calculationText = "";
         });
 
-        found = true;
+        return;
       }
-    }
 
-    // ================= MISSED QUEUE =================
+      if (!mounted) return;
 
-    if (!found && nowServingNotifier.value != null) {
-      String currentQueue = nowServingNotifier.value!['queue'];
-
-      String currentPrefix = currentQueue.substring(0, 1);
-      String userPrefix = input.substring(0, 1);
-
-      if (currentPrefix == userPrefix) {
-        int currentNumber = int.parse(currentQueue.substring(1));
-        int userNumber = int.parse(input.substring(1));
-
-        if (userNumber < currentNumber) {
-          setState(() {
-            statusText = "Sorry, you missed your queue.";
-            queueNumberText = input;
-            positionText = "Please coordinate with staff.";
-            queuePosition = null;
-            estimatedQueueTime = null;
-            travelMinutes = null;
-            leaveInMinutes = null;
-            municipalityText = "";
-            orsStatusText = "";
-            leaveAdviceText = "";
-            calculationText = "";
-          });
-
-          found = true;
-        }
-      }
-    }
-
-    // ================= NOT FOUND =================
-
-    if (!found) {
       setState(() {
         statusText = "Queue not found";
         queueNumberText = input;
@@ -177,7 +252,234 @@ class _TrackPageState extends State<TrackPage> {
         leaveAdviceText = "";
         calculationText = "";
       });
+
+      return;
     }
+
+    final String status = queueItem["status"]?.toString() ?? "Waiting";
+
+    if (status == "Waiting" || status == "Skipped") {
+      final int index = waitingQueue.indexWhere((item) {
+        return item["queue"]?.toString().toUpperCase() == input;
+      });
+
+      final int position = index >= 0 ? index + 1 : 1;
+      final int estimatedTime = position * averageServiceTime;
+
+      if (!mounted) return;
+
+      setState(() {
+        statusText = status == "Skipped" ? "Waiting again" : "Waiting";
+        queueNumberText = input;
+        positionText = "Position $position in line";
+        queuePosition = position;
+        estimatedQueueTime = estimatedTime;
+        travelMinutes = null;
+        leaveInMinutes = null;
+        municipalityText = queueItem["municipality"] ?? "";
+        orsStatusText = "";
+        leaveAdviceText = "";
+        calculationText = "";
+      });
+
+      if (queueItem["source"] == "Appointment" &&
+          queueItem["municipality"] != null &&
+          queueItem["municipality"].toString().trim().isNotEmpty) {
+        await calculateSmartEta(
+          municipality: queueItem["municipality"],
+          estimatedQueueTime: estimatedTime,
+        );
+      }
+
+      if (showNearAlert && position <= 5) {
+        showNearTurnDialog();
+      }
+
+      return;
+    }
+
+    if (status == "Now Serving") {
+      if (!mounted) return;
+
+      setState(() {
+        statusText = "NOW SERVING";
+        queueNumberText = input;
+        positionText = "Please proceed to the testing area";
+        queuePosition = null;
+        estimatedQueueTime = null;
+        travelMinutes = null;
+        leaveInMinutes = null;
+        municipalityText = "";
+        orsStatusText = "";
+        leaveAdviceText = "";
+        calculationText = "";
+      });
+
+      return;
+    }
+
+    if (status == "Passed") {
+      if (!mounted) return;
+
+      setState(() {
+        statusText = "Completed - Passed";
+        queueNumberText = input;
+        positionText = "Your emission test has been marked as passed.";
+        queuePosition = null;
+        estimatedQueueTime = null;
+        travelMinutes = null;
+        leaveInMinutes = null;
+        municipalityText = "";
+        orsStatusText = "";
+        leaveAdviceText = "";
+        calculationText = "";
+      });
+
+      return;
+    }
+
+    if (status == "Failed") {
+      if (!mounted) return;
+
+      setState(() {
+        statusText = "Completed - Failed";
+        queueNumberText = input;
+        positionText = "Your emission test has been marked as failed.";
+        queuePosition = null;
+        estimatedQueueTime = null;
+        travelMinutes = null;
+        leaveInMinutes = null;
+        municipalityText = "";
+        orsStatusText = "";
+        leaveAdviceText = "";
+        calculationText = "";
+      });
+
+      return;
+    }
+
+    if (status == "Cancelled" || status == "Reset") {
+      if (!mounted) return;
+
+      setState(() {
+        statusText = status;
+        queueNumberText = input;
+        positionText = "This queue number is no longer active.";
+        queuePosition = null;
+        estimatedQueueTime = null;
+        travelMinutes = null;
+        leaveInMinutes = null;
+        municipalityText = "";
+        orsStatusText = "";
+        leaveAdviceText = "";
+        calculationText = "";
+      });
+
+      return;
+    }
+
+    if (!mounted) return;
+
+    setState(() {
+      statusText = status;
+      queueNumberText = input;
+      positionText = "Current queue status: $status";
+      queuePosition = null;
+      estimatedQueueTime = null;
+      travelMinutes = null;
+      leaveInMinutes = null;
+      municipalityText = "";
+      orsStatusText = "";
+      leaveAdviceText = "";
+      calculationText = "";
+    });
+  }
+
+  Map<String, String> getLiveStatusFromItems(List<Map<String, dynamic>> items) {
+    if (trackedQueueNumber.isEmpty) {
+      return {
+        "status": statusText,
+        "position": positionText,
+        "queue": queueNumberText,
+      };
+    }
+
+    final waitingQueue = getWaitingQueue(items);
+    final nowServing = getNowServing(items);
+    final queueItem = findQueueItem(
+      items: items,
+      queueNumber: trackedQueueNumber,
+    );
+
+    if (queueItem == null) {
+      if (isMissedQueue(input: trackedQueueNumber, nowServing: nowServing)) {
+        return {
+          "status": "Sorry, you missed your queue.",
+          "position": "Please coordinate with staff.",
+          "queue": trackedQueueNumber,
+        };
+      }
+
+      return {
+        "status": "Queue not found",
+        "position": "Please check your queue number.",
+        "queue": trackedQueueNumber,
+      };
+    }
+
+    final String status = queueItem["status"]?.toString() ?? "Waiting";
+
+    if (status == "Waiting" || status == "Skipped") {
+      final int index = waitingQueue.indexWhere((item) {
+        return item["queue"]?.toString().toUpperCase() == trackedQueueNumber;
+      });
+
+      final int position = index >= 0 ? index + 1 : 1;
+
+      return {
+        "status": status == "Skipped" ? "Waiting again" : "Waiting",
+        "position": "Position $position in line",
+        "queue": trackedQueueNumber,
+      };
+    }
+
+    if (status == "Now Serving") {
+      return {
+        "status": "NOW SERVING",
+        "position": "Please proceed to the testing area",
+        "queue": trackedQueueNumber,
+      };
+    }
+
+    if (status == "Passed") {
+      return {
+        "status": "Completed - Passed",
+        "position": "Your emission test has been marked as passed.",
+        "queue": trackedQueueNumber,
+      };
+    }
+
+    if (status == "Failed") {
+      return {
+        "status": "Completed - Failed",
+        "position": "Your emission test has been marked as failed.",
+        "queue": trackedQueueNumber,
+      };
+    }
+
+    if (status == "Cancelled" || status == "Reset") {
+      return {
+        "status": status,
+        "position": "This queue number is no longer active.",
+        "queue": trackedQueueNumber,
+      };
+    }
+
+    return {
+      "status": status,
+      "position": "Current queue status: $status",
+      "queue": trackedQueueNumber,
+    };
   }
 
   // ================= SMART ETA =================
@@ -206,6 +508,8 @@ class _TrackPageState extends State<TrackPage> {
 
     int computedLeaveIn =
         estimatedQueueTime - (result.minutes + bufferMinutes);
+
+    if (!mounted) return;
 
     setState(() {
       isLoadingEta = false;
@@ -290,51 +594,66 @@ class _TrackPageState extends State<TrackPage> {
         backgroundColor: Colors.white,
       ),
       body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final bool wide = constraints.maxWidth >= 700;
+        child: StreamBuilder<List<Map<String, dynamic>>>(
+          stream: todayQueueStream(),
+          builder: (context, snapshot) {
+            final List<Map<String, dynamic>> items = snapshot.data ?? [];
+            final Map<String, dynamic>? nowServing = getNowServing(items);
 
-            return ListView(
-              padding: EdgeInsets.all(wide ? 24 : 16),
-              children: [
-                buildNowServingCard(),
+            return LayoutBuilder(
+              builder: (context, constraints) {
+                final bool wide = constraints.maxWidth >= 700;
 
-                const SizedBox(height: 18),
+                return ListView(
+                  padding: EdgeInsets.all(wide ? 24 : 16),
+                  children: [
+                    buildNowServingCard(nowServing),
 
-                buildSearchCard(),
+                    const SizedBox(height: 18),
 
-                const SizedBox(height: 18),
+                    buildSearchCard(),
 
-                if (statusText.isNotEmpty) buildQueueStatusCard(),
+                    const SizedBox(height: 18),
 
-                if (estimatedQueueTime != null) ...[
-                  const SizedBox(height: 14),
-                  buildTimeSummaryCard(),
-                ],
+                    if (trackedQueueNumber.isNotEmpty)
+                      buildLiveQueueStatusCard(snapshot)
+                    else if (statusText.isNotEmpty)
+                      buildQueueStatusCard(
+                        queue: queueNumberText,
+                        status: statusText,
+                        position: positionText,
+                      ),
 
-                if (isLoadingEta)
-                  const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Center(
-                      child: CircularProgressIndicator(),
-                    ),
-                  ),
+                    if (estimatedQueueTime != null) ...[
+                      const SizedBox(height: 14),
+                      buildTimeSummaryCard(),
+                    ],
 
-                if (orsStatusText.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  buildInfoNote(orsStatusText),
-                ],
+                    if (isLoadingEta)
+                      const Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Center(
+                          child: CircularProgressIndicator(),
+                        ),
+                      ),
 
-                if (leaveAdviceText.isNotEmpty) ...[
-                  const SizedBox(height: 14),
-                  buildLeaveAdviceCard(),
-                ],
+                    if (orsStatusText.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      buildInfoNote(orsStatusText),
+                    ],
 
-                if (calculationText.isNotEmpty) ...[
-                  const SizedBox(height: 14),
-                  buildCalculationCard(),
-                ],
-              ],
+                    if (leaveAdviceText.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      buildLeaveAdviceCard(),
+                    ],
+
+                    if (calculationText.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      buildCalculationCard(),
+                    ],
+                  ],
+                );
+              },
             );
           },
         ),
@@ -344,41 +663,36 @@ class _TrackPageState extends State<TrackPage> {
 
   // ================= NOW SERVING =================
 
-  Widget buildNowServingCard() {
-    return ValueListenableBuilder<Map<String, dynamic>?>(
-      valueListenable: nowServingNotifier,
-      builder: (context, customer, _) {
-        return Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(20),
-          decoration: cardDecoration(),
-          child: Column(
-            children: [
-              const Text(
-                "NOW SERVING",
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 15,
-                  color: Colors.black54,
-                  letterSpacing: 1,
-                ),
-              ),
-              const SizedBox(height: 10),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  customer == null ? "-" : customer['queue'],
-                  style: const TextStyle(
-                    color: Colors.red,
-                    fontSize: 44,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-              ),
-            ],
+  Widget buildNowServingCard(Map<String, dynamic>? customer) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: cardDecoration(),
+      child: Column(
+        children: [
+          const Text(
+            "NOW SERVING",
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 15,
+              color: Colors.black54,
+              letterSpacing: 1,
+            ),
           ),
-        );
-      },
+          const SizedBox(height: 10),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              customer == null ? "-" : customer['queue'] ?? "-",
+              style: const TextStyle(
+                color: Colors.red,
+                fontSize: 44,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -428,9 +742,44 @@ class _TrackPageState extends State<TrackPage> {
     );
   }
 
+  // ================= LIVE STATUS CARD =================
+
+  Widget buildLiveQueueStatusCard(
+    AsyncSnapshot<List<Map<String, dynamic>>> snapshot,
+  ) {
+    if (snapshot.connectionState == ConnectionState.waiting &&
+        !snapshot.hasData) {
+      return buildQueueStatusCard(
+        queue: trackedQueueNumber,
+        status: "Loading",
+        position: "Checking latest queue status...",
+      );
+    }
+
+    if (snapshot.hasError) {
+      return buildQueueStatusCard(
+        queue: trackedQueueNumber,
+        status: "Unable to load live status",
+        position: snapshot.error.toString(),
+      );
+    }
+
+    final live = getLiveStatusFromItems(snapshot.data ?? []);
+
+    return buildQueueStatusCard(
+      queue: live["queue"] ?? trackedQueueNumber,
+      status: live["status"] ?? "-",
+      position: live["position"] ?? "-",
+    );
+  }
+
   // ================= QUEUE STATUS CARD =================
 
-  Widget buildQueueStatusCard() {
+  Widget buildQueueStatusCard({
+    required String queue,
+    required String status,
+    required String position,
+  }) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
@@ -445,15 +794,15 @@ class _TrackPageState extends State<TrackPage> {
           const SizedBox(height: 14),
           infoRow(
             label: "Queue Number",
-            value: queueNumberText.isEmpty ? "-" : queueNumberText,
+            value: queue.isEmpty ? "-" : queue,
           ),
           infoRow(
             label: "Status",
-            value: statusText,
+            value: status,
           ),
           infoRow(
             label: "Position",
-            value: positionText,
+            value: position,
           ),
         ],
       ),
@@ -475,7 +824,6 @@ class _TrackPageState extends State<TrackPage> {
             title: "Time Summary",
           ),
           const SizedBox(height: 14),
-
           timeItem(
             icon: Icons.schedule,
             title: "Estimated Queue Time",
@@ -484,7 +832,6 @@ class _TrackPageState extends State<TrackPage> {
                 "Based on position ${queuePosition ?? '-'} × $averageServiceTime mins per customer",
             color: Colors.green,
           ),
-
           if (municipalityText.isNotEmpty && travelMinutes != null) ...[
             const SizedBox(height: 10),
             timeItem(

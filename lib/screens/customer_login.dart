@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 import 'customer_register.dart';
 import 'customer_home.dart';
 
@@ -17,62 +20,130 @@ class CustomerLogin extends StatefulWidget {
 }
 
 class _CustomerLoginState extends State<CustomerLogin> {
-  final TextEditingController nameController = TextEditingController();
+  final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
+
+  bool isLoading = false;
 
   @override
   void dispose() {
-    nameController.dispose();
+    emailController.dispose();
     passwordController.dispose();
     super.dispose();
   }
 
-  Map<String, String>? findAccountByName(String fullName) {
-    try {
-      return registeredCustomers.value.firstWhere((account) {
-        return account["fullName"]!.toLowerCase().trim() ==
-            fullName.toLowerCase().trim();
-      });
-    } catch (_) {
-      return null;
+  String getFirebaseErrorMessage(FirebaseAuthException e) {
+    if (e.code == "user-not-found") {
+      return "Account not found. Please create an account first.";
     }
+
+    if (e.code == "wrong-password") {
+      return "Incorrect password.";
+    }
+
+    if (e.code == "invalid-email") {
+      return "Please enter a valid email address.";
+    }
+
+    if (e.code == "invalid-credential") {
+      return "Invalid email or password.";
+    }
+
+    if (e.code == "network-request-failed") {
+      return "Network error. Please check your internet connection.";
+    }
+
+    return e.message ?? "Login failed.";
   }
 
-  void login() {
-    final String fullName = nameController.text.trim();
+  Future<void> login() async {
+    final String email = emailController.text.trim();
     final String password = passwordController.text.trim();
 
-    if (fullName.isEmpty || password.isEmpty) {
+    if (email.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please enter credentials")),
       );
       return;
     }
 
-    final account = findAccountByName(fullName);
+    setState(() {
+      isLoading = true;
+    });
 
-    if (account == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Account not found. Please create an account first."),
-        ),
+    try {
+      final UserCredential credential =
+          await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: email,
+        password: password,
       );
-      return;
-    }
 
-    if (account["password"] != password) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Incorrect password.")),
+      final User? user = credential.user;
+
+      if (user == null) {
+        throw FirebaseAuthException(
+          code: "user-not-found",
+          message: "Account not found.",
+        );
+      }
+
+      final DocumentSnapshot<Map<String, dynamic>> userDoc =
+          await FirebaseFirestore.instance
+              .collection("users")
+              .doc(user.uid)
+              .get();
+
+      if (userDoc.exists && userDoc.data() != null) {
+        final data = userDoc.data()!;
+
+        loggedInCustomerNameNotifier.value =
+            (data["fullName"] ?? user.displayName ?? "").toString();
+
+        loggedInCustomerEmailNotifier.value =
+            (data["email"] ?? user.email ?? email).toString();
+
+        loggedInCustomerIdNotifier.value = user.uid;
+      } else {
+        loggedInCustomerNameNotifier.value = user.displayName ?? "";
+        loggedInCustomerEmailNotifier.value = user.email ?? email;
+        loggedInCustomerIdNotifier.value = user.uid;
+
+        await FirebaseFirestore.instance.collection("users").doc(user.uid).set({
+          "uid": user.uid,
+          "fullName": user.displayName ?? "",
+          "email": user.email ?? email,
+          "municipality": "",
+          "role": "customer",
+          "createdAt": FieldValue.serverTimestamp(),
+          "updatedAt": FieldValue.serverTimestamp(),
+        });
+      }
+
+      if (!mounted) return;
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const CustomerHome()),
       );
-      return;
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(getFirebaseErrorMessage(e))),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Login failed: $e")),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
     }
-
-    loggedInCustomerNameNotifier.value = account["fullName"] ?? fullName;
-
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (_) => const CustomerHome()),
-    );
   }
 
   InputDecoration formDecoration({
@@ -221,7 +292,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
                               SizedBox(width: 10),
                               Expanded(
                                 child: Text(
-                                  "Enter your registered customer account credentials.",
+                                  "Enter your registered email and password.",
                                   style: TextStyle(
                                     fontSize: 13,
                                     height: 1.3,
@@ -236,15 +307,16 @@ class _CustomerLoginState extends State<CustomerLogin> {
                         const SizedBox(height: 20),
 
                         TextField(
-                          controller: nameController,
+                          controller: emailController,
+                          keyboardType: TextInputType.emailAddress,
                           style: const TextStyle(
                             color: _primaryColor,
                             fontWeight: FontWeight.w600,
                           ),
                           decoration: formDecoration(
-                            label: "Full Name",
-                            hint: "Enter your full name",
-                            icon: Icons.person_outline_rounded,
+                            label: "Email",
+                            hint: "Enter your email address",
+                            icon: Icons.email_outlined,
                           ),
                         ),
 
@@ -270,8 +342,17 @@ class _CustomerLoginState extends State<CustomerLogin> {
                           width: double.infinity,
                           height: 55,
                           child: ElevatedButton(
-                            onPressed: login,
-                            child: const Text("LOGIN"),
+                            onPressed: isLoading ? null : login,
+                            child: isLoading
+                                ? const SizedBox(
+                                    height: 22,
+                                    width: 22,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2.5,
+                                      color: Colors.white,
+                                    ),
+                                  )
+                                : const Text("LOGIN"),
                           ),
                         ),
 
@@ -288,14 +369,17 @@ class _CustomerLoginState extends State<CustomerLogin> {
                               ),
                             ),
                             TextButton(
-                              onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => const CustomerRegister(),
-                                  ),
-                                );
-                              },
+                              onPressed: isLoading
+                                  ? null
+                                  : () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) =>
+                                              const CustomerRegister(),
+                                        ),
+                                      );
+                                    },
                               child: const Text(
                                 "Create Account",
                                 style: TextStyle(

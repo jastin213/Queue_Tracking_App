@@ -1,6 +1,6 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
-import 'admin_page.dart';
 import 'admin_settings.dart';
 
 // ============================================================================
@@ -16,7 +16,6 @@ const Color _softPrimaryColor = Color(0xFFEAF4F8);
 const Color _dangerColor = Color(0xFFE53935);
 
 // Used only for display estimate.
-// You can adjust this later depending on your real average testing time.
 const int _estimatedMinutesPerCustomer = 9;
 
 // ============================================================================
@@ -35,31 +34,51 @@ class DisplayPage extends StatelessWidget {
     return "${now.month}/${now.day}/${now.year}";
   }
 
+  String queueDateId(String date) {
+    return date.replaceAll("/", "-");
+  }
+
   // ==========================================================================
-  // QUEUE HELPERS
+  // FIRESTORE STREAM
   // ==========================================================================
 
-  Map<String, dynamic>? getTodayNowServing() {
-    final today = todayDate();
+  Stream<List<Map<String, dynamic>>> todayQueueStream() {
+    final String today = todayDate();
 
-    if (nowServingNotifier.value == null) {
+    return FirebaseFirestore.instance
+        .collection("queues")
+        .doc(queueDateId(today))
+        .collection("items")
+        .orderBy("createdAt")
+        .snapshots()
+        .map((snapshot) {
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+
+        return {
+          ...data,
+          "queueId": data["queueId"] ?? doc.id,
+        };
+      }).toList();
+    });
+  }
+
+  Map<String, dynamic>? getNowServing(List<Map<String, dynamic>> items) {
+    final nowServing = items.where((item) {
+      return item["status"]?.toString() == "Now Serving";
+    }).toList();
+
+    if (nowServing.isEmpty) {
       return null;
     }
 
-    final customer = nowServingNotifier.value!;
-
-    if (customer["date"] == today) {
-      return customer;
-    }
-
-    return null;
+    return nowServing.last;
   }
 
-  List<Map<String, dynamic>> getTodayWaitingQueue() {
-    final today = todayDate();
-
-    return waitingQueueNotifier.value.where((customer) {
-      return customer["date"] == today;
+  List<Map<String, dynamic>> getWaitingQueue(List<Map<String, dynamic>> items) {
+    return items.where((item) {
+      final status = item["status"]?.toString() ?? "Waiting";
+      return status == "Waiting" || status == "Skipped";
     }).toList();
   }
 
@@ -80,54 +99,77 @@ class DisplayPage extends StatelessWidget {
       data: Theme.of(context).copyWith(
         scaffoldBackgroundColor: _backgroundColor,
         colorScheme: Theme.of(context).colorScheme.copyWith(
-          primary: _primaryColor,
-          onPrimary: Colors.white,
-          surface: _cardColor,
-          onSurface: _primaryColor,
-        ),
+              primary: _primaryColor,
+              onPrimary: Colors.white,
+              surface: _cardColor,
+              onSurface: _primaryColor,
+            ),
       ),
       child: Scaffold(
         backgroundColor: _backgroundColor,
         body: SafeArea(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final bool isWide = constraints.maxWidth >= 900;
-              final bool isShort = constraints.maxHeight < 700;
+          child: StreamBuilder<List<Map<String, dynamic>>>(
+            stream: todayQueueStream(),
+            builder: (context, snapshot) {
+              final List<Map<String, dynamic>> queueItems = snapshot.data ?? [];
 
-              final double pagePadding = isWide ? 32 : 16;
-              final double titleSize = isWide ? 30 : 22;
-              final double queueFontSize = isWide ? 110 : 76;
+              final Map<String, dynamic>? nowServing =
+                  getNowServing(queueItems);
 
-              return SingleChildScrollView(
-                padding: EdgeInsets.all(pagePadding),
-                child: Column(
-                  children: [
-                    buildHeader(
-                      today: today,
-                      titleSize: titleSize,
-                      isShort: isShort,
+              final List<Map<String, dynamic>> waitingQueue =
+                  getWaitingQueue(queueItems);
+
+              return LayoutBuilder(
+                builder: (context, constraints) {
+                  final bool isWide = constraints.maxWidth >= 900;
+                  final bool isShort = constraints.maxHeight < 700;
+
+                  final double pagePadding = isWide ? 32 : 16;
+                  final double titleSize = isWide ? 30 : 22;
+                  final double queueFontSize = isWide ? 110 : 76;
+
+                  return SingleChildScrollView(
+                    padding: EdgeInsets.all(pagePadding),
+                    child: Column(
+                      children: [
+                        buildHeader(
+                          today: today,
+                          titleSize: titleSize,
+                          isShort: isShort,
+                        ),
+
+                        SizedBox(height: isShort ? 18 : 24),
+
+                        if (snapshot.connectionState ==
+                                ConnectionState.waiting &&
+                            !snapshot.hasData)
+                          buildLoadingCard()
+                        else if (snapshot.hasError)
+                          buildErrorCard(snapshot.error.toString())
+                        else ...[
+                          buildNowServingCard(
+                            nowServing: nowServing,
+                            queueFontSize: queueFontSize,
+                            isShort: isShort,
+                          ),
+
+                          SizedBox(height: isShort ? 18 : 24),
+
+                          buildNextInLineCard(
+                            today: today,
+                            waitingQueue: waitingQueue,
+                            isWide: isWide,
+                            isShort: isShort,
+                          ),
+
+                          SizedBox(height: isShort ? 14 : 20),
+
+                          buildAnnouncement(),
+                        ],
+                      ],
                     ),
-
-                    SizedBox(height: isShort ? 18 : 24),
-
-                    buildNowServingCard(
-                      queueFontSize: queueFontSize,
-                      isShort: isShort,
-                    ),
-
-                    SizedBox(height: isShort ? 18 : 24),
-
-                    buildNextInLineCard(
-                      today: today,
-                      isWide: isWide,
-                      isShort: isShort,
-                    ),
-
-                    SizedBox(height: isShort ? 14 : 20),
-
-                    buildAnnouncement(),
-                  ],
-                ),
+                  );
+                },
               );
             },
           ),
@@ -167,9 +209,7 @@ class DisplayPage extends StatelessWidget {
               size: 32,
             ),
           ),
-
           const SizedBox(width: 16),
-
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -206,10 +246,72 @@ class DisplayPage extends StatelessWidget {
   }
 
   // ==========================================================================
+  // LOADING / ERROR
+  // ==========================================================================
+
+  Widget buildLoadingCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(28),
+      decoration: cardDecoration(),
+      child: const Column(
+        children: [
+          CircularProgressIndicator(color: _primaryColor),
+          SizedBox(height: 14),
+          Text(
+            "Loading queue display...",
+            style: TextStyle(
+              color: _mutedTextColor,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildErrorCard(String error) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: cardDecoration(),
+      child: Column(
+        children: [
+          const Icon(
+            Icons.error_outline_rounded,
+            color: _dangerColor,
+            size: 46,
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            "Unable to load queue display",
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: _dangerColor,
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            error,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: _mutedTextColor,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==========================================================================
   // NOW SERVING CARD
   // ==========================================================================
 
   Widget buildNowServingCard({
+    required Map<String, dynamic>? nowServing,
     required double queueFontSize,
     required bool isShort,
   }) {
@@ -224,99 +326,92 @@ class DisplayPage extends StatelessWidget {
           BoxShadow(color: _primaryColor.withOpacity(0.08), blurRadius: 18),
         ],
       ),
-      child: ValueListenableBuilder<Map<String, dynamic>?>(
-        valueListenable: nowServingNotifier,
-        builder: (context, customer, _) {
-          final todayCustomer = getTodayNowServing();
+      child: Column(
+        children: [
+          const Text(
+            "NOW SERVING",
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: _primaryColor,
+              fontSize: 22,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 2,
+            ),
+          ),
 
-          return Column(
-            children: [
-              const Text(
-                "NOW SERVING",
-                textAlign: TextAlign.center,
+          SizedBox(height: isShort ? 14 : 20),
+
+          Container(
+            width: double.infinity,
+            padding: EdgeInsets.symmetric(
+              horizontal: 18,
+              vertical: isShort ? 18 : 26,
+            ),
+            decoration: BoxDecoration(
+              color: _dangerColor.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(26),
+              border: Border.all(color: _dangerColor, width: 3),
+            ),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                nowServing == null ? "-" : nowServing["queue"] ?? "-",
                 style: TextStyle(
+                  color: _dangerColor,
+                  fontSize: queueFontSize,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 4,
+                ),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 14),
+
+          ValueListenableBuilder<bool>(
+            valueListenable: showCustomerNameNotifier,
+            builder: (context, showName, _) {
+              if (!showName) {
+                return const SizedBox.shrink();
+              }
+
+              return Text(
+                nowServing == null
+                    ? "Please wait for today's queue number"
+                    : nowServing["name"] ?? "",
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
                   color: _primaryColor,
                   fontSize: 22,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2,
+                  fontWeight: FontWeight.w800,
                 ),
-              ),
+              );
+            },
+          ),
 
-              SizedBox(height: isShort ? 14 : 20),
+          ValueListenableBuilder<bool>(
+            valueListenable: showVehicleTypeNotifier,
+            builder: (context, showVehicle, _) {
+              if (!showVehicle || nowServing == null) {
+                return const SizedBox.shrink();
+              }
 
-              Container(
-                width: double.infinity,
-                padding: EdgeInsets.symmetric(
-                  horizontal: 18,
-                  vertical: isShort ? 18 : 26,
-                ),
-                decoration: BoxDecoration(
-                  color: _dangerColor.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(26),
-                  border: Border.all(color: _dangerColor, width: 3),
-                ),
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    todayCustomer == null ? "-" : todayCustomer["queue"],
-                    style: TextStyle(
-                      color: _dangerColor,
-                      fontSize: queueFontSize,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 4,
-                    ),
+              return Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  nowServing["type"] ?? "",
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: _mutedTextColor,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-              ),
-
-              const SizedBox(height: 14),
-
-              ValueListenableBuilder<bool>(
-                valueListenable: showCustomerNameNotifier,
-                builder: (context, showName, _) {
-                  if (!showName) {
-                    return const SizedBox.shrink();
-                  }
-
-                  return Text(
-                    todayCustomer == null
-                        ? "Please wait for today's queue number"
-                        : todayCustomer["name"] ?? "",
-                    textAlign: TextAlign.center,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: _primaryColor,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  );
-                },
-              ),
-
-              ValueListenableBuilder<bool>(
-                valueListenable: showVehicleTypeNotifier,
-                builder: (context, showVehicle, _) {
-                  if (!showVehicle || todayCustomer == null) {
-                    return const SizedBox.shrink();
-                  }
-
-                  return Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Text(
-                      todayCustomer["type"] ?? "",
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: _mutedTextColor,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ],
-          );
-        },
+              );
+            },
+          ),
+        ],
       ),
     );
   }
@@ -327,6 +422,7 @@ class DisplayPage extends StatelessWidget {
 
   Widget buildNextInLineCard({
     required String today,
+    required List<Map<String, dynamic>> waitingQueue,
     required bool isWide,
     required bool isShort,
   }) {
@@ -345,35 +441,25 @@ class DisplayPage extends StatelessWidget {
 
           const SizedBox(height: 16),
 
-          ValueListenableBuilder<List<Map<String, dynamic>>>(
-            valueListenable: waitingQueueNotifier,
-            builder: (context, queueList, _) {
-              final todayQueue = getTodayWaitingQueue();
+          if (waitingQueue.isEmpty)
+            emptyQueueBox()
+          else
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: waitingQueue.take(8).length,
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: isWide ? 4 : 2,
+                crossAxisSpacing: 14,
+                mainAxisSpacing: 14,
+                childAspectRatio: isWide ? 2.9 : 2.2,
+              ),
+              itemBuilder: (context, index) {
+                final customer = waitingQueue[index];
 
-              if (todayQueue.isEmpty) {
-                return emptyQueueBox();
-              }
-
-              final visibleList = todayQueue.take(8).toList();
-
-              return GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: visibleList.length,
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: isWide ? 4 : 2,
-                  crossAxisSpacing: 14,
-                  mainAxisSpacing: 14,
-                  childAspectRatio: isWide ? 2.9 : 2.2,
-                ),
-                itemBuilder: (context, index) {
-                  final customer = visibleList[index];
-
-                  return queueTile(customer: customer, index: index);
-                },
-              );
-            },
-          ),
+                return queueTile(customer: customer, index: index);
+              },
+            ),
         ],
       ),
     );
@@ -572,7 +658,10 @@ class DisplayPage extends StatelessWidget {
       borderRadius: BorderRadius.circular(28),
       border: Border.all(color: _borderColor),
       boxShadow: [
-        BoxShadow(color: _primaryColor.withOpacity(0.08), blurRadius: 18),
+        BoxShadow(
+          color: _primaryColor.withOpacity(0.08),
+          blurRadius: 18,
+        ),
       ],
     );
   }

@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -19,6 +21,10 @@ const Color _mutedTextColor = Color(0xFF6E7E88);
 const Color _softPrimaryColor = Color(0xFFEAF4F8);
 
 // ================= GLOBAL BOOKING & QUEUE STORAGE =================
+//
+// These local notifiers are kept temporarily so the current admin dashboard,
+// appointment status page, and existing UI will not break.
+// Firestore is now the permanent backend source for submitted appointments.
 
 ValueNotifier<List<Map<String, dynamic>>> pendingBookings = ValueNotifier([]);
 ValueNotifier<List<Map<String, dynamic>>> approvedBookings = ValueNotifier([]);
@@ -59,9 +65,16 @@ class _BookAppointmentState extends State<BookAppointment> {
   Uint8List? orFileBytes;
   Uint8List? crFileBytes;
 
+  bool isSubmitting = false;
+
   static const int maxQueueLimit = 80;
 
   String get loggedInCustomerName => loggedInCustomerNameNotifier.value.trim();
+
+  String get loggedInCustomerEmail =>
+      loggedInCustomerEmailNotifier.value.trim();
+
+  String get loggedInCustomerId => loggedInCustomerIdNotifier.value.trim();
 
   @override
   void initState() {
@@ -201,6 +214,18 @@ class _BookAppointmentState extends State<BookAppointment> {
         inNowServing;
   }
 
+  Future<bool> isQueueTakenInFirestore(String date, String queueCode) async {
+    final query = await FirebaseFirestore.instance
+        .collection("appointments")
+        .where("date", isEqualTo: date)
+        .where("queue", isEqualTo: queueCode)
+        .where("status", whereIn: ["Pending", "Approved"])
+        .limit(1)
+        .get();
+
+    return query.docs.isNotEmpty;
+  }
+
   String getFirstAvailableQueueCode() {
     final codes = getQueueCodes();
 
@@ -332,12 +357,33 @@ class _BookAppointmentState extends State<BookAppointment> {
     }
   }
 
-  // ================= SUBMIT BOOKING =================
+  // ================= SUBMIT APPOINTMENT =================
 
-  void submitBooking() {
+  Future<void> submitBooking() async {
+    if (isSubmitting) return;
+
+    final User? currentUser = FirebaseAuth.instance.currentUser;
+
     final String customerName = loggedInCustomerName.isNotEmpty
         ? normalizeName(loggedInCustomerName)
         : normalizeName(fullNameController.text);
+
+    final String customerEmail = loggedInCustomerEmail.isNotEmpty
+        ? loggedInCustomerEmail
+        : (currentUser?.email ?? "");
+
+    final String customerId = loggedInCustomerId.isNotEmpty
+        ? loggedInCustomerId
+        : (currentUser?.uid ?? "");
+
+    if (currentUser == null || customerId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Please login first before submitting an appointment."),
+        ),
+      );
+      return;
+    }
 
     if (selectedDate == null ||
         customerName.isEmpty ||
@@ -378,9 +424,39 @@ class _BookAppointmentState extends State<BookAppointment> {
       return;
     }
 
-    pendingBookings.value = [
-      ...pendingBookings.value,
-      {
+    setState(() {
+      isSubmitting = true;
+    });
+
+    try {
+      final bool firestoreQueueTaken =
+          await isQueueTakenInFirestore(formattedDate, selectedQueueCode);
+
+      if (firestoreQueueTaken) {
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              "This queue code was already taken online. Please choose another queue.",
+            ),
+          ),
+        );
+
+        setState(() {
+          selectedQueueCode = getFirstAvailableQueueCode();
+        });
+
+        return;
+      }
+
+      final DocumentReference<Map<String, dynamic>> appointmentRef =
+          FirebaseFirestore.instance.collection("appointments").doc();
+
+      final Map<String, dynamic> appointmentData = {
+        "appointmentId": appointmentRef.id,
+        "customerId": customerId,
+        "customerEmail": customerEmail,
         "fullName": customerName,
         "municipality": selectedMunicipality,
         "plate": plateController.text.trim().toUpperCase(),
@@ -388,23 +464,60 @@ class _BookAppointmentState extends State<BookAppointment> {
         "queue": selectedQueueCode,
         "date": formattedDate,
         "status": "Pending",
+
+        // Firebase Storage is not enabled yet, so we save filenames only for now.
+        // Later, these fields can be replaced or expanded with download URLs.
         "idFile": idFileName,
         "orFile": orFileName,
         "crFile": crFileName,
-        "idPath": idFilePath,
-        "orPath": orFilePath,
-        "crPath": crFilePath,
-        "idBytes": idFileBytes,
-        "orBytes": orFileBytes,
-        "crBytes": crFileBytes,
-      },
-    ];
+        "idFileUrl": "",
+        "orFileUrl": "",
+        "crFileUrl": "",
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Appointment submitted successfully.")),
-    );
+        "source": "Appointment",
+        "createdAt": FieldValue.serverTimestamp(),
+        "updatedAt": FieldValue.serverTimestamp(),
+      };
 
-    Navigator.pop(context);
+      await appointmentRef.set(appointmentData);
+
+      // Keep local data temporarily so current frontend pages still work
+      // until admin dashboard and appointment status are also converted to Firestore.
+      pendingBookings.value = [
+        ...pendingBookings.value,
+        {
+          ...appointmentData,
+          "createdAt": DateTime.now().toIso8601String(),
+          "updatedAt": DateTime.now().toIso8601String(),
+          "idPath": idFilePath,
+          "orPath": orFilePath,
+          "crPath": crFilePath,
+          "idBytes": idFileBytes,
+          "orBytes": orFileBytes,
+          "crBytes": crFileBytes,
+        },
+      ];
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Appointment submitted successfully.")),
+      );
+
+      Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Appointment submission failed: $e")),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          isSubmitting = false;
+        });
+      }
+    }
   }
 
   // ================= UI HELPERS =================
@@ -582,7 +695,7 @@ class _BookAppointmentState extends State<BookAppointment> {
       width: double.infinity,
       height: 54,
       child: OutlinedButton.icon(
-        onPressed: pickDate,
+        onPressed: isSubmitting ? null : pickDate,
         icon: const Icon(Icons.calendar_month_outlined, color: _primaryColor),
         label: Text(
           selectedDate == null ? "Choose Appointment Date" : formattedDate,
@@ -673,7 +786,7 @@ class _BookAppointmentState extends State<BookAppointment> {
             bool selected = selectedQueueCode == code;
 
             return GestureDetector(
-              onTap: taken
+              onTap: taken || isSubmitting
                   ? null
                   : () {
                       setState(() {
@@ -791,7 +904,7 @@ class _BookAppointmentState extends State<BookAppointment> {
             children: [
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: onPick,
+                  onPressed: isSubmitting ? null : onPick,
                   icon: const Icon(Icons.attach_file, size: 18),
                   label: const Text("Choose File"),
                   style: OutlinedButton.styleFrom(
@@ -806,7 +919,7 @@ class _BookAppointmentState extends State<BookAppointment> {
               const SizedBox(width: 10),
               Expanded(
                 child: OutlinedButton.icon(
-                  onPressed: onCamera,
+                  onPressed: isSubmitting ? null : onCamera,
                   icon: const Icon(Icons.camera_alt, size: 18),
                   label: Text(kIsWeb ? "Camera / Photo" : "Take Photo"),
                   style: OutlinedButton.styleFrom(
@@ -887,8 +1000,17 @@ class _BookAppointmentState extends State<BookAppointment> {
             child: SizedBox(
               height: 55,
               child: ElevatedButton(
-                onPressed: submitBooking,
-                child: const Text("SUBMIT APPOINTMENT"),
+                onPressed: isSubmitting ? null : submitBooking,
+                child: isSubmitting
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text("SUBMIT APPOINTMENT"),
               ),
             ),
           ),
@@ -925,12 +1047,14 @@ class _BookAppointmentState extends State<BookAppointment> {
                         child: Text(loc.name),
                       );
                     }).toList(),
-                    onChanged: (v) {
-                      if (v == null) return;
-                      setState(() {
-                        selectedMunicipality = v;
-                      });
-                    },
+                    onChanged: isSubmitting
+                        ? null
+                        : (v) {
+                            if (v == null) return;
+                            setState(() {
+                              selectedMunicipality = v;
+                            });
+                          },
                   ),
 
                   const SizedBox(height: 18),
@@ -946,20 +1070,22 @@ class _BookAppointmentState extends State<BookAppointment> {
                       DropdownMenuItem(value: "Gas", child: Text("Gas")),
                       DropdownMenuItem(value: "Diesel", child: Text("Diesel")),
                     ],
-                    onChanged: (v) {
-                      if (v == null) return;
+                    onChanged: isSubmitting
+                        ? null
+                        : (v) {
+                            if (v == null) return;
 
-                      setState(() {
-                        selectedVehicle = v;
+                            setState(() {
+                              selectedVehicle = v;
 
-                        if (selectedDate != null) {
-                          selectedQueueCode = getFirstAvailableQueueCode();
-                        } else {
-                          selectedQueueCode =
-                              selectedVehicle == "Gas" ? "G001" : "D001";
-                        }
-                      });
-                    },
+                              if (selectedDate != null) {
+                                selectedQueueCode = getFirstAvailableQueueCode();
+                              } else {
+                                selectedQueueCode =
+                                    selectedVehicle == "Gas" ? "G001" : "D001";
+                              }
+                            });
+                          },
                   ),
 
                   const SizedBox(height: 18),
@@ -978,7 +1104,7 @@ class _BookAppointmentState extends State<BookAppointment> {
                 number: "2",
                 title: "Customer Information",
                 subtitle:
-                    "The booking name is linked to the logged-in customer account.",
+                    "The appointment name is linked to the logged-in customer account.",
                 icon: Icons.person_outline,
               ),
               sectionCard(
@@ -986,7 +1112,7 @@ class _BookAppointmentState extends State<BookAppointment> {
                   fieldLabel("Full Name"),
                   TextField(
                     controller: fullNameController,
-                    readOnly: loggedInCustomerName.isNotEmpty,
+                    readOnly: loggedInCustomerName.isNotEmpty || isSubmitting,
                     style: const TextStyle(color: _primaryColor),
                     decoration: formDecoration("Enter full name").copyWith(
                       suffixIcon: loggedInCustomerName.isNotEmpty
@@ -1014,6 +1140,7 @@ class _BookAppointmentState extends State<BookAppointment> {
                   fieldLabel("Plate Number"),
                   TextField(
                     controller: plateController,
+                    enabled: !isSubmitting,
                     textCapitalization: TextCapitalization.characters,
                     style: const TextStyle(color: _primaryColor),
                     decoration: formDecoration("Enter plate number"),

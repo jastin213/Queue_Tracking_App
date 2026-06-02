@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
@@ -73,6 +74,172 @@ class _AdminPageState extends State<AdminPage> {
     return isFilipino ? filipino : english;
   }
 
+  // ================= FIRESTORE HELPERS =================
+
+  String queueDateId(String date) {
+    return date.replaceAll("/", "-");
+  }
+
+  CollectionReference<Map<String, dynamic>> queueItemsRef(String date) {
+    return FirebaseFirestore.instance
+        .collection("queues")
+        .doc(queueDateId(date))
+        .collection("items");
+  }
+
+  Stream<List<Map<String, dynamic>>> queueItemsStream(String date) {
+    return queueItemsRef(date).orderBy("createdAt").snapshots().map((snapshot) {
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+
+        return {
+          ...data,
+          "queueId": data["queueId"] ?? doc.id,
+        };
+      }).toList();
+    });
+  }
+
+  Future<List<Map<String, dynamic>>> getQueueItemsOnline(String date) async {
+    final snapshot = await queueItemsRef(date).get();
+
+    return snapshot.docs.map((doc) {
+      final data = doc.data();
+
+      return {
+        ...data,
+        "queueId": data["queueId"] ?? doc.id,
+      };
+    }).toList();
+  }
+
+  bool isActiveQueueStatus(String status) {
+    return status == "Waiting" ||
+        status == "Now Serving" ||
+        status == "Skipped";
+  }
+
+  void syncLocalQueueFromFirestore(List<Map<String, dynamic>> onlineItems) {
+    final String selectedDate = selectedQueueDateNotifier.value;
+
+    final waiting = onlineItems.where((item) {
+      final status = item["status"]?.toString() ?? "Waiting";
+      return item["date"] == selectedDate &&
+          (status == "Waiting" || status == "Skipped");
+    }).toList();
+
+    final nowServingList = onlineItems.where((item) {
+      return item["date"] == selectedDate &&
+          item["status"]?.toString() == "Now Serving";
+    }).toList();
+
+    final passedList = onlineItems.where((item) {
+      return item["date"] == selectedDate &&
+          item["status"]?.toString() == "Passed";
+    }).toList();
+
+    final failedList = onlineItems.where((item) {
+      return item["date"] == selectedDate &&
+          item["status"]?.toString() == "Failed";
+    }).toList();
+
+    final issuedList = onlineItems.where((item) {
+      final status = item["status"]?.toString() ?? "";
+      return item["date"] == selectedDate &&
+          status != "Cancelled" &&
+          status != "Reset";
+    }).map((item) {
+      return item["queue"].toString();
+    }).toList();
+
+    waitingQueueNotifier.value = waiting;
+
+    nowServingNotifier.value =
+        nowServingList.isEmpty ? null : nowServingList.last;
+
+    issuedQueueCodesNotifier.value = {
+      ...issuedQueueCodesNotifier.value,
+      selectedDate: issuedList,
+    };
+
+    dailyServedReportNotifier.value = {
+      ...dailyServedReportNotifier.value,
+      selectedDate: passedList,
+    };
+
+    dailyFailedReportNotifier.value = {
+      ...dailyFailedReportNotifier.value,
+      selectedDate: failedList,
+    };
+  }
+
+  Future<bool> queueCodeExistsOnline({
+    required String date,
+    required String queueCode,
+  }) async {
+    final snapshot = await queueItemsRef(date).doc(queueCode).get();
+
+    if (!snapshot.exists) {
+      return false;
+    }
+
+    final data = snapshot.data();
+
+    if (data == null) {
+      return false;
+    }
+
+    final status = data["status"]?.toString() ?? "";
+
+    return status != "Cancelled" && status != "Reset";
+  }
+
+  Future<String> generateNextAvailableQueueCodeOnline(String type) async {
+    final String selectedDate = selectedQueueDateNotifier.value;
+    final String prefix = type == "Gas" ? "G" : "D";
+
+    for (int number = 1; number <= maxQueueLimit; number++) {
+      final String queueCode = "$prefix${number.toString().padLeft(3, '0')}";
+
+      final bool existsLocally = queueCodeExistsOnSelectedDate(queueCode);
+      final bool existsOnline = await queueCodeExistsOnline(
+        date: selectedDate,
+        queueCode: queueCode,
+      );
+
+      if (!existsLocally && !existsOnline) {
+        return queueCode;
+      }
+    }
+
+    return "";
+  }
+
+  Future<void> updateQueueItemStatus({
+    required Map<String, dynamic> customer,
+    required String status,
+    Map<String, dynamic>? extraData,
+  }) async {
+    final String date =
+        customer["date"]?.toString() ?? selectedQueueDateNotifier.value;
+    final String queue = customer["queue"]?.toString() ?? "";
+
+    if (date.isEmpty || queue.isEmpty) return;
+
+    await queueItemsRef(date).doc(queue).set(
+      {
+        ...customer,
+        "queueId": queue,
+        "queue": queue,
+        "date": date,
+        "status": status,
+        "updatedAt": FieldValue.serverTimestamp(),
+        ...?extraData,
+      },
+      SetOptions(merge: true),
+    );
+  }
+
   // ================= SPEAK =================
 
   Future<void> speak(String queueNumber) async {
@@ -128,7 +295,10 @@ class _AdminPageState extends State<AdminPage> {
 
   List<Map<String, dynamic>> getQueueForSelectedDate() {
     return waitingQueueNotifier.value.where((customer) {
-      return customer["date"] == selectedQueueDateNotifier.value;
+      final status = customer["status"]?.toString() ?? "Waiting";
+
+      return customer["date"] == selectedQueueDateNotifier.value &&
+          (status == "Waiting" || status == "Skipped");
     }).toList();
   }
 
@@ -170,7 +340,11 @@ class _AdminPageState extends State<AdminPage> {
             false;
 
     bool inWaiting = waitingQueueNotifier.value.any((customer) {
-      return customer["date"] == selectedDate && customer["queue"] == queueCode;
+      final status = customer["status"]?.toString() ?? "Waiting";
+      return customer["date"] == selectedDate &&
+          customer["queue"] == queueCode &&
+          status != "Cancelled" &&
+          status != "Reset";
     });
 
     bool inNowServing =
@@ -282,9 +456,15 @@ class _AdminPageState extends State<AdminPage> {
                 borderRadius: BorderRadius.circular(14),
               ),
             ),
-            onPressed: () {
-              generateQueue(type, nameController.text.trim());
-              Navigator.pop(context);
+            onPressed: () async {
+              final success = await generateQueue(
+                type,
+                nameController.text.trim(),
+              );
+
+              if (success && context.mounted) {
+                Navigator.pop(context);
+              }
             },
             child: Text(text("Generate Queue", "Gumawa ng Queue")),
           ),
@@ -295,7 +475,7 @@ class _AdminPageState extends State<AdminPage> {
 
   // ================= GENERATE QUEUE =================
 
-  void generateQueue(String type, String name) {
+  Future<bool> generateQueue(String type, String name) async {
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -307,7 +487,7 @@ class _AdminPageState extends State<AdminPage> {
           ),
         ),
       );
-      return;
+      return false;
     }
 
     final String selectedDate = selectedQueueDateNotifier.value;
@@ -323,10 +503,10 @@ class _AdminPageState extends State<AdminPage> {
           ),
         ),
       );
-      return;
+      return false;
     }
 
-    String queueNumber = generateNextAvailableQueueCode(type);
+    String queueNumber = await generateNextAvailableQueueCodeOnline(type);
 
     if (queueNumber.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -339,57 +519,104 @@ class _AdminPageState extends State<AdminPage> {
           ),
         ),
       );
-      return;
+      return false;
     }
 
-    final updatedQueue = List<Map<String, dynamic>>.from(
-      waitingQueueNotifier.value,
-    );
-
-    updatedQueue.add({
+    final Map<String, dynamic> queueData = {
+      "queueId": queueNumber,
       "queue": queueNumber,
       "name": name,
       "type": type,
       "date": selectedDate,
       "source": "Walk-in",
-    });
+      "status": "Waiting",
+      "createdAt": FieldValue.serverTimestamp(),
+      "updatedAt": FieldValue.serverTimestamp(),
+    };
 
-    waitingQueueNotifier.value = updatedQueue;
+    try {
+      await queueItemsRef(selectedDate).doc(queueNumber).set(queueData);
 
-    markQueueCodeAsIssued(selectedDate, queueNumber);
+      final updatedQueue = List<Map<String, dynamic>>.from(
+        waitingQueueNotifier.value,
+      );
 
-    setState(() {
-      totalQueue++;
-    });
+      updatedQueue.add({
+        "queueId": queueNumber,
+        "queue": queueNumber,
+        "name": name,
+        "type": type,
+        "date": selectedDate,
+        "source": "Walk-in",
+        "status": "Waiting",
+      });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          text(
-            "$queueNumber added to queue",
-            "Naidagdag ang $queueNumber sa queue",
+      waitingQueueNotifier.value = updatedQueue;
+
+      markQueueCodeAsIssued(selectedDate, queueNumber);
+
+      setState(() {
+        totalQueue++;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            text(
+              "$queueNumber added to queue",
+              "Naidagdag ang $queueNumber sa queue",
+            ),
           ),
         ),
-      ),
-    );
+      );
+
+      return true;
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Failed to save queue online: $e")),
+      );
+
+      return false;
+    }
   }
 
   // ================= CALL CUSTOMER =================
 
-  void callCustomer(Map<String, dynamic> customer) async {
-    final updatedQueue = List<Map<String, dynamic>>.from(
-      waitingQueueNotifier.value,
-    );
+  Future<void> callCustomer(Map<String, dynamic> customer) async {
+    try {
+      await updateQueueItemStatus(
+        customer: customer,
+        status: "Now Serving",
+        extraData: {
+          "calledAt": FieldValue.serverTimestamp(),
+          "source": customer["source"] ?? "Walk-in",
+        },
+      );
 
-    updatedQueue.remove(customer);
+      final updatedQueue = List<Map<String, dynamic>>.from(
+        waitingQueueNotifier.value,
+      );
 
-    waitingQueueNotifier.value = updatedQueue;
+      updatedQueue.removeWhere((item) {
+        return item["queue"] == customer["queue"] &&
+            item["date"] == customer["date"];
+      });
 
-    nowServingNotifier.value = customer;
+      waitingQueueNotifier.value = updatedQueue;
 
-    await speak(customer['queue']);
+      nowServingNotifier.value = {
+        ...customer,
+        "status": "Now Serving",
+      };
 
-    setState(() {});
+      await speak(customer['queue']);
+
+      setState(() {});
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Failed to call customer: $e")),
+      );
+    }
   }
 
   // ================= CALL AGAIN =================
@@ -416,7 +643,7 @@ class _AdminPageState extends State<AdminPage> {
 
   // ================= SKIP CUSTOMER =================
 
-  void skipCustomer() {
+  Future<void> skipCustomer() async {
     final customer = getDisplayedNowServing();
 
     if (customer == null) {
@@ -430,32 +657,51 @@ class _AdminPageState extends State<AdminPage> {
       return;
     }
 
-    final skippedCustomer = {...customer, "source": "Skipped / No Show"};
+    final skippedCustomer = {
+      ...customer,
+      "source": "Skipped / No Show",
+      "status": "Skipped",
+    };
 
-    waitingQueueNotifier.value = [
-      ...waitingQueueNotifier.value,
-      skippedCustomer,
-    ];
+    try {
+      await updateQueueItemStatus(
+        customer: skippedCustomer,
+        status: "Skipped",
+        extraData: {
+          "source": "Skipped / No Show",
+          "skippedAt": FieldValue.serverTimestamp(),
+        },
+      );
 
-    nowServingNotifier.value = null;
+      waitingQueueNotifier.value = [
+        ...waitingQueueNotifier.value,
+        skippedCustomer,
+      ];
 
-    setState(() {});
+      nowServingNotifier.value = null;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          text(
-            "${skippedCustomer['queue']} skipped and moved to bottom queue",
-            "Na-skip ang ${skippedCustomer['queue']} at nailipat sa dulo ng queue",
+      setState(() {});
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            text(
+              "${skippedCustomer['queue']} skipped and moved to bottom queue",
+              "Na-skip ang ${skippedCustomer['queue']} at nailipat sa dulo ng queue",
+            ),
           ),
         ),
-      ),
-    );
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Failed to skip customer: $e")),
+      );
+    }
   }
 
   // ================= PASSED =================
 
-  void markPassed() {
+  Future<void> markPassed() async {
     final customer = getDisplayedNowServing();
 
     if (customer == null) {
@@ -473,56 +719,74 @@ class _AdminPageState extends State<AdminPage> {
     }
 
     final String date = customer["date"] ?? selectedQueueDateNotifier.value;
+    final String time = TimeOfDay.now().format(context);
 
-    final updatedServed = Map<String, List<Map<String, dynamic>>>.from(
-      dailyServedReportNotifier.value,
-    );
+    try {
+      await updateQueueItemStatus(
+        customer: customer,
+        status: "Passed",
+        extraData: {
+          "result": "Passed",
+          "time": time,
+          "completedAt": FieldValue.serverTimestamp(),
+        },
+      );
 
-    final servedList = List<Map<String, dynamic>>.from(
-      updatedServed[date] ?? [],
-    );
+      final updatedServed = Map<String, List<Map<String, dynamic>>>.from(
+        dailyServedReportNotifier.value,
+      );
 
-    servedList.add({
-      ...customer,
-      "result": "Passed",
-      "time": TimeOfDay.now().format(context),
-    });
+      final servedList = List<Map<String, dynamic>>.from(
+        updatedServed[date] ?? [],
+      );
 
-    updatedServed[date] = servedList;
-    dailyServedReportNotifier.value = updatedServed;
+      servedList.add({
+        ...customer,
+        "result": "Passed",
+        "status": "Passed",
+        "time": time,
+      });
 
-    final updatedOldHistory = Map<String, List<String>>.from(
-      dailyHistoryNotifier.value,
-    );
+      updatedServed[date] = servedList;
+      dailyServedReportNotifier.value = updatedServed;
 
-    final oldList = List<String>.from(updatedOldHistory[date] ?? []);
+      final updatedOldHistory = Map<String, List<String>>.from(
+        dailyHistoryNotifier.value,
+      );
 
-    oldList.add(customer["queue"]);
+      final oldList = List<String>.from(updatedOldHistory[date] ?? []);
 
-    updatedOldHistory[date] = oldList;
-    dailyHistoryNotifier.value = updatedOldHistory;
+      oldList.add(customer["queue"]);
 
-    nowServingNotifier.value = null;
+      updatedOldHistory[date] = oldList;
+      dailyHistoryNotifier.value = updatedOldHistory;
 
-    setState(() {
-      completedQueue++;
-    });
+      nowServingNotifier.value = null;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          text(
-            "${customer['queue']} marked as passed",
-            "Naipasa ang ${customer['queue']}",
+      setState(() {
+        completedQueue++;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            text(
+              "${customer['queue']} marked as passed",
+              "Naipasa ang ${customer['queue']}",
+            ),
           ),
         ),
-      ),
-    );
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Failed to mark as passed: $e")),
+      );
+    }
   }
 
   // ================= FAILED =================
 
-  void markFailed() {
+  Future<void> markFailed() async {
     final customer = getDisplayedNowServing();
 
     if (customer == null) {
@@ -540,63 +804,98 @@ class _AdminPageState extends State<AdminPage> {
     }
 
     final String date = customer["date"] ?? selectedQueueDateNotifier.value;
+    final String time = TimeOfDay.now().format(context);
 
-    final updatedFailed = Map<String, List<Map<String, dynamic>>>.from(
-      dailyFailedReportNotifier.value,
-    );
+    try {
+      await updateQueueItemStatus(
+        customer: customer,
+        status: "Failed",
+        extraData: {
+          "result": "Failed",
+          "time": time,
+          "completedAt": FieldValue.serverTimestamp(),
+        },
+      );
 
-    final failedList = List<Map<String, dynamic>>.from(
-      updatedFailed[date] ?? [],
-    );
+      final updatedFailed = Map<String, List<Map<String, dynamic>>>.from(
+        dailyFailedReportNotifier.value,
+      );
 
-    failedList.add({
-      ...customer,
-      "result": "Failed",
-      "time": TimeOfDay.now().format(context),
-    });
+      final failedList = List<Map<String, dynamic>>.from(
+        updatedFailed[date] ?? [],
+      );
 
-    updatedFailed[date] = failedList;
-    dailyFailedReportNotifier.value = updatedFailed;
+      failedList.add({
+        ...customer,
+        "result": "Failed",
+        "status": "Failed",
+        "time": time,
+      });
 
-    nowServingNotifier.value = null;
+      updatedFailed[date] = failedList;
+      dailyFailedReportNotifier.value = updatedFailed;
 
-    setState(() {});
+      nowServingNotifier.value = null;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          text(
-            "${customer['queue']} marked as failed",
-            "Na-failed ang ${customer['queue']}",
+      setState(() {});
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            text(
+              "${customer['queue']} marked as failed",
+              "Na-failed ang ${customer['queue']}",
+            ),
           ),
         ),
-      ),
-    );
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Failed to mark as failed: $e")),
+      );
+    }
   }
 
   // ================= CANCEL QUEUE =================
 
-  void cancelQueue(Map<String, dynamic> customer) {
-    final updatedQueue = List<Map<String, dynamic>>.from(
-      waitingQueueNotifier.value,
-    );
+  Future<void> cancelQueue(Map<String, dynamic> customer) async {
+    try {
+      await updateQueueItemStatus(
+        customer: customer,
+        status: "Cancelled",
+        extraData: {
+          "cancelledAt": FieldValue.serverTimestamp(),
+        },
+      );
 
-    updatedQueue.remove(customer);
+      final updatedQueue = List<Map<String, dynamic>>.from(
+        waitingQueueNotifier.value,
+      );
 
-    waitingQueueNotifier.value = updatedQueue;
+      updatedQueue.removeWhere((item) {
+        return item["queue"] == customer["queue"] &&
+            item["date"] == customer["date"];
+      });
 
-    setState(() {});
+      waitingQueueNotifier.value = updatedQueue;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          text(
-            "${customer['queue']} removed from queue",
-            "Naalis ang ${customer['queue']} sa queue",
+      setState(() {});
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            text(
+              "${customer['queue']} removed from queue",
+              "Naalis ang ${customer['queue']} sa queue",
+            ),
           ),
         ),
-      ),
-    );
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Failed to cancel queue: $e")),
+      );
+    }
   }
 
   // ================= DAILY RESET =================
@@ -616,8 +915,8 @@ class _AdminPageState extends State<AdminPage> {
         ),
         content: Text(
           text(
-            "This will clear all queues and start a new day.",
-            "Mabubura ang lahat ng queue at magsisimula ng bagong araw.",
+            "This will clear the active queues for the selected date.",
+            "Mabubura ang active queues para sa napiling petsa.",
           ),
           style: const TextStyle(color: _mutedTextColor, height: 1.4),
         ),
@@ -642,33 +941,70 @@ class _AdminPageState extends State<AdminPage> {
                 borderRadius: BorderRadius.circular(14),
               ),
             ),
-            onPressed: () {
-              waitingQueueNotifier.value = [];
-              nowServingNotifier.value = null;
-              issuedQueueCodesNotifier.value = {};
+            onPressed: () async {
+              final String selectedDate = selectedQueueDateNotifier.value;
 
-              gasCounter = 1;
-              dieselCounter = 1;
+              try {
+                final onlineItems = await getQueueItemsOnline(selectedDate);
 
-              totalQueue = 0;
-              completedQueue = 0;
+                final batch = FirebaseFirestore.instance.batch();
 
-              selectedQueueDateNotifier.value = formatDate(DateTime.now());
+                for (final item in onlineItems) {
+                  final status = item["status"]?.toString() ?? "";
 
-              setState(() {});
+                  if (status == "Waiting" ||
+                      status == "Now Serving" ||
+                      status == "Skipped") {
+                    final queue = item["queue"]?.toString() ?? "";
 
-              Navigator.pop(context);
+                    if (queue.isNotEmpty) {
+                      batch.update(queueItemsRef(selectedDate).doc(queue), {
+                        "status": "Reset",
+                        "resetAt": FieldValue.serverTimestamp(),
+                        "updatedAt": FieldValue.serverTimestamp(),
+                      });
+                    }
+                  }
+                }
 
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    text(
-                      "System reset for new day",
-                      "Na-reset ang system para sa bagong araw",
+                await batch.commit();
+
+                waitingQueueNotifier.value = [];
+                nowServingNotifier.value = null;
+                issuedQueueCodesNotifier.value = {
+                  ...issuedQueueCodesNotifier.value,
+                  selectedDate: [],
+                };
+
+                gasCounter = 1;
+                dieselCounter = 1;
+
+                totalQueue = 0;
+                completedQueue = 0;
+
+                setState(() {});
+
+                if (context.mounted) {
+                  Navigator.pop(context);
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        text(
+                          "Queue reset for selected date",
+                          "Na-reset ang queue para sa napiling petsa",
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-              );
+                  );
+                }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text("Reset failed: $e")),
+                  );
+                }
+              }
             },
             child: Text(text("Confirm", "Kumpirmahin")),
           ),
@@ -687,116 +1023,137 @@ class _AdminPageState extends State<AdminPage> {
 
   @override
   Widget build(BuildContext context) {
-    List<Map<String, dynamic>> selectedDateQueue = getQueueForSelectedDate();
-    Map<String, dynamic>? displayedNowServing = getDisplayedNowServing();
+    return ValueListenableBuilder<String>(
+      valueListenable: selectedQueueDateNotifier,
+      builder: (context, selectedDate, _) {
+        return StreamBuilder<List<Map<String, dynamic>>>(
+          stream: queueItemsStream(selectedDate),
+          builder: (context, snapshot) {
+            if (snapshot.hasData) {
+              syncLocalQueueFromFirestore(snapshot.data!);
+            }
 
-    return Theme(
-      data: Theme.of(context).copyWith(
-        scaffoldBackgroundColor: _backgroundColor,
-        colorScheme: Theme.of(context).colorScheme.copyWith(
-          primary: _primaryColor,
-          onPrimary: Colors.white,
-          surface: _cardColor,
-          onSurface: _primaryColor,
-        ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: _backgroundColor,
-          foregroundColor: _primaryColor,
-          elevation: 0,
-          centerTitle: false,
-          titleTextStyle: TextStyle(
-            color: _primaryColor,
-            fontSize: 20,
-            fontWeight: FontWeight.w800,
-            letterSpacing: 0.4,
-          ),
-        ),
-        elevatedButtonTheme: ElevatedButtonThemeData(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: _primaryColor,
-            foregroundColor: Colors.white,
-            elevation: 2,
-            shadowColor: _primaryColor.withOpacity(0.16),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
-            textStyle: const TextStyle(
-              fontWeight: FontWeight.w800,
-              letterSpacing: 0.4,
-            ),
-          ),
-        ),
-      ),
-      child: Scaffold(
-        backgroundColor: _backgroundColor,
-        drawer: buildDrawer(),
-        appBar: AppBar(
-          title: Text(text("Admin Control Panel", "Admin Control Panel")),
-        ),
-        body: SafeArea(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final bool wide = isWideScreen(constraints.maxWidth);
-              final bool tablet = isTabletScreen(constraints.maxWidth);
-              final double pagePadding = wide ? 20 : 12;
+            List<Map<String, dynamic>> selectedDateQueue =
+                getQueueForSelectedDate();
+            Map<String, dynamic>? displayedNowServing =
+                getDisplayedNowServing();
 
-              final double waitingListHeight = wide || tablet
-                  ? (constraints.maxHeight - 420).clamp(360.0, 720.0)
-                  : 430.0;
-
-              return SingleChildScrollView(
-                padding: EdgeInsets.all(pagePadding),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    minHeight: constraints.maxHeight - (pagePadding * 2),
-                  ),
-                  child: Column(
-                    children: [
-                      buildDateSelector(),
-                      const SizedBox(height: 14),
-                      buildStatsSection(
-                        selectedDateQueue: selectedDateQueue,
-                        compact: !wide,
-                      ),
-                      const SizedBox(height: 18),
-                      if (wide || tablet)
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SizedBox(
-                              width: wide ? 245 : 215,
-                              child: buildLeftPanel(),
-                            ),
-                            const SizedBox(width: 18),
-                            Expanded(
-                              child: buildRightPanel(
-                                selectedDateQueue: selectedDateQueue,
-                                displayedNowServing: displayedNowServing,
-                                waitingListHeight: waitingListHeight,
-                              ),
-                            ),
-                          ],
-                        )
-                      else
-                        Column(
-                          children: [
-                            buildLeftPanel(),
-                            const SizedBox(height: 16),
-                            buildRightPanel(
-                              selectedDateQueue: selectedDateQueue,
-                              displayedNowServing: displayedNowServing,
-                              waitingListHeight: waitingListHeight,
-                            ),
-                          ],
-                        ),
-                    ],
+            return Theme(
+              data: Theme.of(context).copyWith(
+                scaffoldBackgroundColor: _backgroundColor,
+                colorScheme: Theme.of(context).colorScheme.copyWith(
+                      primary: _primaryColor,
+                      onPrimary: Colors.white,
+                      surface: _cardColor,
+                      onSurface: _primaryColor,
+                    ),
+                appBarTheme: const AppBarTheme(
+                  backgroundColor: _backgroundColor,
+                  foregroundColor: _primaryColor,
+                  elevation: 0,
+                  centerTitle: false,
+                  titleTextStyle: TextStyle(
+                    color: _primaryColor,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.4,
                   ),
                 ),
-              );
-            },
-          ),
-        ),
-      ),
+                elevatedButtonTheme: ElevatedButtonThemeData(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _primaryColor,
+                    foregroundColor: Colors.white,
+                    elevation: 2,
+                    shadowColor: _primaryColor.withOpacity(0.16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    textStyle: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                ),
+              ),
+              child: Scaffold(
+                backgroundColor: _backgroundColor,
+                drawer: buildDrawer(),
+                appBar: AppBar(
+                  title:
+                      Text(text("Admin Control Panel", "Admin Control Panel")),
+                ),
+                body: SafeArea(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final bool wide = isWideScreen(constraints.maxWidth);
+                      final bool tablet =
+                          isTabletScreen(constraints.maxWidth);
+                      final double pagePadding = wide ? 20 : 12;
+
+                      final double waitingListHeight = wide || tablet
+                          ? (constraints.maxHeight - 420).clamp(360.0, 720.0)
+                          : 430.0;
+
+                      return SingleChildScrollView(
+                        padding: EdgeInsets.all(pagePadding),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minHeight:
+                                constraints.maxHeight - (pagePadding * 2),
+                          ),
+                          child: Column(
+                            children: [
+                              buildDateSelector(),
+                              const SizedBox(height: 14),
+                              buildStatsSection(
+                                selectedDateQueue: selectedDateQueue,
+                                compact: !wide,
+                              ),
+                              const SizedBox(height: 18),
+                              if (wide || tablet)
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    SizedBox(
+                                      width: wide ? 245 : 215,
+                                      child: buildLeftPanel(),
+                                    ),
+                                    const SizedBox(width: 18),
+                                    Expanded(
+                                      child: buildRightPanel(
+                                        selectedDateQueue: selectedDateQueue,
+                                        displayedNowServing:
+                                            displayedNowServing,
+                                        waitingListHeight: waitingListHeight,
+                                      ),
+                                    ),
+                                  ],
+                                )
+                              else
+                                Column(
+                                  children: [
+                                    buildLeftPanel(),
+                                    const SizedBox(height: 16),
+                                    buildRightPanel(
+                                      selectedDateQueue: selectedDateQueue,
+                                      displayedNowServing:
+                                          displayedNowServing,
+                                      waitingListHeight: waitingListHeight,
+                                    ),
+                                  ],
+                                ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -1322,7 +1679,7 @@ class _AdminPageState extends State<AdminPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                customer['queue'],
+                customer['queue'] ?? "-",
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   fontSize: 18,
@@ -1332,7 +1689,7 @@ class _AdminPageState extends State<AdminPage> {
               ),
               const SizedBox(height: 3),
               Text(
-                customer['name'],
+                customer['name'] ?? "-",
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   color: _mutedTextColor,

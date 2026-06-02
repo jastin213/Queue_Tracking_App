@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "725297483957",
+    "project_id": "npjn-queue-system-jkr",
+    "storage_bucket": "npjn-queue-system-jkr.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:725297483957:android:4375108c2532e45c00eefc",
+        "android_client_info": {
+          "package_name": "com.example.queue_tracking_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBwEDKsjPo1iWfD-lEwYAP5EdXCDUAmZH4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
