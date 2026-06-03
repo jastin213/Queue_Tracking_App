@@ -21,7 +21,18 @@ class AdminDashboard extends StatefulWidget {
 }
 
 class _AdminDashboardState extends State<AdminDashboard> {
-  // ================= FIRESTORE STREAMS =================
+  // ================= FIRESTORE HELPERS =================
+
+  String queueDateId(String date) {
+    return date.replaceAll("/", "-");
+  }
+
+  CollectionReference<Map<String, dynamic>> queueItemsRef(String date) {
+    return FirebaseFirestore.instance
+        .collection("queues")
+        .doc(queueDateId(date))
+        .collection("items");
+  }
 
   Stream<List<Map<String, dynamic>>> appointmentStreamByStatus(String status) {
     return FirebaseFirestore.instance
@@ -31,6 +42,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         .map((snapshot) {
       final list = snapshot.docs.map((doc) {
         final data = doc.data();
+
         return {
           ...data,
           "appointmentId": data["appointmentId"] ?? doc.id,
@@ -52,27 +64,33 @@ class _AdminDashboardState extends State<AdminDashboard> {
     });
   }
 
-  Future<Map<String, int>> getAppointmentCounts() async {
-    final pending = await FirebaseFirestore.instance
+  Stream<Map<String, int>> appointmentCountsStream() {
+    return FirebaseFirestore.instance
         .collection("appointments")
-        .where("status", isEqualTo: "Pending")
-        .get();
+        .snapshots()
+        .map((snapshot) {
+      int pending = 0;
+      int approved = 0;
+      int rejected = 0;
 
-    final approved = await FirebaseFirestore.instance
-        .collection("appointments")
-        .where("status", isEqualTo: "Approved")
-        .get();
+      for (final doc in snapshot.docs) {
+        final status = doc.data()["status"]?.toString() ?? "";
 
-    final rejected = await FirebaseFirestore.instance
-        .collection("appointments")
-        .where("status", isEqualTo: "Rejected")
-        .get();
+        if (status == "Pending") {
+          pending++;
+        } else if (status == "Approved") {
+          approved++;
+        } else if (status == "Rejected") {
+          rejected++;
+        }
+      }
 
-    return {
-      "Pending": pending.docs.length,
-      "Approved": approved.docs.length,
-      "Rejected": rejected.docs.length,
-    };
+      return {
+        "Pending": pending,
+        "Approved": approved,
+        "Rejected": rejected,
+      };
+    });
   }
 
   // ================= CHECK IF QUEUE IS ALREADY USED =================
@@ -97,7 +115,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return inIssued || inWaitingQueue || inNowServing;
   }
 
-  Future<bool> isQueueAlreadyUsedInFirestore(
+  Future<bool> isQueueAlreadyUsedInApprovedAppointments(
     Map<String, dynamic> booking,
   ) async {
     final String bookingQueue = booking["queue"]?.toString() ?? "";
@@ -122,6 +140,33 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
 
     return false;
+  }
+
+  Future<bool> isQueueAlreadyUsedInFirestoreQueue({
+    required String date,
+    required String queue,
+  }) async {
+    if (date.isEmpty || queue.isEmpty) {
+      return false;
+    }
+
+    final doc = await queueItemsRef(date).doc(queue).get();
+
+    if (!doc.exists) {
+      return false;
+    }
+
+    final data = doc.data();
+
+    if (data == null) {
+      return false;
+    }
+
+    final status = data["status"]?.toString() ?? "";
+
+    return status == "Waiting" ||
+        status == "Now Serving" ||
+        status == "Skipped";
   }
 
   void markQueueCodeAsIssuedForBooking(String date, String queueCode) {
@@ -151,15 +196,54 @@ class _AdminDashboardState extends State<AdminDashboard> {
       waitingQueueNotifier.value = [
         ...waitingQueueNotifier.value,
         {
+          "queueId": approved["queue"],
           "queue": approved["queue"],
           "name": approved["fullName"] ?? approved["plate"],
           "type": approved["vehicle"],
           "date": approved["date"],
           "source": "Appointment",
           "municipality": approved["municipality"],
+          "status": "Waiting",
+          "appointmentId": approved["appointmentId"],
+          "customerId": approved["customerId"],
+          "customerEmail": approved["customerEmail"],
+          "plate": approved["plate"],
         },
       ];
     }
+  }
+
+  Future<void> addApprovedAppointmentToFirestoreQueue(
+    Map<String, dynamic> approved,
+  ) async {
+    final String queue = approved["queue"]?.toString() ?? "";
+    final String date = approved["date"]?.toString() ?? "";
+
+    if (queue.isEmpty || date.isEmpty) {
+      throw Exception("Queue code or appointment date is missing.");
+    }
+
+    final Map<String, dynamic> queueData = {
+      "queueId": queue,
+      "queue": queue,
+      "name": approved["fullName"] ?? approved["plate"] ?? "-",
+      "type": approved["vehicle"] ?? "-",
+      "date": date,
+      "source": "Appointment",
+      "status": "Waiting",
+      "municipality": approved["municipality"] ?? "",
+      "appointmentId": approved["appointmentId"] ?? "",
+      "customerId": approved["customerId"] ?? "",
+      "customerEmail": approved["customerEmail"] ?? "",
+      "plate": approved["plate"] ?? "",
+      "createdAt": FieldValue.serverTimestamp(),
+      "updatedAt": FieldValue.serverTimestamp(),
+    };
+
+    await queueItemsRef(date).doc(queue).set(
+          queueData,
+          SetOptions(merge: true),
+        );
   }
 
   // ================= APPROVE APPOINTMENT =================
@@ -176,6 +260,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
       return false;
     }
 
+    if (queue.isEmpty || date.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Queue code or appointment date is missing."),
+        ),
+      );
+      return false;
+    }
+
     if (isQueueAlreadyUsedLocally(booking)) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -187,15 +280,34 @@ class _AdminDashboardState extends State<AdminDashboard> {
       return false;
     }
 
-    final bool usedOnline = await isQueueAlreadyUsedInFirestore(booking);
+    final bool usedInApprovedAppointments =
+        await isQueueAlreadyUsedInApprovedAppointments(booking);
 
-    if (usedOnline) {
+    if (usedInApprovedAppointments) {
       if (!mounted) return false;
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             "$queue is already approved online for $date.",
+          ),
+        ),
+      );
+      return false;
+    }
+
+    final bool usedInQueue = await isQueueAlreadyUsedInFirestoreQueue(
+      date: date,
+      queue: queue,
+    );
+
+    if (usedInQueue) {
+      if (!mounted) return false;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "$queue already exists in the live queue for $date.",
           ),
         ),
       );
@@ -210,14 +322,42 @@ class _AdminDashboardState extends State<AdminDashboard> {
         "approvedAt": FieldValue.serverTimestamp(),
       };
 
-      await FirebaseFirestore.instance
+      final batch = FirebaseFirestore.instance.batch();
+
+      final appointmentRef = FirebaseFirestore.instance
           .collection("appointments")
-          .doc(appointmentId)
-          .update({
+          .doc(appointmentId);
+
+      final queueRef = queueItemsRef(date).doc(queue);
+
+      batch.update(appointmentRef, {
         "status": "Approved",
         "updatedAt": FieldValue.serverTimestamp(),
         "approvedAt": FieldValue.serverTimestamp(),
       });
+
+      batch.set(
+        queueRef,
+        {
+          "queueId": queue,
+          "queue": queue,
+          "name": booking["fullName"] ?? booking["plate"] ?? "-",
+          "type": booking["vehicle"] ?? "-",
+          "date": date,
+          "source": "Appointment",
+          "status": "Waiting",
+          "municipality": booking["municipality"] ?? "",
+          "appointmentId": appointmentId,
+          "customerId": booking["customerId"] ?? "",
+          "customerEmail": booking["customerEmail"] ?? "",
+          "plate": booking["plate"] ?? "",
+          "createdAt": FieldValue.serverTimestamp(),
+          "updatedAt": FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+
+      await batch.commit();
 
       pendingBookings.value =
           pendingBookings.value.where((b) => b != booking).toList();
@@ -236,7 +376,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
       if (!mounted) return true;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("$queue approved for $date")),
+        SnackBar(
+          content: Text(
+            "$queue approved and added to live queue for $date",
+          ),
+        ),
       );
 
       return true;
@@ -939,8 +1083,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
                 const SizedBox(height: 14),
 
-                FutureBuilder<Map<String, int>>(
-                  future: getAppointmentCounts(),
+                StreamBuilder<Map<String, int>>(
+                  stream: appointmentCountsStream(),
                   builder: (context, snapshot) {
                     final counts = snapshot.data ??
                         {
@@ -1008,7 +1152,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             stream: appointmentStreamByStatus("Pending"),
                             builder: (context, snapshot) {
                               if (snapshot.connectionState ==
-                                  ConnectionState.waiting) {
+                                      ConnectionState.waiting &&
+                                  !snapshot.hasData) {
                                 return const Center(
                                   child: CircularProgressIndicator(
                                     color: _primaryColor,
@@ -1041,6 +1186,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                 itemCount: bookings.length,
                                 itemBuilder: (context, index) {
                                   final booking = bookings[index];
+
                                   return pendingAppointmentCard(booking);
                                 },
                               );

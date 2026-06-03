@@ -1,4 +1,7 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+
 import 'admin_page.dart';
 
 const Color _backgroundColor = Color(0xFFF1FAFC);
@@ -16,31 +19,141 @@ class AdminLogin extends StatefulWidget {
 }
 
 class _AdminLoginState extends State<AdminLogin> {
-  final TextEditingController _username = TextEditingController();
+  final TextEditingController _email = TextEditingController();
   final TextEditingController _password = TextEditingController();
 
-  final String adminUser = "admin";
-  final String adminPass = "1234";
-
   bool _obscurePassword = true;
+  bool _isLoading = false;
 
   @override
   void dispose() {
-    _username.dispose();
+    _email.dispose();
     _password.dispose();
     super.dispose();
   }
 
-  void login() {
-    if (_username.text == adminUser && _password.text == adminPass) {
+  String getFirebaseErrorMessage(FirebaseAuthException e) {
+    if (e.code == "invalid-email") {
+      return "Please enter a valid email address.";
+    }
+
+    if (e.code == "user-not-found") {
+      return "Admin account not found.";
+    }
+
+    if (e.code == "wrong-password") {
+      return "Incorrect password.";
+    }
+
+    if (e.code == "invalid-credential") {
+      return "Invalid email or password.";
+    }
+
+    if (e.code == "network-request-failed") {
+      return "Network error. Please check your internet connection.";
+    }
+
+    return e.message ?? "Admin login failed.";
+  }
+
+  Future<void> login() async {
+    final String email = _email.text.trim();
+    final String password = _password.text.trim();
+
+    if (email.isEmpty || password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please enter admin email and password.")),
+      );
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final UserCredential credential =
+          await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+      final User? user = credential.user;
+
+      if (user == null) {
+        throw FirebaseAuthException(
+          code: "user-not-found",
+          message: "Admin account not found.",
+        );
+      }
+
+      final DocumentSnapshot<Map<String, dynamic>> userDoc =
+          await FirebaseFirestore.instance
+              .collection("users")
+              .doc(user.uid)
+              .get();
+
+      if (!userDoc.exists || userDoc.data() == null) {
+        await FirebaseAuth.instance.signOut();
+
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Admin profile not found in Firestore."),
+          ),
+        );
+        return;
+      }
+
+      final data = userDoc.data()!;
+      final String role = (data["role"] ?? "").toString().trim().toLowerCase();
+
+      if (role != "admin") {
+        await FirebaseAuth.instance.signOut();
+
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Access denied. This account is not an admin."),
+          ),
+        );
+        return;
+      }
+
+      await FirebaseFirestore.instance.collection("users").doc(user.uid).set(
+        {
+          "lastLoginAt": FieldValue.serverTimestamp(),
+          "updatedAt": FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+
+      if (!mounted) return;
+
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (context) => const AdminPage()),
       );
-    } else {
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Invalid Admin Credentials")),
+        SnackBar(content: Text(getFirebaseErrorMessage(e))),
       );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Admin login failed: $e")),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -78,11 +191,11 @@ class _AdminLoginState extends State<AdminLogin> {
       data: Theme.of(context).copyWith(
         scaffoldBackgroundColor: _backgroundColor,
         colorScheme: Theme.of(context).colorScheme.copyWith(
-          primary: _primaryColor,
-          onPrimary: Colors.white,
-          surface: _cardColor,
-          onSurface: _primaryColor,
-        ),
+              primary: _primaryColor,
+              onPrimary: Colors.white,
+              surface: _cardColor,
+              onSurface: _primaryColor,
+            ),
       ),
       child: Scaffold(
         backgroundColor: _backgroundColor,
@@ -91,13 +204,14 @@ class _AdminLoginState extends State<AdminLogin> {
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 24),
             child: Column(
               children: [
-                // TOP BAR
                 Row(
                   children: [
                     IconButton(
-                      onPressed: () {
-                        Navigator.pop(context);
-                      },
+                      onPressed: _isLoading
+                          ? null
+                          : () {
+                              Navigator.pop(context);
+                            },
                       icon: const Icon(
                         Icons.arrow_back_rounded,
                         color: _primaryColor,
@@ -118,7 +232,6 @@ class _AdminLoginState extends State<AdminLogin> {
 
                 const SizedBox(height: 45),
 
-                // HEADER ICON
                 Container(
                   height: 90,
                   width: 90,
@@ -154,14 +267,13 @@ class _AdminLoginState extends State<AdminLogin> {
                 const SizedBox(height: 8),
 
                 const Text(
-                  "Enter your admin credentials.",
+                  "Enter your Firebase admin account.",
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 14.5, color: _mutedTextColor),
                 ),
 
                 const SizedBox(height: 32),
 
-                // LOGIN CARD
                 Container(
                   width: double.infinity,
                   constraints: const BoxConstraints(maxWidth: 380),
@@ -197,7 +309,7 @@ class _AdminLoginState extends State<AdminLogin> {
                             SizedBox(width: 10),
                             Expanded(
                               child: Text(
-                                "Authorized access only.",
+                                "Authorized admin access only.",
                                 style: TextStyle(
                                   fontSize: 13,
                                   height: 1.3,
@@ -213,14 +325,16 @@ class _AdminLoginState extends State<AdminLogin> {
                       const SizedBox(height: 20),
 
                       TextField(
-                        controller: _username,
+                        controller: _email,
+                        enabled: !_isLoading,
+                        keyboardType: TextInputType.emailAddress,
                         style: const TextStyle(
                           color: _primaryColor,
                           fontWeight: FontWeight.w600,
                         ),
                         decoration: inputStyle(
-                          label: "Username",
-                          icon: Icons.person_rounded,
+                          label: "Admin Email",
+                          icon: Icons.email_rounded,
                         ),
                       ),
 
@@ -228,6 +342,7 @@ class _AdminLoginState extends State<AdminLogin> {
 
                       TextField(
                         controller: _password,
+                        enabled: !_isLoading,
                         obscureText: _obscurePassword,
                         style: const TextStyle(
                           color: _primaryColor,
@@ -243,11 +358,13 @@ class _AdminLoginState extends State<AdminLogin> {
                                   : Icons.visibility_rounded,
                               color: _primaryColor,
                             ),
-                            onPressed: () {
-                              setState(() {
-                                _obscurePassword = !_obscurePassword;
-                              });
-                            },
+                            onPressed: _isLoading
+                                ? null
+                                : () {
+                                    setState(() {
+                                      _obscurePassword = !_obscurePassword;
+                                    });
+                                  },
                           ),
                         ),
                       ),
@@ -267,15 +384,24 @@ class _AdminLoginState extends State<AdminLogin> {
                               borderRadius: BorderRadius.circular(16),
                             ),
                           ),
-                          onPressed: login,
-                          child: const Text(
-                            "LOGIN",
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 0.8,
-                            ),
-                          ),
+                          onPressed: _isLoading ? null : login,
+                          child: _isLoading
+                              ? const SizedBox(
+                                  height: 22,
+                                  width: 22,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.5,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Text(
+                                  "LOGIN",
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 0.8,
+                                  ),
+                                ),
                         ),
                       ),
                     ],
