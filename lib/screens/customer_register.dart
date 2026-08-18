@@ -34,6 +34,7 @@ class _CustomerRegisterState extends State<CustomerRegister> {
   final TextEditingController passwordController = TextEditingController();
 
   bool isLoading = false;
+  bool obscurePassword = true;
 
   String selectedAddress = "Ligao";
 
@@ -167,11 +168,13 @@ class _CustomerRegisterState extends State<CustomerRegister> {
     required String label,
     required String hint,
     required IconData icon,
+    Widget? suffixIcon,
   }) {
     return InputDecoration(
       labelText: label,
       hintText: hint,
       prefixIcon: Icon(icon, color: _primaryColor),
+      suffixIcon: suffixIcon,
       labelStyle: const TextStyle(
         color: _mutedTextColor,
         fontWeight: FontWeight.w600,
@@ -220,7 +223,7 @@ class _CustomerRegisterState extends State<CustomerRegister> {
             backgroundColor: _primaryColor,
             foregroundColor: Colors.white,
             elevation: 3,
-            shadowColor: _primaryColor.withOpacity(0.18),
+            shadowColor: _primaryColor.withValues(alpha: 0.18),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
@@ -248,7 +251,7 @@ class _CustomerRegisterState extends State<CustomerRegister> {
                     border: Border.all(color: _borderColor),
                     boxShadow: [
                       BoxShadow(
-                        color: _primaryColor.withOpacity(0.08),
+                        color: _primaryColor.withValues(alpha: 0.08),
                         blurRadius: 18,
                       ),
                     ],
@@ -315,7 +318,7 @@ class _CustomerRegisterState extends State<CustomerRegister> {
                     border: Border.all(color: _borderColor),
                     boxShadow: [
                       BoxShadow(
-                        color: _primaryColor.withOpacity(0.06),
+                        color: _primaryColor.withValues(alpha: 0.06),
                         blurRadius: 14,
                       ),
                     ],
@@ -354,7 +357,7 @@ class _CustomerRegisterState extends State<CustomerRegister> {
                       const SizedBox(height: 16),
 
                       DropdownButtonFormField<String>(
-                        value: selectedAddress,
+                        initialValue: selectedAddress,
                         decoration: formDecoration(
                           label: "Municipality",
                           hint: "Select municipality",
@@ -385,7 +388,9 @@ class _CustomerRegisterState extends State<CustomerRegister> {
 
                       TextField(
                         controller: passwordController,
-                        obscureText: true,
+                        obscureText: obscurePassword,
+                        enableSuggestions: false,
+                        autocorrect: false,
                         style: const TextStyle(
                           color: _primaryColor,
                           fontWeight: FontWeight.w600,
@@ -394,6 +399,24 @@ class _CustomerRegisterState extends State<CustomerRegister> {
                           label: "Password",
                           hint: "Enter your password",
                           icon: Icons.lock_outline_rounded,
+                          suffixIcon: IconButton(
+                            tooltip: obscurePassword
+                                ? "Show password"
+                                : "Hide password",
+                            onPressed: isLoading
+                                ? null
+                                : () {
+                                    setState(() {
+                                      obscurePassword = !obscurePassword;
+                                    });
+                                  },
+                            icon: Icon(
+                              obscurePassword
+                                  ? Icons.visibility_off_rounded
+                                  : Icons.visibility_rounded,
+                              color: _primaryColor,
+                            ),
+                          ),
                         ),
                       ),
                     ],

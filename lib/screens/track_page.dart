@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../widgets/app_refresh_indicator.dart';
 import 'ors_service.dart';
 import 'location_data.dart';
 
@@ -64,18 +65,17 @@ class _TrackPageState extends State<TrackPage> {
         .orderBy("createdAt")
         .snapshots()
         .map((snapshot) {
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
+          return snapshot.docs.map((doc) {
+            final data = doc.data();
 
-        return {
-          ...data,
-          "queueId": data["queueId"] ?? doc.id,
-        };
-      }).toList();
-    });
+            return {...data, "queueId": data["queueId"] ?? doc.id};
+          }).toList();
+        });
   }
 
-  Future<List<Map<String, dynamic>>> getTodayQueueOnce() async {
+  Future<List<Map<String, dynamic>>> getTodayQueueOnce({
+    bool forceServer = false,
+  }) async {
     final String today = todayDate();
 
     final snapshot = await FirebaseFirestore.instance
@@ -83,16 +83,27 @@ class _TrackPageState extends State<TrackPage> {
         .doc(queueDateId(today))
         .collection("items")
         .orderBy("createdAt")
-        .get();
+        .get(forceServer ? const GetOptions(source: Source.server) : null);
 
     return snapshot.docs.map((doc) {
       final data = doc.data();
 
-      return {
-        ...data,
-        "queueId": data["queueId"] ?? doc.id,
-      };
+      return {...data, "queueId": data["queueId"] ?? doc.id};
     }).toList();
+  }
+
+  Future<void> refreshQueue() async {
+    final items = await getTodayQueueOnce(forceServer: true);
+
+    if (trackedQueueNumber.isNotEmpty) {
+      await updateTrackedQueueStateFromItems(
+        input: trackedQueueNumber,
+        items: items,
+        showNearAlert: false,
+      );
+    } else if (mounted) {
+      setState(() {});
+    }
   }
 
   Map<String, dynamic>? getNowServing(List<Map<String, dynamic>> items) {
@@ -506,8 +517,7 @@ class _TrackPageState extends State<TrackPage> {
       originLat: location.lat,
     );
 
-    int computedLeaveIn =
-        estimatedQueueTime - (result.minutes + bufferMinutes);
+    int computedLeaveIn = estimatedQueueTime - (result.minutes + bufferMinutes);
 
     if (!mounted) return;
 
@@ -538,9 +548,7 @@ class _TrackPageState extends State<TrackPage> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text("Queue Alert"),
-        content: const Text(
-          "Please prepare. Your turn is near.",
-        ),
+        content: const Text("Please prepare. Your turn is near."),
         actions: [
           TextButton(
             onPressed: () {
@@ -604,54 +612,56 @@ class _TrackPageState extends State<TrackPage> {
               builder: (context, constraints) {
                 final bool wide = constraints.maxWidth >= 700;
 
-                return ListView(
-                  padding: EdgeInsets.all(wide ? 24 : 16),
-                  children: [
-                    buildNowServingCard(nowServing),
+                return AppRefreshIndicator(
+                  onRefresh: refreshQueue,
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: EdgeInsets.all(wide ? 24 : 16),
+                    children: [
+                      buildNowServingCard(nowServing),
 
-                    const SizedBox(height: 18),
+                      const SizedBox(height: 18),
 
-                    buildSearchCard(),
+                      buildSearchCard(),
 
-                    const SizedBox(height: 18),
+                      const SizedBox(height: 18),
 
-                    if (trackedQueueNumber.isNotEmpty)
-                      buildLiveQueueStatusCard(snapshot)
-                    else if (statusText.isNotEmpty)
-                      buildQueueStatusCard(
-                        queue: queueNumberText,
-                        status: statusText,
-                        position: positionText,
-                      ),
-
-                    if (estimatedQueueTime != null) ...[
-                      const SizedBox(height: 14),
-                      buildTimeSummaryCard(),
-                    ],
-
-                    if (isLoadingEta)
-                      const Padding(
-                        padding: EdgeInsets.all(24),
-                        child: Center(
-                          child: CircularProgressIndicator(),
+                      if (trackedQueueNumber.isNotEmpty)
+                        buildLiveQueueStatusCard(snapshot)
+                      else if (statusText.isNotEmpty)
+                        buildQueueStatusCard(
+                          queue: queueNumberText,
+                          status: statusText,
+                          position: positionText,
                         ),
-                      ),
 
-                    if (orsStatusText.isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      buildInfoNote(orsStatusText),
-                    ],
+                      if (estimatedQueueTime != null) ...[
+                        const SizedBox(height: 14),
+                        buildTimeSummaryCard(),
+                      ],
 
-                    if (leaveAdviceText.isNotEmpty) ...[
-                      const SizedBox(height: 14),
-                      buildLeaveAdviceCard(),
-                    ],
+                      if (isLoadingEta)
+                        const Padding(
+                          padding: EdgeInsets.all(24),
+                          child: Center(child: CircularProgressIndicator()),
+                        ),
 
-                    if (calculationText.isNotEmpty) ...[
-                      const SizedBox(height: 14),
-                      buildCalculationCard(),
+                      if (orsStatusText.isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        buildInfoNote(orsStatusText),
+                      ],
+
+                      if (leaveAdviceText.isNotEmpty) ...[
+                        const SizedBox(height: 14),
+                        buildLeaveAdviceCard(),
+                      ],
+
+                      if (calculationText.isNotEmpty) ...[
+                        const SizedBox(height: 14),
+                        buildCalculationCard(),
+                      ],
                     ],
-                  ],
+                  ),
                 );
               },
             );
@@ -708,9 +718,7 @@ class _TrackPageState extends State<TrackPage> {
         children: [
           const Text(
             "Enter your queue number",
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 10),
           TextField(
@@ -792,18 +800,9 @@ class _TrackPageState extends State<TrackPage> {
             title: "Queue Status",
           ),
           const SizedBox(height: 14),
-          infoRow(
-            label: "Queue Number",
-            value: queue.isEmpty ? "-" : queue,
-          ),
-          infoRow(
-            label: "Status",
-            value: status,
-          ),
-          infoRow(
-            label: "Position",
-            value: position,
-          ),
+          infoRow(label: "Queue Number", value: queue.isEmpty ? "-" : queue),
+          infoRow(label: "Status", value: status),
+          infoRow(label: "Position", value: position),
         ],
       ),
     );
@@ -819,10 +818,7 @@ class _TrackPageState extends State<TrackPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          sectionHeader(
-            icon: Icons.timer,
-            title: "Time Summary",
-          ),
+          sectionHeader(icon: Icons.timer, title: "Time Summary"),
           const SizedBox(height: 14),
           timeItem(
             icon: Icons.schedule,
@@ -866,24 +862,14 @@ class _TrackPageState extends State<TrackPage> {
       decoration: BoxDecoration(
         color: color.withOpacity(0.10),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: color.withOpacity(0.45),
-          width: 1.5,
-        ),
+        border: Border.all(color: color.withOpacity(0.45), width: 1.5),
         boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.07),
-            blurRadius: 10,
-          ),
+          BoxShadow(color: Colors.black.withOpacity(0.07), blurRadius: 10),
         ],
       ),
       child: Column(
         children: [
-          Icon(
-            getAdviceIcon(),
-            color: color,
-            size: 38,
-          ),
+          Icon(getAdviceIcon(), color: color, size: 38),
           const SizedBox(height: 10),
           const Text(
             "SMART LEAVE ADVICE",
@@ -943,8 +929,7 @@ class _TrackPageState extends State<TrackPage> {
           const Divider(height: 22),
           calculationLine(
             label: "Recommended leave time",
-            value:
-                "${(leaveInMinutes ?? 0) <= 0 ? 0 : leaveInMinutes} mins",
+            value: "${(leaveInMinutes ?? 0) <= 0 ? 0 : leaveInMinutes} mins",
             icon: Icons.notifications_active,
             bold: true,
           ),
@@ -964,29 +949,20 @@ class _TrackPageState extends State<TrackPage> {
 
   // ================= SMALL WIDGETS =================
 
-  Widget sectionHeader({
-    required IconData icon,
-    required String title,
-  }) {
+  Widget sectionHeader({required IconData icon, required String title}) {
     return Row(
       children: [
         Icon(icon, color: Colors.black54),
         const SizedBox(width: 10),
         Text(
           title,
-          style: const TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 17,
-          ),
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
         ),
       ],
     );
   }
 
-  Widget infoRow({
-    required String label,
-    required String value,
-  }) {
+  Widget infoRow({required String label, required String value}) {
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 8),
@@ -994,9 +970,7 @@ class _TrackPageState extends State<TrackPage> {
       decoration: BoxDecoration(
         color: Colors.grey.shade50,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: Colors.grey.shade300,
-        ),
+        border: Border.all(color: Colors.grey.shade300),
       ),
       child: Row(
         children: [
@@ -1013,9 +987,7 @@ class _TrackPageState extends State<TrackPage> {
           Expanded(
             child: Text(
               value,
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-              ),
+              style: const TextStyle(fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -1036,19 +1008,13 @@ class _TrackPageState extends State<TrackPage> {
       decoration: BoxDecoration(
         color: Colors.grey.shade50,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.grey.shade300,
-        ),
+        border: Border.all(color: Colors.grey.shade300),
       ),
       child: Row(
         children: [
           CircleAvatar(
             backgroundColor: color.withOpacity(0.12),
-            child: Icon(
-              icon,
-              color: color,
-              size: 20,
-            ),
+            child: Icon(icon, color: color, size: 20),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1057,17 +1023,12 @@ class _TrackPageState extends State<TrackPage> {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 3),
                 Text(
                   subtitle,
-                  style: const TextStyle(
-                    color: Colors.black54,
-                    fontSize: 12,
-                  ),
+                  style: const TextStyle(color: Colors.black54, fontSize: 12),
                 ),
               ],
             ),
@@ -1096,11 +1057,7 @@ class _TrackPageState extends State<TrackPage> {
       padding: const EdgeInsets.only(bottom: 9),
       child: Row(
         children: [
-          Icon(
-            icon,
-            size: 18,
-            color: Colors.black54,
-          ),
+          Icon(icon, size: 18, color: Colors.black54),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -1129,17 +1086,11 @@ class _TrackPageState extends State<TrackPage> {
       decoration: BoxDecoration(
         color: Colors.blueGrey.withOpacity(0.08),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: Colors.blueGrey.withOpacity(0.20),
-        ),
+        border: Border.all(color: Colors.blueGrey.withOpacity(0.20)),
       ),
       child: Row(
         children: [
-          const Icon(
-            Icons.info_outline,
-            color: Colors.black54,
-            size: 20,
-          ),
+          const Icon(Icons.info_outline, color: Colors.black54, size: 20),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -1160,14 +1111,9 @@ class _TrackPageState extends State<TrackPage> {
     return BoxDecoration(
       color: Colors.white.withOpacity(0.96),
       borderRadius: BorderRadius.circular(20),
-      border: Border.all(
-        color: Colors.black.withOpacity(0.04),
-      ),
+      border: Border.all(color: Colors.black.withOpacity(0.04)),
       boxShadow: [
-        BoxShadow(
-          color: Colors.black.withOpacity(0.08),
-          blurRadius: 10,
-        ),
+        BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 10),
       ],
     );
   }

@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../widgets/app_refresh_indicator.dart';
 import 'customer_register.dart';
 
 const Color _backgroundColor = Color(0xFFF1FAFC);
@@ -30,12 +31,13 @@ class BookingStatusPage extends StatelessWidget {
     return loggedInEmail.isNotEmpty ? loggedInEmail : user?.email ?? "";
   }
 
-  Stream<List<Map<String, dynamic>>> myAppointmentsStream() {
+  Query<Map<String, dynamic>> myAppointmentsQuery() {
     final String uid = currentUserId;
     final String email = currentUserEmail;
 
-    Query<Map<String, dynamic>> query =
-        FirebaseFirestore.instance.collection("appointments");
+    Query<Map<String, dynamic>> query = FirebaseFirestore.instance.collection(
+      "appointments",
+    );
 
     if (uid.isNotEmpty) {
       query = query.where("customerId", isEqualTo: uid);
@@ -45,14 +47,15 @@ class BookingStatusPage extends StatelessWidget {
       query = query.where("customerId", isEqualTo: "__no_logged_in_user__");
     }
 
-    return query.snapshots().map((snapshot) {
+    return query;
+  }
+
+  Stream<List<Map<String, dynamic>>> myAppointmentsStream() {
+    return myAppointmentsQuery().snapshots().map((snapshot) {
       final appointments = snapshot.docs.map((doc) {
         final data = doc.data();
 
-        return {
-          ...data,
-          "appointmentId": data["appointmentId"] ?? doc.id,
-        };
+        return {...data, "appointmentId": data["appointmentId"] ?? doc.id};
       }).toList();
 
       appointments.sort((a, b) {
@@ -68,6 +71,10 @@ class BookingStatusPage extends StatelessWidget {
 
       return appointments;
     });
+  }
+
+  Future<void> refreshAppointments() async {
+    await myAppointmentsQuery().get(const GetOptions(source: Source.server));
   }
 
   Color statusColor(String status) {
@@ -100,11 +107,11 @@ class BookingStatusPage extends StatelessWidget {
       data: Theme.of(context).copyWith(
         scaffoldBackgroundColor: _backgroundColor,
         colorScheme: Theme.of(context).colorScheme.copyWith(
-              primary: _primaryColor,
-              onPrimary: Colors.white,
-              surface: _cardColor,
-              onSurface: _primaryColor,
-            ),
+          primary: _primaryColor,
+          onPrimary: Colors.white,
+          surface: _cardColor,
+          onSurface: _primaryColor,
+        ),
         appBarTheme: const AppBarTheme(
           backgroundColor: _backgroundColor,
           foregroundColor: _primaryColor,
@@ -119,56 +126,60 @@ class BookingStatusPage extends StatelessWidget {
         ),
       ),
       child: Scaffold(
-        appBar: AppBar(
-          title: const Text("My Appointment Status"),
-        ),
+        appBar: AppBar(title: const Text("My Appointment Status")),
         body: SafeArea(
-          child: ValueListenableBuilder<String>(
-            valueListenable: loggedInCustomerNameNotifier,
-            builder: (context, name, _) {
-              return StreamBuilder<List<Map<String, dynamic>>>(
-                stream: myAppointmentsStream(),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
+          child: AppRefreshIndicator(
+            onRefresh: refreshAppointments,
+            child: ValueListenableBuilder<String>(
+              valueListenable: loggedInCustomerNameNotifier,
+              builder: (context, name, _) {
+                return StreamBuilder<List<Map<String, dynamic>>>(
+                  stream: myAppointmentsStream(),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                        children: [
+                          buildHeaderCard(),
+                          const SizedBox(height: 18),
+                          buildLoadingCard(),
+                        ],
+                      );
+                    }
+
+                    if (snapshot.hasError) {
+                      return ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                        children: [
+                          buildHeaderCard(),
+                          const SizedBox(height: 18),
+                          buildErrorCard(snapshot.error.toString()),
+                        ],
+                      );
+                    }
+
+                    final appointments = snapshot.data ?? [];
+
                     return ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
                       padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
                       children: [
                         buildHeaderCard(),
                         const SizedBox(height: 18),
-                        buildLoadingCard(),
+                        if (appointments.isEmpty)
+                          buildEmptyCard()
+                        else
+                          ...appointments.map((appointment) {
+                            return buildBookingCard(appointment);
+                          }).toList(),
                       ],
                     );
-                  }
-
-                  if (snapshot.hasError) {
-                    return ListView(
-                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-                      children: [
-                        buildHeaderCard(),
-                        const SizedBox(height: 18),
-                        buildErrorCard(snapshot.error.toString()),
-                      ],
-                    );
-                  }
-
-                  final appointments = snapshot.data ?? [];
-
-                  return ListView(
-                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-                    children: [
-                      buildHeaderCard(),
-                      const SizedBox(height: 18),
-                      if (appointments.isEmpty)
-                        buildEmptyCard()
-                      else
-                        ...appointments.map((appointment) {
-                          return buildBookingCard(appointment);
-                        }).toList(),
-                    ],
-                  );
-                },
-              );
-            },
+                  },
+                );
+              },
+            ),
           ),
         ),
       ),
@@ -184,10 +195,7 @@ class BookingStatusPage extends StatelessWidget {
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: _borderColor),
         boxShadow: [
-          BoxShadow(
-            color: _primaryColor.withOpacity(0.06),
-            blurRadius: 14,
-          ),
+          BoxShadow(color: _primaryColor.withOpacity(0.06), blurRadius: 14),
         ],
       ),
       child: Row(
@@ -274,11 +282,7 @@ class BookingStatusPage extends StatelessWidget {
       ),
       child: Column(
         children: [
-          const Icon(
-            Icons.error_outline_rounded,
-            color: Colors.red,
-            size: 48,
-          ),
+          const Icon(Icons.error_outline_rounded, color: Colors.red, size: 48),
           const SizedBox(height: 12),
           const Text(
             "Unable to load appointment status",
@@ -315,11 +319,7 @@ class BookingStatusPage extends StatelessWidget {
       ),
       child: const Column(
         children: [
-          Icon(
-            Icons.inbox_rounded,
-            color: _primaryColor,
-            size: 50,
-          ),
+          Icon(Icons.inbox_rounded, color: _primaryColor, size: 50),
           SizedBox(height: 12),
           Text(
             "No appointment found",
@@ -334,10 +334,7 @@ class BookingStatusPage extends StatelessWidget {
           Text(
             "After you book an appointment, your appointment status will appear here as Pending, Approved, or Rejected.",
             textAlign: TextAlign.center,
-            style: TextStyle(
-              color: _mutedTextColor,
-              height: 1.4,
-            ),
+            style: TextStyle(color: _mutedTextColor, height: 1.4),
           ),
         ],
       ),
@@ -357,10 +354,7 @@ class BookingStatusPage extends StatelessWidget {
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: _borderColor),
         boxShadow: [
-          BoxShadow(
-            color: _primaryColor.withOpacity(0.05),
-            blurRadius: 12,
-          ),
+          BoxShadow(color: _primaryColor.withOpacity(0.05), blurRadius: 12),
         ],
       ),
       child: Column(
@@ -370,10 +364,7 @@ class BookingStatusPage extends StatelessWidget {
             children: [
               CircleAvatar(
                 backgroundColor: color.withOpacity(0.12),
-                child: Icon(
-                  statusIcon(status),
-                  color: color,
-                ),
+                child: Icon(statusIcon(status), color: color),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -433,9 +424,7 @@ class BookingStatusPage extends StatelessWidget {
               decoration: BoxDecoration(
                 color: Colors.green.withOpacity(0.08),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: Colors.green.withOpacity(0.25),
-                ),
+                border: Border.all(color: Colors.green.withOpacity(0.25)),
               ),
               child: const Text(
                 "Your appointment is approved. Use your queue code when tracking your queue.",

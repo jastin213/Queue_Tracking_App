@@ -136,6 +136,7 @@ class DisplayPage extends StatelessWidget {
                           today: today,
                           titleSize: titleSize,
                           isShort: isShort,
+                          onBack: () => Navigator.maybePop(context),
                         ),
 
                         SizedBox(height: isShort ? 18 : 24),
@@ -186,6 +187,7 @@ class DisplayPage extends StatelessWidget {
     required String today,
     required double titleSize,
     required bool isShort,
+    required VoidCallback onBack,
   }) {
     return Container(
       width: double.infinity,
@@ -196,6 +198,20 @@ class DisplayPage extends StatelessWidget {
       decoration: cardDecoration(),
       child: Row(
         children: [
+          IconButton(
+            tooltip: "Back",
+            onPressed: onBack,
+            style: IconButton.styleFrom(
+              foregroundColor: _primaryColor,
+              backgroundColor: _softPrimaryColor,
+              minimumSize: const Size(48, 48),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
+            ),
+            icon: const Icon(Icons.arrow_back_rounded),
+          ),
+          const SizedBox(width: 12),
           Container(
             height: 58,
             width: 58,

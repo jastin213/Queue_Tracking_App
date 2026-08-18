@@ -1,0 +1,36 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+          && firestore.get(
+            /databases/(default)/documents/users/$(request.auth.uid)
+          ).data.role == 'admin';
+    }
+
+    function isAllowedAppointmentDocument() {
+      return request.resource.size <= 10 * 1024 * 1024
+          && request.resource.contentType.matches(
+            'image/jpeg|image/png|application/pdf'
+          );
+    }
+
+    match /appointment_documents/{customerId}/{appointmentId}/{fileName} {
+      allow read: if isSignedIn()
+          && (request.auth.uid == customerId || isAdmin());
+
+      allow create: if isSignedIn()
+          && request.auth.uid == customerId
+          && isAllowedAppointmentDocument();
+
+      allow update: if false;
+      allow delete: if isSignedIn()
+          && (request.auth.uid == customerId || isAdmin());
+    }
+  }
+}

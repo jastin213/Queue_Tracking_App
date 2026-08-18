@@ -1,7 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
+import '../widgets/app_refresh_indicator.dart';
 import 'daily_report.dart';
 import 'display_page.dart';
 import 'admin_dashboard.dart';
@@ -20,10 +22,10 @@ const Color _softPrimaryColor = Color(0xFFEAF4F8);
 // ================= GLOBAL VARIABLES =================
 
 ValueNotifier<Map<String, List<Map<String, dynamic>>>>
-    dailyServedReportNotifier = ValueNotifier({});
+dailyServedReportNotifier = ValueNotifier({});
 
 ValueNotifier<Map<String, List<Map<String, dynamic>>>>
-    dailyFailedReportNotifier = ValueNotifier({});
+dailyFailedReportNotifier = ValueNotifier({});
 
 ValueNotifier<Map<String, List<String>>> dailyHistoryNotifier = ValueNotifier(
   {},
@@ -92,25 +94,37 @@ class _AdminPageState extends State<AdminPage> {
       return snapshot.docs.map((doc) {
         final data = doc.data();
 
-        return {
-          ...data,
-          "queueId": data["queueId"] ?? doc.id,
-        };
+        return {...data, "queueId": data["queueId"] ?? doc.id};
       }).toList();
     });
   }
 
-  Future<List<Map<String, dynamic>>> getQueueItemsOnline(String date) async {
-    final snapshot = await queueItemsRef(date).get();
+  Future<List<Map<String, dynamic>>> getQueueItemsOnline(
+    String date, {
+    bool forceServer = false,
+  }) async {
+    final snapshot = await queueItemsRef(date)
+        .orderBy("createdAt")
+        .get(forceServer ? const GetOptions(source: Source.server) : null);
 
     return snapshot.docs.map((doc) {
       final data = doc.data();
 
-      return {
-        ...data,
-        "queueId": data["queueId"] ?? doc.id,
-      };
+      return {...data, "queueId": data["queueId"] ?? doc.id};
     }).toList();
+  }
+
+  Future<void> refreshQueue() async {
+    final String selectedDate = selectedQueueDateNotifier.value;
+    final onlineItems = await getQueueItemsOnline(
+      selectedDate,
+      forceServer: true,
+    );
+
+    if (!mounted) return;
+
+    syncLocalQueueFromFirestore(onlineItems);
+    setState(() {});
   }
 
   bool isActiveQueueStatus(String status) {
@@ -143,19 +157,23 @@ class _AdminPageState extends State<AdminPage> {
           item["status"]?.toString() == "Failed";
     }).toList();
 
-    final issuedList = onlineItems.where((item) {
-      final status = item["status"]?.toString() ?? "";
-      return item["date"] == selectedDate &&
-          status != "Cancelled" &&
-          status != "Reset";
-    }).map((item) {
-      return item["queue"].toString();
-    }).toList();
+    final issuedList = onlineItems
+        .where((item) {
+          final status = item["status"]?.toString() ?? "";
+          return item["date"] == selectedDate &&
+              status != "Cancelled" &&
+              status != "Reset";
+        })
+        .map((item) {
+          return item["queue"].toString();
+        })
+        .toList();
 
     waitingQueueNotifier.value = waiting;
 
-    nowServingNotifier.value =
-        nowServingList.isEmpty ? null : nowServingList.last;
+    nowServingNotifier.value = nowServingList.isEmpty
+        ? null
+        : nowServingList.last;
 
     issuedQueueCodesNotifier.value = {
       ...issuedQueueCodesNotifier.value,
@@ -226,18 +244,15 @@ class _AdminPageState extends State<AdminPage> {
 
     if (date.isEmpty || queue.isEmpty) return;
 
-    await queueItemsRef(date).doc(queue).set(
-      {
-        ...customer,
-        "queueId": queue,
-        "queue": queue,
-        "date": date,
-        "status": status,
-        "updatedAt": FieldValue.serverTimestamp(),
-        ...?extraData,
-      },
-      SetOptions(merge: true),
-    );
+    await queueItemsRef(date).doc(queue).set({
+      ...customer,
+      "queueId": queue,
+      "queue": queue,
+      "date": date,
+      "status": status,
+      "updatedAt": FieldValue.serverTimestamp(),
+      ...?extraData,
+    }, SetOptions(merge: true));
   }
 
   // ================= SPEAK =================
@@ -337,7 +352,7 @@ class _AdminPageState extends State<AdminPage> {
 
     bool alreadyIssued =
         issuedQueueCodesNotifier.value[selectedDate]?.contains(queueCode) ??
-            false;
+        false;
 
     bool inWaiting = waitingQueueNotifier.value.any((customer) {
       final status = customer["status"]?.toString() ?? "Waiting";
@@ -604,18 +619,15 @@ class _AdminPageState extends State<AdminPage> {
 
       waitingQueueNotifier.value = updatedQueue;
 
-      nowServingNotifier.value = {
-        ...customer,
-        "status": "Now Serving",
-      };
+      nowServingNotifier.value = {...customer, "status": "Now Serving"};
 
       await speak(customer['queue']);
 
       setState(() {});
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Failed to call customer: $e")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Failed to call customer: $e")));
     }
   }
 
@@ -669,6 +681,9 @@ class _AdminPageState extends State<AdminPage> {
         status: "Skipped",
         extraData: {
           "source": "Skipped / No Show",
+          "originalCreatedAt":
+              customer["originalCreatedAt"] ?? customer["createdAt"],
+          "createdAt": FieldValue.serverTimestamp(),
           "skippedAt": FieldValue.serverTimestamp(),
         },
       );
@@ -693,9 +708,9 @@ class _AdminPageState extends State<AdminPage> {
         ),
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Failed to skip customer: $e")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Failed to skip customer: $e")));
     }
   }
 
@@ -778,9 +793,9 @@ class _AdminPageState extends State<AdminPage> {
         ),
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Failed to mark as passed: $e")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Failed to mark as passed: $e")));
     }
   }
 
@@ -850,9 +865,9 @@ class _AdminPageState extends State<AdminPage> {
         ),
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Failed to mark as failed: $e")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Failed to mark as failed: $e")));
     }
   }
 
@@ -863,9 +878,7 @@ class _AdminPageState extends State<AdminPage> {
       await updateQueueItemStatus(
         customer: customer,
         status: "Cancelled",
-        extraData: {
-          "cancelledAt": FieldValue.serverTimestamp(),
-        },
+        extraData: {"cancelledAt": FieldValue.serverTimestamp()},
       );
 
       final updatedQueue = List<Map<String, dynamic>>.from(
@@ -892,9 +905,9 @@ class _AdminPageState extends State<AdminPage> {
         ),
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Failed to cancel queue: $e")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Failed to cancel queue: $e")));
     }
   }
 
@@ -1000,9 +1013,9 @@ class _AdminPageState extends State<AdminPage> {
                 }
               } catch (e) {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text("Reset failed: $e")),
-                  );
+                  ScaffoldMessenger.of(
+                    context,
+                  ).showSnackBar(SnackBar(content: Text("Reset failed: $e")));
                 }
               }
             },
@@ -1042,11 +1055,11 @@ class _AdminPageState extends State<AdminPage> {
               data: Theme.of(context).copyWith(
                 scaffoldBackgroundColor: _backgroundColor,
                 colorScheme: Theme.of(context).colorScheme.copyWith(
-                      primary: _primaryColor,
-                      onPrimary: Colors.white,
-                      surface: _cardColor,
-                      onSurface: _primaryColor,
-                    ),
+                  primary: _primaryColor,
+                  onPrimary: Colors.white,
+                  surface: _cardColor,
+                  onSurface: _primaryColor,
+                ),
                 appBarTheme: const AppBarTheme(
                   backgroundColor: _backgroundColor,
                   foregroundColor: _primaryColor,
@@ -1079,70 +1092,75 @@ class _AdminPageState extends State<AdminPage> {
                 backgroundColor: _backgroundColor,
                 drawer: buildDrawer(),
                 appBar: AppBar(
-                  title:
-                      Text(text("Admin Control Panel", "Admin Control Panel")),
+                  title: Text(
+                    text("Admin Control Panel", "Admin Control Panel"),
+                  ),
                 ),
                 body: SafeArea(
                   child: LayoutBuilder(
                     builder: (context, constraints) {
                       final bool wide = isWideScreen(constraints.maxWidth);
-                      final bool tablet =
-                          isTabletScreen(constraints.maxWidth);
+                      final bool tablet = isTabletScreen(constraints.maxWidth);
                       final double pagePadding = wide ? 20 : 12;
 
                       final double waitingListHeight = wide || tablet
                           ? (constraints.maxHeight - 420).clamp(360.0, 720.0)
                           : 430.0;
 
-                      return SingleChildScrollView(
-                        padding: EdgeInsets.all(pagePadding),
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(
-                            minHeight:
-                                constraints.maxHeight - (pagePadding * 2),
-                          ),
-                          child: Column(
-                            children: [
-                              buildDateSelector(),
-                              const SizedBox(height: 14),
-                              buildStatsSection(
-                                selectedDateQueue: selectedDateQueue,
-                                compact: !wide,
-                              ),
-                              const SizedBox(height: 18),
-                              if (wide || tablet)
-                                Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    SizedBox(
-                                      width: wide ? 245 : 215,
-                                      child: buildLeftPanel(),
-                                    ),
-                                    const SizedBox(width: 18),
-                                    Expanded(
-                                      child: buildRightPanel(
+                      return AppRefreshIndicator(
+                        onRefresh: refreshQueue,
+                        child: SingleChildScrollView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: EdgeInsets.all(pagePadding),
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              minHeight:
+                                  constraints.maxHeight - (pagePadding * 2),
+                            ),
+                            child: Column(
+                              children: [
+                                buildDateSelector(),
+                                const SizedBox(height: 14),
+                                buildStatsSection(
+                                  selectedDateQueue: selectedDateQueue,
+                                  compact: !wide,
+                                ),
+                                const SizedBox(height: 18),
+                                if (wide || tablet)
+                                  Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      SizedBox(
+                                        width: wide ? 245 : 215,
+                                        child: buildLeftPanel(),
+                                      ),
+                                      const SizedBox(width: 18),
+                                      Expanded(
+                                        child: buildRightPanel(
+                                          selectedDateQueue: selectedDateQueue,
+                                          displayedNowServing:
+                                              displayedNowServing,
+                                          waitingListHeight: waitingListHeight,
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                else
+                                  Column(
+                                    children: [
+                                      buildLeftPanel(),
+                                      const SizedBox(height: 16),
+                                      buildRightPanel(
                                         selectedDateQueue: selectedDateQueue,
                                         displayedNowServing:
                                             displayedNowServing,
                                         waitingListHeight: waitingListHeight,
                                       ),
-                                    ),
-                                  ],
-                                )
-                              else
-                                Column(
-                                  children: [
-                                    buildLeftPanel(),
-                                    const SizedBox(height: 16),
-                                    buildRightPanel(
-                                      selectedDateQueue: selectedDateQueue,
-                                      displayedNowServing:
-                                          displayedNowServing,
-                                      waitingListHeight: waitingListHeight,
-                                    ),
-                                  ],
-                                ),
-                            ],
+                                    ],
+                                  ),
+                              ],
+                            ),
                           ),
                         ),
                       );
@@ -1245,7 +1263,11 @@ class _AdminPageState extends State<AdminPage> {
             icon: Icons.logout_rounded,
             title: text("Logout", "Logout"),
             isLogout: true,
-            onTap: () {
+            onTap: () async {
+              await FirebaseAuth.instance.signOut();
+
+              if (!context.mounted) return;
+
               Navigator.pushAndRemoveUntil(
                 context,
                 MaterialPageRoute(builder: (_) => const HomePage()),
@@ -1761,8 +1783,9 @@ class _AdminPageState extends State<AdminPage> {
     bool centered = false,
   }) {
     return Row(
-      mainAxisAlignment:
-          centered ? MainAxisAlignment.center : MainAxisAlignment.start,
+      mainAxisAlignment: centered
+          ? MainAxisAlignment.center
+          : MainAxisAlignment.start,
       children: [
         Icon(icon, color: _primaryColor, size: 22),
         const SizedBox(width: 8),
@@ -1850,10 +1873,10 @@ class _AdminPageState extends State<AdminPage> {
       message: icon == Icons.volume_up_rounded
           ? text("Call", "Tawagin")
           : icon == Icons.skip_next_rounded
-              ? text("Skip", "I-skip")
-              : icon == Icons.check_rounded
-                  ? text("Passed", "Passed")
-                  : text("Cancel / Failed", "Cancel / Failed"),
+          ? text("Skip", "I-skip")
+          : icon == Icons.check_rounded
+          ? text("Passed", "Passed")
+          : text("Cancel / Failed", "Cancel / Failed"),
       child: SizedBox(
         width: 42,
         height: 42,

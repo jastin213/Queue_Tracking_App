@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -19,6 +20,8 @@ const Color _cardColor = Colors.white;
 const Color _borderColor = Color(0xFFD8E8EE);
 const Color _mutedTextColor = Color(0xFF6E7E88);
 const Color _softPrimaryColor = Color(0xFFEAF4F8);
+const int _maxDocumentBytes = 10 * 1024 * 1024;
+const int _firestoreChunkBytes = 650 * 1024;
 
 // ================= GLOBAL BOOKING & QUEUE STORAGE =================
 //
@@ -112,10 +115,7 @@ class _BookAppointmentState extends State<BookAppointment> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
         title: const Text(
           "Appointment Policy",
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            color: _primaryColor,
-          ),
+          style: TextStyle(fontWeight: FontWeight.bold, color: _primaryColor),
         ),
         content: const SingleChildScrollView(
           child: Column(
@@ -273,12 +273,7 @@ class _BookAppointmentState extends State<BookAppointment> {
         allowMultiple: false,
         withData: true,
         type: FileType.custom,
-        allowedExtensions: [
-          "jpg",
-          "jpeg",
-          "png",
-          "pdf",
-        ],
+        allowedExtensions: ["jpg", "jpeg", "png", "pdf"],
       );
 
       if (result == null) return;
@@ -290,6 +285,17 @@ class _BookAppointmentState extends State<BookAppointment> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text("Unable to read selected file. Please try again."),
+          ),
+        );
+        return;
+      }
+
+      if (bytes.length > _maxDocumentBytes) {
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Each document must be 10 MB or smaller."),
           ),
         );
         return;
@@ -313,9 +319,9 @@ class _BookAppointmentState extends State<BookAppointment> {
         }
       });
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("File upload failed: $e")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("File upload failed: $e")));
     }
   }
 
@@ -330,6 +336,17 @@ class _BookAppointmentState extends State<BookAppointment> {
 
       final Uint8List bytes = await photo.readAsBytes();
       final String? safePath = kIsWeb ? null : photo.path;
+
+      if (bytes.length > _maxDocumentBytes) {
+        if (!mounted) return;
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Each document must be 10 MB or smaller."),
+          ),
+        );
+        return;
+      }
 
       setState(() {
         if (type == "ID") {
@@ -354,6 +371,117 @@ class _BookAppointmentState extends State<BookAppointment> {
           ),
         ),
       );
+    }
+  }
+
+  String documentContentType(String fileName) {
+    final String extension = fileName.toLowerCase().split('.').last;
+
+    switch (extension) {
+      case 'pdf':
+        return 'application/pdf';
+      case 'png':
+        return 'image/png';
+      case 'jpg':
+      case 'jpeg':
+      default:
+        return 'image/jpeg';
+    }
+  }
+
+  String safeStorageFileName(String fileName) {
+    return fileName.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+  }
+
+  Future<({String path, String url})> uploadAppointmentDocument({
+    required String customerId,
+    required String appointmentId,
+    required String documentType,
+    required String fileName,
+    required Uint8List bytes,
+  }) async {
+    final String safeFileName = safeStorageFileName(fileName);
+    final Reference documentRef = FirebaseStorage.instance.ref().child(
+      'appointment_documents/$customerId/$appointmentId/'
+      '${documentType.toLowerCase()}_$safeFileName',
+    );
+
+    await documentRef.putData(
+      bytes,
+      SettableMetadata(
+        contentType: documentContentType(fileName),
+        customMetadata: {
+          'appointmentId': appointmentId,
+          'customerId': customerId,
+          'documentType': documentType,
+          'originalFileName': fileName,
+        },
+      ),
+    );
+
+    return (
+      path: documentRef.fullPath,
+      url: await documentRef.getDownloadURL(),
+    );
+  }
+
+  Future<void> uploadAppointmentDocumentToFirestore({
+    required DocumentReference<Map<String, dynamic>> appointmentRef,
+    required String customerId,
+    required String documentType,
+    required String fileName,
+    required Uint8List bytes,
+    required List<DocumentReference<Map<String, dynamic>>> createdRefs,
+  }) async {
+    final documentRef = appointmentRef
+        .collection('documents')
+        .doc(documentType.toLowerCase());
+    final int chunkCount =
+        (bytes.length + _firestoreChunkBytes - 1) ~/ _firestoreChunkBytes;
+
+    await documentRef.set({
+      'customerId': customerId,
+      'documentType': documentType,
+      'fileName': fileName,
+      'contentType': documentContentType(fileName),
+      'size': bytes.length,
+      'chunkCount': chunkCount,
+      'uploadedAt': FieldValue.serverTimestamp(),
+    });
+    createdRefs.add(documentRef);
+
+    const int chunksPerBatch = 8;
+
+    for (
+      int firstChunk = 0;
+      firstChunk < chunkCount;
+      firstChunk += chunksPerBatch
+    ) {
+      final WriteBatch batch = FirebaseFirestore.instance.batch();
+      final List<DocumentReference<Map<String, dynamic>>> batchRefs = [];
+      final int lastChunk = (firstChunk + chunksPerBatch < chunkCount)
+          ? firstChunk + chunksPerBatch
+          : chunkCount;
+
+      for (int index = firstChunk; index < lastChunk; index++) {
+        final int start = index * _firestoreChunkBytes;
+        final int end = (start + _firestoreChunkBytes < bytes.length)
+            ? start + _firestoreChunkBytes
+            : bytes.length;
+        final chunkRef = documentRef
+            .collection('chunks')
+            .doc(index.toString().padLeft(3, '0'));
+
+        batch.set(chunkRef, {
+          'customerId': customerId,
+          'index': index,
+          'data': Blob(Uint8List.sublistView(bytes, start, end)),
+        });
+        batchRefs.add(chunkRef);
+      }
+
+      await batch.commit();
+      createdRefs.addAll(batchRefs);
     }
   }
 
@@ -428,9 +556,16 @@ class _BookAppointmentState extends State<BookAppointment> {
       isSubmitting = true;
     });
 
+    final List<Reference> uploadedDocumentRefs = [];
+    final List<DocumentReference<Map<String, dynamic>>>
+    uploadedFirestoreDocumentRefs = [];
+    bool appointmentSaved = false;
+
     try {
-      final bool firestoreQueueTaken =
-          await isQueueTakenInFirestore(formattedDate, selectedQueueCode);
+      final bool firestoreQueueTaken = await isQueueTakenInFirestore(
+        formattedDate,
+        selectedQueueCode,
+      );
 
       if (firestoreQueueTaken) {
         if (!mounted) return;
@@ -453,6 +588,91 @@ class _BookAppointmentState extends State<BookAppointment> {
       final DocumentReference<Map<String, dynamic>> appointmentRef =
           FirebaseFirestore.instance.collection("appointments").doc();
 
+      String idFileUrl = '';
+      String orFileUrl = '';
+      String crFileUrl = '';
+      String idStoragePath = '';
+      String orStoragePath = '';
+      String crStoragePath = '';
+      String documentBackend = 'firebase_storage';
+
+      try {
+        FirebaseStorage.instance.setMaxUploadRetryTime(
+          const Duration(seconds: 5),
+        );
+        FirebaseStorage.instance.setMaxOperationRetryTime(
+          const Duration(seconds: 5),
+        );
+
+        final idUpload = await uploadAppointmentDocument(
+          customerId: customerId,
+          appointmentId: appointmentRef.id,
+          documentType: 'ID',
+          fileName: idFileName ?? 'valid_id.jpg',
+          bytes: idFileBytes!,
+        );
+        idFileUrl = idUpload.url;
+        idStoragePath = idUpload.path;
+        uploadedDocumentRefs.add(FirebaseStorage.instance.ref(idUpload.path));
+
+        final orUpload = await uploadAppointmentDocument(
+          customerId: customerId,
+          appointmentId: appointmentRef.id,
+          documentType: 'OR',
+          fileName: orFileName ?? 'official_receipt.jpg',
+          bytes: orFileBytes!,
+        );
+        orFileUrl = orUpload.url;
+        orStoragePath = orUpload.path;
+        uploadedDocumentRefs.add(FirebaseStorage.instance.ref(orUpload.path));
+
+        final crUpload = await uploadAppointmentDocument(
+          customerId: customerId,
+          appointmentId: appointmentRef.id,
+          documentType: 'CR',
+          fileName: crFileName ?? 'certificate_of_registration.jpg',
+          bytes: crFileBytes!,
+        );
+        crFileUrl = crUpload.url;
+        crStoragePath = crUpload.path;
+        uploadedDocumentRefs.add(FirebaseStorage.instance.ref(crUpload.path));
+      } catch (_) {
+        for (final Reference documentRef in uploadedDocumentRefs.reversed) {
+          try {
+            await documentRef.delete();
+          } catch (_) {
+            // Best-effort cleanup before switching to Firestore file storage.
+          }
+        }
+        uploadedDocumentRefs.clear();
+        documentBackend = 'firestore';
+
+        await uploadAppointmentDocumentToFirestore(
+          appointmentRef: appointmentRef,
+          customerId: customerId,
+          documentType: 'ID',
+          fileName: idFileName ?? 'valid_id.jpg',
+          bytes: idFileBytes!,
+          createdRefs: uploadedFirestoreDocumentRefs,
+        );
+        await uploadAppointmentDocumentToFirestore(
+          appointmentRef: appointmentRef,
+          customerId: customerId,
+          documentType: 'OR',
+          fileName: orFileName ?? 'official_receipt.jpg',
+          bytes: orFileBytes!,
+          createdRefs: uploadedFirestoreDocumentRefs,
+        );
+        await uploadAppointmentDocumentToFirestore(
+          appointmentRef: appointmentRef,
+          customerId: customerId,
+          documentType: 'CR',
+          fileName: crFileName ?? 'certificate_of_registration.jpg',
+          bytes: crFileBytes!,
+          createdRefs: uploadedFirestoreDocumentRefs,
+        );
+      }
+
       final Map<String, dynamic> appointmentData = {
         "appointmentId": appointmentRef.id,
         "customerId": customerId,
@@ -465,14 +685,19 @@ class _BookAppointmentState extends State<BookAppointment> {
         "date": formattedDate,
         "status": "Pending",
 
-        // Firebase Storage is not enabled yet, so we save filenames only for now.
-        // Later, these fields can be replaced or expanded with download URLs.
         "idFile": idFileName,
         "orFile": orFileName,
         "crFile": crFileName,
-        "idFileUrl": "",
-        "orFileUrl": "",
-        "crFileUrl": "",
+        "idFileUrl": idFileUrl,
+        "orFileUrl": orFileUrl,
+        "crFileUrl": crFileUrl,
+        "idStoragePath": idStoragePath,
+        "orStoragePath": orStoragePath,
+        "crStoragePath": crStoragePath,
+        "idFileUploaded": true,
+        "orFileUploaded": true,
+        "crFileUploaded": true,
+        "documentBackend": documentBackend,
 
         "source": "Appointment",
         "createdAt": FieldValue.serverTimestamp(),
@@ -480,6 +705,7 @@ class _BookAppointmentState extends State<BookAppointment> {
       };
 
       await appointmentRef.set(appointmentData);
+      appointmentSaved = true;
 
       // Keep local data temporarily so current frontend pages still work
       // until admin dashboard and appointment status are also converted to Firestore.
@@ -506,6 +732,24 @@ class _BookAppointmentState extends State<BookAppointment> {
 
       Navigator.pop(context);
     } catch (e) {
+      if (!appointmentSaved) {
+        for (final Reference documentRef in uploadedDocumentRefs.reversed) {
+          try {
+            await documentRef.delete();
+          } catch (_) {
+            // Best-effort cleanup for files uploaded before a failed submission.
+          }
+        }
+
+        for (final documentRef in uploadedFirestoreDocumentRefs.reversed) {
+          try {
+            await documentRef.delete();
+          } catch (_) {
+            // Best-effort cleanup for Firestore chunks from a failed submission.
+          }
+        }
+      }
+
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -801,15 +1045,15 @@ class _BookAppointmentState extends State<BookAppointment> {
                   color: taken
                       ? const Color(0xFFE3E9EC)
                       : selected
-                          ? _primaryColor
-                          : _cardColor,
+                      ? _primaryColor
+                      : _cardColor,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: selected
                         ? _primaryColor
                         : taken
-                            ? const Color(0xFFD1DCE1)
-                            : _borderColor,
+                        ? const Color(0xFFD1DCE1)
+                        : _borderColor,
                     width: selected ? 1.5 : 1,
                   ),
                 ),
@@ -820,8 +1064,8 @@ class _BookAppointmentState extends State<BookAppointment> {
                     color: selected
                         ? Colors.white
                         : taken
-                            ? _mutedTextColor
-                            : _primaryColor,
+                        ? _mutedTextColor
+                        : _primaryColor,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -948,11 +1192,11 @@ class _BookAppointmentState extends State<BookAppointment> {
       data: Theme.of(context).copyWith(
         scaffoldBackgroundColor: _backgroundColor,
         colorScheme: Theme.of(context).colorScheme.copyWith(
-              primary: _primaryColor,
-              onPrimary: Colors.white,
-              surface: _cardColor,
-              onSurface: _primaryColor,
-            ),
+          primary: _primaryColor,
+          onPrimary: Colors.white,
+          surface: _cardColor,
+          onSurface: _primaryColor,
+        ),
         appBarTheme: const AppBarTheme(
           backgroundColor: _backgroundColor,
           foregroundColor: _primaryColor,
@@ -1079,10 +1323,12 @@ class _BookAppointmentState extends State<BookAppointment> {
                               selectedVehicle = v;
 
                               if (selectedDate != null) {
-                                selectedQueueCode = getFirstAvailableQueueCode();
-                              } else {
                                 selectedQueueCode =
-                                    selectedVehicle == "Gas" ? "G001" : "D001";
+                                    getFirstAvailableQueueCode();
+                              } else {
+                                selectedQueueCode = selectedVehicle == "Gas"
+                                    ? "G001"
+                                    : "D001";
                               }
                             });
                           },

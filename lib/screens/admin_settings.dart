@@ -157,11 +157,11 @@ class _AdminSettingsState extends State<AdminSettings> {
       data: Theme.of(context).copyWith(
         scaffoldBackgroundColor: _backgroundColor,
         colorScheme: Theme.of(context).colorScheme.copyWith(
-              primary: _primaryColor,
-              onPrimary: Colors.white,
-              surface: _cardColor,
-              onSurface: _primaryColor,
-            ),
+          primary: _primaryColor,
+          onPrimary: Colors.white,
+          surface: _cardColor,
+          onSurface: _primaryColor,
+        ),
         appBarTheme: const AppBarTheme(
           backgroundColor: _backgroundColor,
           foregroundColor: _primaryColor,
@@ -182,19 +182,25 @@ class _AdminSettingsState extends State<AdminSettings> {
             builder: (context, constraints) {
               final bool wideWeb = constraints.maxWidth >= 900;
 
-              return SingleChildScrollView(
-                padding: EdgeInsets.fromLTRB(
-                  wideWeb ? 24 : 16,
-                  10,
-                  wideWeb ? 24 : 16,
-                  20,
-                ),
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxWidth: wideWeb ? 900 : double.infinity,
+              return ScrollConfiguration(
+                behavior: ScrollConfiguration.of(
+                  context,
+                ).copyWith(overscroll: false),
+                child: SingleChildScrollView(
+                  physics: const ClampingScrollPhysics(),
+                  padding: EdgeInsets.fromLTRB(
+                    wideWeb ? 24 : 16,
+                    10,
+                    wideWeb ? 24 : 16,
+                    20,
+                  ),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: wideWeb ? 900 : double.infinity,
+                      ),
+                      child: buildOneLineSettingsLayout(),
                     ),
-                    child: buildOneLineSettingsLayout(),
                   ),
                 ),
               );

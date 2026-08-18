@@ -4,6 +4,9 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import '../widgets/analytics_line_chart.dart';
+import '../widgets/app_refresh_indicator.dart';
+
 // ================= COLOR THEME =================
 
 const Color _backgroundColor = Color(0xFFF1FAFC);
@@ -86,6 +89,33 @@ class _DailyReportState extends State<DailyReport> {
     return "${monthNames[month - 1]} $year";
   }
 
+  String shortMonthLabelFromKey(String key) {
+    final parts = key.split("-");
+    if (parts.length != 2) return key;
+
+    const monthNames = [
+      "Jan",
+      "Feb",
+      "Mar",
+      "Apr",
+      "May",
+      "Jun",
+      "Jul",
+      "Aug",
+      "Sep",
+      "Oct",
+      "Nov",
+      "Dec",
+    ];
+
+    final year = int.tryParse(parts[0]) ?? 0;
+    final month = int.tryParse(parts[1]) ?? 0;
+
+    if (month < 1 || month > 12) return key;
+
+    return "${monthNames[month - 1]}\n${year.toString().padLeft(4, '0').substring(2)}";
+  }
+
   String currentMonthKey() {
     return monthKeyFromDate(selectedDate);
   }
@@ -127,27 +157,37 @@ class _DailyReportState extends State<DailyReport> {
       return snapshot.docs.map((doc) {
         final data = doc.data();
 
-        return {
-          ...data,
-          "queueId": data["queueId"] ?? doc.id,
-        };
+        return {...data, "queueId": data["queueId"] ?? doc.id};
       }).toList();
     });
   }
 
   Stream<List<Map<String, dynamic>>> appointmentStream() {
-    return FirebaseFirestore.instance.collection("appointments").snapshots().map((
-      snapshot,
-    ) {
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
+    return FirebaseFirestore.instance
+        .collection("appointments")
+        .snapshots()
+        .map((snapshot) {
+          return snapshot.docs.map((doc) {
+            final data = doc.data();
 
-        return {
-          ...data,
-          "appointmentId": data["appointmentId"] ?? doc.id,
-        };
-      }).toList();
-    });
+            return {...data, "appointmentId": data["appointmentId"] ?? doc.id};
+          }).toList();
+        });
+  }
+
+  Future<void> refreshReport() async {
+    await Future.wait([
+      FirebaseFirestore.instance
+          .collectionGroup("items")
+          .get(const GetOptions(source: Source.server)),
+      FirebaseFirestore.instance
+          .collection("appointments")
+          .get(const GetOptions(source: Source.server)),
+    ]);
+
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   // ================= DATA FILTERS =================
@@ -276,10 +316,7 @@ class _DailyReportState extends State<DailyReport> {
       margin: const pw.EdgeInsets.only(top: 14, bottom: 8),
       child: pw.Text(
         title,
-        style: pw.TextStyle(
-          fontSize: 14,
-          fontWeight: pw.FontWeight.bold,
-        ),
+        style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
       ),
     );
   }
@@ -292,39 +329,24 @@ class _DailyReportState extends State<DailyReport> {
         border: pw.Border.all(color: PdfColors.grey400),
         borderRadius: pw.BorderRadius.circular(6),
       ),
-      child: pw.Text(
-        message,
-        style: const pw.TextStyle(fontSize: 10),
-      ),
+      child: pw.Text(message, style: const pw.TextStyle(fontSize: 10)),
     );
   }
 
-  pw.Widget pdfRecordsTable(
-    List<Map<String, dynamic>> records,
-    String result,
-  ) {
+  pw.Widget pdfRecordsTable(List<Map<String, dynamic>> records, String result) {
     if (records.isEmpty) {
       return pdfEmptyText("No $result records.");
     }
 
     return pw.Table.fromTextArray(
-      headers: [
-        "Queue",
-        "Name",
-        "Vehicle",
-        "Source",
-        "Time",
-        "Result",
-      ],
+      headers: ["Queue", "Name", "Vehicle", "Source", "Time", "Result"],
       data: pdfRowsFromRecords(records, result),
       headerStyle: pw.TextStyle(
         fontWeight: pw.FontWeight.bold,
         color: PdfColors.white,
         fontSize: 9,
       ),
-      headerDecoration: const pw.BoxDecoration(
-        color: PdfColors.blueGrey800,
-      ),
+      headerDecoration: const pw.BoxDecoration(color: PdfColors.blueGrey800),
       cellStyle: const pw.TextStyle(fontSize: 8),
       cellAlignment: pw.Alignment.centerLeft,
       headerAlignment: pw.Alignment.centerLeft,
@@ -350,18 +372,12 @@ class _DailyReportState extends State<DailyReport> {
           return [
             pw.Text(
               "NPJN Emission Testing Center",
-              style: pw.TextStyle(
-                fontSize: 20,
-                fontWeight: pw.FontWeight.bold,
-              ),
+              style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold),
             ),
             pw.SizedBox(height: 4),
             pw.Text(
               "Daily Report",
-              style: pw.TextStyle(
-                fontSize: 15,
-                fontWeight: pw.FontWeight.bold,
-              ),
+              style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
             ),
             pw.SizedBox(height: 8),
             pw.Text("Report Date: $selectedDate"),
@@ -394,10 +410,7 @@ class _DailyReportState extends State<DailyReport> {
             pw.SizedBox(height: 20),
             pw.Text(
               "This PDF report includes only Passed and Failed emission test results.",
-              style: const pw.TextStyle(
-                fontSize: 9,
-                color: PdfColors.grey700,
-              ),
+              style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700),
             ),
           ];
         },
@@ -427,11 +440,7 @@ class _DailyReportState extends State<DailyReport> {
     void ensureDate(String date) {
       dailySummary.putIfAbsent(
         date,
-        () => {
-          "passed": 0,
-          "failed": 0,
-          "served": 0,
-        },
+        () => {"passed": 0, "failed": 0, "served": 0},
       );
     }
 
@@ -464,18 +473,12 @@ class _DailyReportState extends State<DailyReport> {
           return [
             pw.Text(
               "NPJN Emission Testing Center",
-              style: pw.TextStyle(
-                fontSize: 20,
-                fontWeight: pw.FontWeight.bold,
-              ),
+              style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold),
             ),
             pw.SizedBox(height: 4),
             pw.Text(
               "Monthly Report",
-              style: pw.TextStyle(
-                fontSize: 15,
-                fontWeight: pw.FontWeight.bold,
-              ),
+              style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
             ),
             pw.SizedBox(height: 8),
             pw.Text("Report Month: $monthLabel"),
@@ -504,12 +507,7 @@ class _DailyReportState extends State<DailyReport> {
               pdfEmptyText("No Passed or Failed records for this month.")
             else
               pw.Table.fromTextArray(
-                headers: [
-                  "Date",
-                  "Served",
-                  "Passed",
-                  "Failed",
-                ],
+                headers: ["Date", "Served", "Passed", "Failed"],
                 data: dailyEntries.map((entry) {
                   return [
                     entry.key,
@@ -543,10 +541,7 @@ class _DailyReportState extends State<DailyReport> {
             pw.SizedBox(height: 20),
             pw.Text(
               "This PDF report includes only Passed and Failed emission test results.",
-              style: const pw.TextStyle(
-                fontSize: 9,
-                color: PdfColors.grey700,
-              ),
+              style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700),
             ),
           ];
         },
@@ -719,10 +714,10 @@ class _DailyReportState extends State<DailyReport> {
 
             final bool isLoading =
                 (queueSnapshot.connectionState == ConnectionState.waiting &&
-                        !queueSnapshot.hasData) ||
-                    (appointmentSnapshot.connectionState ==
-                            ConnectionState.waiting &&
-                        !appointmentSnapshot.hasData);
+                    !queueSnapshot.hasData) ||
+                (appointmentSnapshot.connectionState ==
+                        ConnectionState.waiting &&
+                    !appointmentSnapshot.hasData);
 
             final Object? error =
                 queueSnapshot.error ?? appointmentSnapshot.error;
@@ -731,11 +726,11 @@ class _DailyReportState extends State<DailyReport> {
               data: Theme.of(context).copyWith(
                 scaffoldBackgroundColor: _backgroundColor,
                 colorScheme: Theme.of(context).colorScheme.copyWith(
-                      primary: _primaryColor,
-                      onPrimary: Colors.white,
-                      surface: _cardColor,
-                      onSurface: _primaryColor,
-                    ),
+                  primary: _primaryColor,
+                  onPrimary: Colors.white,
+                  surface: _cardColor,
+                  onSurface: _primaryColor,
+                ),
                 appBarTheme: const AppBarTheme(
                   backgroundColor: _backgroundColor,
                   foregroundColor: _primaryColor,
@@ -752,83 +747,89 @@ class _DailyReportState extends State<DailyReport> {
               child: Scaffold(
                 appBar: AppBar(title: const Text("Daily Report")),
                 body: SafeArea(
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final bool wide = constraints.maxWidth >= 850;
+                  child: AppRefreshIndicator(
+                    onRefresh: refreshReport,
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final bool wide = constraints.maxWidth >= 850;
 
-                      return SingleChildScrollView(
-                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
-                        child: Column(
-                          children: [
-                            buildDateSelector(),
+                        return SingleChildScrollView(
+                          physics: const AlwaysScrollableScrollPhysics(
+                            parent: ClampingScrollPhysics(),
+                          ),
+                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
+                          child: Column(
+                            children: [
+                              buildDateSelector(),
 
-                            const SizedBox(height: 14),
+                              const SizedBox(height: 14),
 
-                            if (isLoading)
-                              cardContainer(
-                                child: const Column(
-                                  children: [
-                                    CircularProgressIndicator(
-                                      color: _primaryColor,
-                                    ),
-                                    SizedBox(height: 14),
-                                    Text(
-                                      "Loading report records...",
-                                      style: TextStyle(
-                                        color: _mutedTextColor,
-                                        fontWeight: FontWeight.w700,
+                              if (isLoading)
+                                cardContainer(
+                                  child: const Column(
+                                    children: [
+                                      CircularProgressIndicator(
+                                        color: _primaryColor,
                                       ),
-                                    ),
-                                  ],
+                                      SizedBox(height: 14),
+                                      Text(
+                                        "Loading report records...",
+                                        style: TextStyle(
+                                          color: _mutedTextColor,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              else if (error != null)
+                                buildErrorCard(error.toString())
+                              else ...[
+                                buildPdfExportCard(
+                                  passedList: passedList,
+                                  failedList: failedList,
+                                  queueItems: queueItems,
                                 ),
-                              )
-                            else if (error != null)
-                              buildErrorCard(error.toString())
-                            else ...[
-                              buildPdfExportCard(
-                                passedList: passedList,
-                                failedList: failedList,
-                                queueItems: queueItems,
-                              ),
 
-                              const SizedBox(height: 14),
+                                const SizedBox(height: 14),
 
-                              buildSeasonalDetectionCard(
-                                wide: wide,
-                                queueItems: queueItems,
-                                appointments: appointments,
-                              ),
+                                buildSeasonalDetectionCard(
+                                  wide: wide,
+                                  queueItems: queueItems,
+                                  appointments: appointments,
+                                ),
 
-                              const SizedBox(height: 14),
+                                const SizedBox(height: 14),
 
-                              buildSummarySection(
-                                wide: wide,
-                                totalServed: totalServed,
-                                passed: passedList.length,
-                                failed: failedList.length,
-                                approved: approvedList.length,
-                                rejected: rejectedList.length,
-                                pending: pendingList.length,
-                              ),
+                                buildSummarySection(
+                                  wide: wide,
+                                  totalServed: totalServed,
+                                  passed: passedList.length,
+                                  failed: failedList.length,
+                                  approved: approvedList.length,
+                                  rejected: rejectedList.length,
+                                  pending: pendingList.length,
+                                ),
 
-                              const SizedBox(height: 16),
+                                const SizedBox(height: 16),
 
-                              buildReportDetails(
-                                date: selectedDate,
-                                totalServed: totalServed,
-                                queueItems: queueItems,
-                                appointments: appointments,
-                                passedList: passedList,
-                                failedList: failedList,
-                                approvedList: approvedList,
-                                rejectedList: rejectedList,
-                                pendingList: pendingList,
-                              ),
+                                buildReportDetails(
+                                  date: selectedDate,
+                                  totalServed: totalServed,
+                                  queueItems: queueItems,
+                                  appointments: appointments,
+                                  passedList: passedList,
+                                  failedList: failedList,
+                                  approvedList: approvedList,
+                                  rejectedList: rejectedList,
+                                  pendingList: pendingList,
+                                ),
+                              ],
                             ],
-                          ],
-                        ),
-                      );
-                    },
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ),
               ),
@@ -977,11 +978,7 @@ class _DailyReportState extends State<DailyReport> {
     return cardContainer(
       child: Column(
         children: [
-          const Icon(
-            Icons.error_outline_rounded,
-            color: Colors.red,
-            size: 46,
-          ),
+          const Icon(Icons.error_outline_rounded, color: Colors.red, size: 46),
           const SizedBox(height: 12),
           const Text(
             "Unable to load daily report",
@@ -996,10 +993,7 @@ class _DailyReportState extends State<DailyReport> {
           Text(
             error,
             textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: _mutedTextColor,
-              height: 1.4,
-            ),
+            style: const TextStyle(color: _mutedTextColor, height: 1.4),
           ),
         ],
       ),
@@ -1159,6 +1153,15 @@ class _DailyReportState extends State<DailyReport> {
               ],
             ),
           const SizedBox(height: 16),
+          sectionHeader(
+            icon: Icons.show_chart_rounded,
+            title: "Analytics Line Graph",
+          ),
+          const SizedBox(height: 12),
+          monthly.isEmpty
+              ? emptyBox("No analytics data yet.")
+              : buildAnalyticsLineGraph(monthly),
+          const SizedBox(height: 16),
           sectionHeader(icon: Icons.bar_chart_rounded, title: "Monthly Trend"),
           const SizedBox(height: 12),
           monthly.isEmpty
@@ -1166,6 +1169,27 @@ class _DailyReportState extends State<DailyReport> {
               : buildMonthlyTrend(monthly),
         ],
       ),
+    );
+  }
+
+  Widget buildAnalyticsLineGraph(Map<String, Map<String, int>> monthly) {
+    final entries = monthly.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key));
+
+    final visibleEntries = entries.length > 6
+        ? entries.sublist(entries.length - 6)
+        : entries;
+
+    return AnalyticsLineChart(
+      labels: visibleEntries
+          .map((entry) => shortMonthLabelFromKey(entry.key))
+          .toList(),
+      servedValues: visibleEntries
+          .map((entry) => entry.value["totalServed"] ?? 0)
+          .toList(),
+      appointmentValues: visibleEntries
+          .map((entry) => entry.value["appointmentActivity"] ?? 0)
+          .toList(),
     );
   }
 
@@ -1581,10 +1605,7 @@ class _DailyReportState extends State<DailyReport> {
                 ),
                 child: Text(
                   "${records.length}",
-                  style: TextStyle(
-                    color: color,
-                    fontWeight: FontWeight.w900,
-                  ),
+                  style: TextStyle(color: color, fontWeight: FontWeight.w900),
                 ),
               ),
             ],
@@ -1606,18 +1627,17 @@ class _DailyReportState extends State<DailyReport> {
   Widget reportRecordTile(Map<String, dynamic> record) {
     final queue = record["queue"]?.toString() ?? "-";
 
-    final name = record["name"]?.toString() ??
+    final name =
+        record["name"]?.toString() ??
         record["fullName"]?.toString() ??
         record["plate"]?.toString() ??
         "-";
 
-    final vehicle = record["type"]?.toString() ??
-        record["vehicle"]?.toString() ??
-        "-";
+    final vehicle =
+        record["type"]?.toString() ?? record["vehicle"]?.toString() ?? "-";
 
-    final source = record["source"]?.toString() ??
-        record["status"]?.toString() ??
-        "-";
+    final source =
+        record["source"]?.toString() ?? record["status"]?.toString() ?? "-";
 
     final time = record["time"]?.toString();
 
@@ -1698,10 +1718,7 @@ class _DailyReportState extends State<DailyReport> {
       borderRadius: BorderRadius.circular(22),
       border: Border.all(color: _borderColor),
       boxShadow: [
-        BoxShadow(
-          color: _primaryColor.withOpacity(0.06),
-          blurRadius: 14,
-        ),
+        BoxShadow(color: _primaryColor.withOpacity(0.06), blurRadius: 14),
       ],
     );
   }
@@ -1719,10 +1736,7 @@ class _DailyReportState extends State<DailyReport> {
     );
   }
 
-  Widget sectionHeader({
-    required IconData icon,
-    required String title,
-  }) {
+  Widget sectionHeader({required IconData icon, required String title}) {
     return Row(
       children: [
         Icon(icon, color: _primaryColor, size: 22),
