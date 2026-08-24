@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_tts/flutter_tts.dart';
 
 import '../widgets/app_refresh_indicator.dart';
+import 'customer_settings.dart';
 import 'ors_service.dart';
 import 'location_data.dart';
 
@@ -14,6 +18,7 @@ class TrackPage extends StatefulWidget {
 
 class _TrackPageState extends State<TrackPage> {
   final TextEditingController queueController = TextEditingController();
+  final FlutterTts flutterTts = FlutterTts();
 
   String trackedQueueNumber = "";
 
@@ -33,12 +38,14 @@ class _TrackPageState extends State<TrackPage> {
   String calculationText = "";
 
   bool isLoadingEta = false;
+  bool isNearTurnDialogOpen = false;
 
   final int averageServiceTime = 9;
 
   @override
   void dispose() {
     queueController.dispose();
+    flutterTts.stop();
     super.dispose();
   }
 
@@ -543,22 +550,44 @@ class _TrackPageState extends State<TrackPage> {
 
   // ================= ALERT =================
 
+  Future<void> speakNearTurnAlert() async {
+    try {
+      await flutterTts.stop();
+      await flutterTts.setLanguage("en-US");
+      await flutterTts.setSpeechRate(0.45);
+      await flutterTts.setPitch(1.0);
+      await flutterTts.speak("Please prepare. Your turn is near.");
+    } catch (_) {
+      // Keep the visual queue alert working if voice playback is unavailable.
+    }
+  }
+
   void showNearTurnDialog() {
-    showDialog(
+    if (!mounted || isNearTurnDialogOpen) return;
+
+    isNearTurnDialogOpen = true;
+
+    if (customerVoiceAlertsEnabledNotifier.value) {
+      unawaited(speakNearTurnAlert());
+    }
+
+    showDialog<void>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text("Queue Alert"),
         content: const Text("Please prepare. Your turn is near."),
         actions: [
           TextButton(
             onPressed: () {
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
             },
             child: const Text("OK"),
           ),
         ],
       ),
-    );
+    ).whenComplete(() {
+      isNearTurnDialogOpen = false;
+    });
   }
 
   // ================= COLOR HELPERS =================

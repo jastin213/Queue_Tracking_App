@@ -27,6 +27,7 @@ class AdminDashboard extends StatefulWidget {
 
 class _AdminDashboardState extends State<AdminDashboard> {
   DateTime calendarMonth = DateTime(DateTime.now().year, DateTime.now().month);
+  DateTime? selectedCalendarDate;
 
   // ================= FIRESTORE HELPERS =================
 
@@ -410,6 +411,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
   // ================= SHOW DETAILS =================
 
   void showDetails(Map<String, dynamic> booking) {
+    final bool canReviewBooking =
+        booking["status"]?.toString().trim().toLowerCase() == "pending";
+
     showDialog(
       context: context,
       builder: (_) {
@@ -558,117 +562,118 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       ),
                     ),
 
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: const BoxDecoration(
-                        color: _cardColor,
-                        border: Border(top: BorderSide(color: _borderColor)),
-                        borderRadius: BorderRadius.vertical(
-                          bottom: Radius.circular(22),
+                    if (canReviewBooking)
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: const BoxDecoration(
+                          color: _cardColor,
+                          border: Border(top: BorderSide(color: _borderColor)),
+                          borderRadius: BorderRadius.vertical(
+                            bottom: Radius.circular(22),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: SizedBox(
+                                height: 50,
+                                child: ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green,
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                    ),
+                                  ),
+                                  onPressed: isProcessing
+                                      ? null
+                                      : () async {
+                                          setDialogState(() {
+                                            isProcessing = true;
+                                          });
+
+                                          final success = await approveBooking(
+                                            booking,
+                                          );
+
+                                          if (!context.mounted) return;
+
+                                          setDialogState(() {
+                                            isProcessing = false;
+                                          });
+
+                                          if (success) {
+                                            Navigator.pop(context);
+                                          }
+                                        },
+                                  child: isProcessing
+                                      ? const SizedBox(
+                                          height: 22,
+                                          width: 22,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2.5,
+                                            color: Colors.white,
+                                          ),
+                                        )
+                                      : const Text(
+                                          "APPROVE",
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: SizedBox(
+                                height: 50,
+                                child: ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.red,
+                                    foregroundColor: Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(14),
+                                    ),
+                                  ),
+                                  onPressed: isProcessing
+                                      ? null
+                                      : () async {
+                                          setDialogState(() {
+                                            isProcessing = true;
+                                          });
+
+                                          await rejectBooking(booking);
+
+                                          if (!context.mounted) return;
+
+                                          setDialogState(() {
+                                            isProcessing = false;
+                                          });
+
+                                          Navigator.pop(context);
+                                        },
+                                  child: isProcessing
+                                      ? const SizedBox(
+                                          height: 22,
+                                          width: 22,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2.5,
+                                            color: Colors.white,
+                                          ),
+                                        )
+                                      : const Text(
+                                          "REJECT",
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: SizedBox(
-                              height: 50,
-                              child: ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.green,
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(14),
-                                  ),
-                                ),
-                                onPressed: isProcessing
-                                    ? null
-                                    : () async {
-                                        setDialogState(() {
-                                          isProcessing = true;
-                                        });
-
-                                        final success = await approveBooking(
-                                          booking,
-                                        );
-
-                                        if (!context.mounted) return;
-
-                                        setDialogState(() {
-                                          isProcessing = false;
-                                        });
-
-                                        if (success) {
-                                          Navigator.pop(context);
-                                        }
-                                      },
-                                child: isProcessing
-                                    ? const SizedBox(
-                                        height: 22,
-                                        width: 22,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2.5,
-                                          color: Colors.white,
-                                        ),
-                                      )
-                                    : const Text(
-                                        "APPROVE",
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w800,
-                                        ),
-                                      ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: SizedBox(
-                              height: 50,
-                              child: ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.red,
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(14),
-                                  ),
-                                ),
-                                onPressed: isProcessing
-                                    ? null
-                                    : () async {
-                                        setDialogState(() {
-                                          isProcessing = true;
-                                        });
-
-                                        await rejectBooking(booking);
-
-                                        if (!context.mounted) return;
-
-                                        setDialogState(() {
-                                          isProcessing = false;
-                                        });
-
-                                        Navigator.pop(context);
-                                      },
-                                child: isProcessing
-                                    ? const SizedBox(
-                                        height: 22,
-                                        width: 22,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2.5,
-                                          color: Colors.white,
-                                        ),
-                                      )
-                                    : const Text(
-                                        "REJECT",
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w800,
-                                        ),
-                                      ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
                   ],
                 ),
               ),
@@ -1284,6 +1289,25 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return "${months[date.month - 1]} ${date.year}";
   }
 
+  String calendarFullDateLabel(DateTime date) {
+    const months = [
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
+    ];
+
+    return "${months[date.month - 1]} ${date.day}, ${date.year}";
+  }
+
   Map<String, int> activeBookingsByDate(
     List<Map<String, dynamic>> appointments,
   ) {
@@ -1301,6 +1325,257 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
 
     return counts;
+  }
+
+  List<Map<String, dynamic>> approvedAppointmentsForDate(
+    List<Map<String, dynamic>> appointments,
+    DateTime date,
+  ) {
+    final String selectedDateKey = calendarDateKey(date);
+    final approved = appointments.where((appointment) {
+      final String status =
+          appointment["status"]?.toString().trim().toLowerCase() ?? "";
+      final String appointmentDate = appointment["date"]?.toString() ?? "";
+
+      return status == "approved" && appointmentDate == selectedDateKey;
+    }).toList();
+
+    approved.sort((a, b) {
+      final String aQueue = a["queue"]?.toString() ?? "";
+      final String bQueue = b["queue"]?.toString() ?? "";
+      return aQueue.compareTo(bQueue);
+    });
+
+    return approved;
+  }
+
+  Widget buildSelectedDateAppointments(
+    List<Map<String, dynamic>> appointments,
+    DateTime selectedDate,
+  ) {
+    final approved = approvedAppointmentsForDate(appointments, selectedDate);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _softPrimaryColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: const Icon(
+                  Icons.event_available_rounded,
+                  color: Colors.green,
+                  size: 23,
+                ),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "Approved Customers",
+                      style: TextStyle(
+                        color: _primaryColor,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      calendarFullDateLabel(selectedDate),
+                      style: const TextStyle(
+                        color: _mutedTextColor,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  "${approved.length} approved",
+                  style: const TextStyle(
+                    color: Colors.green,
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 13),
+          if (approved.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 20),
+              decoration: BoxDecoration(
+                color: _cardColor,
+                borderRadius: BorderRadius.circular(15),
+                border: Border.all(color: _borderColor),
+              ),
+              child: const Column(
+                children: [
+                  Icon(
+                    Icons.event_busy_outlined,
+                    color: _mutedTextColor,
+                    size: 32,
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    "No approved customers for this date.",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: _mutedTextColor,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            ...approved.map(approvedCalendarAppointmentCard),
+        ],
+      ),
+    );
+  }
+
+  Widget approvedCalendarAppointmentCard(Map<String, dynamic> appointment) {
+    final String queue = appointment["queue"]?.toString() ?? "-";
+    final String name = appointment["fullName"]?.toString().trim() ?? "";
+    final String plate = appointment["plate"]?.toString().trim() ?? "";
+    final String vehicle = appointment["vehicle"]?.toString().trim() ?? "";
+    final String municipality =
+        appointment["municipality"]?.toString().trim() ?? "";
+    final String queueLetter = queue.isEmpty ? "-" : queue.substring(0, 1);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 9),
+      child: Material(
+        color: _cardColor,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(15),
+          side: const BorderSide(color: _borderColor),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => showDetails(appointment),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Container(
+                  width: 45,
+                  height: 45,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: _primaryColor,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Text(
+                    queueLetter,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 11),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              name.isEmpty ? "Customer" : name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: _primaryColor,
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 7),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.green.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Text(
+                              "Approved",
+                              style: TextStyle(
+                                color: Colors.green,
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        "$queue • ${plate.isEmpty ? 'No plate' : plate}",
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _primaryColor,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        "${vehicle.isEmpty ? 'Vehicle not specified' : vehicle} • ${municipality.isEmpty ? 'Municipality not specified' : municipality}",
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _mutedTextColor,
+                          fontSize: 11.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 5),
+                const Icon(Icons.chevron_right_rounded, color: _mutedTextColor),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget buildAppointmentCalendar(List<Map<String, dynamic>> appointments) {
@@ -1353,7 +1628,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ),
           const SizedBox(height: 6),
           const Text(
-            "Dates update automatically from Pending and Approved appointments.",
+            "Select a date to view approved customers. Availability updates automatically from Pending and Approved appointments.",
             style: TextStyle(
               color: _mutedTextColor,
               fontSize: 12.5,
@@ -1378,6 +1653,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         calendarMonth.year,
                         calendarMonth.month - 1,
                       );
+                      selectedCalendarDate = null;
                     });
                   },
                   icon: const Icon(Icons.chevron_left_rounded),
@@ -1401,6 +1677,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         calendarMonth.year,
                         calendarMonth.month + 1,
                       );
+                      selectedCalendarDate = null;
                     });
                   },
                   icon: const Icon(Icons.chevron_right_rounded),
@@ -1447,6 +1724,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
               final isClosed = date.weekday == DateTime.sunday;
               final isFull = !isPast && !isClosed && booked >= maxQueueLimit;
               final isAvailable = !isPast && !isClosed && !isFull;
+              final isSelected =
+                  selectedCalendarDate != null &&
+                  DateUtils.isSameDay(selectedCalendarDate, date);
 
               final Color statusColor = isFull
                   ? Colors.red
@@ -1463,43 +1743,69 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
               return Tooltip(
                 message: isFull
-                    ? "${calendarDateKey(date)} is fully booked"
+                    ? "${calendarDateKey(date)} is fully booked. Tap to view approved customers."
                     : isAvailable
-                    ? "${calendarDateKey(date)} has ${maxQueueLimit - booked} slot(s) available"
-                    : "${calendarDateKey(date)} is unavailable",
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  decoration: BoxDecoration(
-                    color: statusColor.withValues(alpha: 0.10),
+                    ? "${calendarDateKey(date)} has ${maxQueueLimit - booked} slot(s) available. Tap to view approved customers."
+                    : "${calendarDateKey(date)} is unavailable for booking. Tap to view approved customers.",
+                child: Material(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(12),
+                  child: InkWell(
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: statusColor.withValues(alpha: 0.42),
-                    ),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(
-                        day.toString(),
-                        style: TextStyle(
-                          color: statusColor,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w900,
+                    onTap: () {
+                      setState(() {
+                        selectedCalendarDate = date;
+                      });
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? _primaryColor.withValues(alpha: 0.12)
+                            : statusColor.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isSelected
+                              ? _primaryColor
+                              : statusColor.withValues(alpha: 0.42),
+                          width: isSelected ? 2 : 1,
                         ),
+                        boxShadow: isSelected
+                            ? [
+                                BoxShadow(
+                                  color: _primaryColor.withValues(alpha: 0.12),
+                                  blurRadius: 8,
+                                ),
+                              ]
+                            : null,
                       ),
-                      const SizedBox(height: 3),
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          statusText,
-                          style: TextStyle(
-                            color: statusColor,
-                            fontSize: 8.5,
-                            fontWeight: FontWeight.w800,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Text(
+                            day.toString(),
+                            style: TextStyle(
+                              color: isSelected ? _primaryColor : statusColor,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w900,
+                            ),
                           ),
-                        ),
+                          const SizedBox(height: 3),
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              statusText,
+                              style: TextStyle(
+                                color: isSelected ? _primaryColor : statusColor,
+                                fontSize: 8.5,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
               );
@@ -1515,6 +1821,35 @@ class _AdminDashboardState extends State<AdminDashboard> {
               _CalendarLegend(color: Colors.grey, label: "Closed / Past"),
             ],
           ),
+          const SizedBox(height: 14),
+          if (selectedCalendarDate == null)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: _softPrimaryColor,
+                borderRadius: BorderRadius.circular(15),
+                border: Border.all(color: _borderColor),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.touch_app_rounded, color: _primaryColor, size: 21),
+                  SizedBox(width: 9),
+                  Expanded(
+                    child: Text(
+                      "Tap any date to view its approved customers.",
+                      style: TextStyle(
+                        color: _primaryColor,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else
+            buildSelectedDateAppointments(appointments, selectedCalendarDate!),
         ],
       ),
     );

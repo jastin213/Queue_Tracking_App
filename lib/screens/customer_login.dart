@@ -559,38 +559,6 @@ class _CustomerLoginState extends State<CustomerLogin> {
                             ),
                           ),
 
-                          const SizedBox(height: 14),
-
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              color: _softPrimaryColor,
-                              borderRadius: BorderRadius.circular(18),
-                              border: Border.all(color: _borderColor),
-                            ),
-                            child: const Row(
-                              children: [
-                                Icon(
-                                  Icons.login_rounded,
-                                  color: _primaryColor,
-                                  size: 24,
-                                ),
-                                SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    "Admins and customers use the same login form.",
-                                    style: TextStyle(
-                                      fontSize: 13,
-                                      height: 1.3,
-                                      color: _mutedTextColor,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-
                           const SizedBox(height: 20),
 
                           TextField(

@@ -3,10 +3,29 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:queue_tracking_app/main.dart';
 import 'package:queue_tracking_app/screens/admin_settings.dart';
+import 'package:queue_tracking_app/screens/book_appointment.dart';
+import 'package:queue_tracking_app/screens/customer_home.dart';
+import 'package:queue_tracking_app/screens/customer_settings.dart';
 import 'package:queue_tracking_app/widgets/analytics_line_chart.dart';
 import 'package:queue_tracking_app/widgets/app_refresh_indicator.dart';
 
 void main() {
+  test('validates Philippine vehicle plate numbers', () {
+    expect(validatePhilippinePlateNumber('ABC123'), isNull);
+    expect(validatePhilippinePlateNumber('abc1234'), isNull);
+    expect(validatePhilippinePlateNumber('AB12345'), isNull);
+
+    expect(validatePhilippinePlateNumber('ABC12'), isNotNull);
+    expect(validatePhilippinePlateNumber('ABC12345'), isNotNull);
+    expect(validatePhilippinePlateNumber('ABCDEF'), isNotNull);
+    expect(validatePhilippinePlateNumber('123456'), isNotNull);
+    expect(validatePhilippinePlateNumber('ABC-123'), isNotNull);
+  });
+
+  test('customer voice queue alerts are enabled by default', () {
+    expect(customerVoiceAlertsEnabledNotifier.value, isTrue);
+  });
+
   testWidgets('shows one shared account login', (WidgetTester tester) async {
     await tester.pumpWidget(const MyApp());
 
@@ -21,6 +40,10 @@ void main() {
     expect(find.byType(AppRefreshIndicator), findsNothing);
     expect(find.text('Customer Portal'), findsNothing);
     expect(find.text('Admin Login'), findsNothing);
+    expect(
+      find.text('Admins and customers use the same login form.'),
+      findsNothing,
+    );
   });
 
   testWidgets('opens the password recovery dialog', (
@@ -126,5 +149,21 @@ void main() {
       find.byType(SingleChildScrollView),
     );
     expect(scrollView.physics, isA<ClampingScrollPhysics>());
+  });
+
+  testWidgets('customer home provides settings and logout actions', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(const MaterialApp(home: CustomerHome()));
+
+    expect(find.byTooltip('Customer settings'), findsOneWidget);
+    expect(find.byTooltip('Log out'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Log out'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Log out?'), findsOneWidget);
+    expect(find.text('LOG OUT'), findsOneWidget);
+    expect(find.text('CANCEL'), findsOneWidget);
   });
 }

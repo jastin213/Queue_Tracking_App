@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -24,12 +25,21 @@ class DailyReport extends StatefulWidget {
 }
 
 class _DailyReportState extends State<DailyReport> {
+  final TextEditingController reportSearchController = TextEditingController();
+
   String selectedDate = "";
+  String reportSearchQuery = "";
 
   @override
   void initState() {
     super.initState();
     selectedDate = todayDate();
+  }
+
+  @override
+  void dispose() {
+    reportSearchController.dispose();
+    super.dispose();
   }
 
   // ================= DATE HELPERS =================
@@ -142,8 +152,11 @@ class _DailyReportState extends State<DailyReport> {
     );
 
     if (picked != null) {
+      reportSearchController.clear();
+
       setState(() {
         selectedDate = formatPickedDate(picked);
+        reportSearchQuery = "";
       });
     }
   }
@@ -752,80 +765,94 @@ class _DailyReportState extends State<DailyReport> {
                     child: LayoutBuilder(
                       builder: (context, constraints) {
                         final bool wide = constraints.maxWidth >= 850;
+                        final bool desktopWeb =
+                            kIsWeb && constraints.maxWidth >= 900;
 
                         return SingleChildScrollView(
                           physics: const AlwaysScrollableScrollPhysics(
                             parent: ClampingScrollPhysics(),
                           ),
-                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
-                          child: Column(
-                            children: [
-                              buildDateSelector(),
+                          padding: EdgeInsets.fromLTRB(
+                            desktopWeb ? 24 : 16,
+                            10,
+                            desktopWeb ? 24 : 16,
+                            18,
+                          ),
+                          child: Center(
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: desktopWeb ? 1240 : double.infinity,
+                              ),
+                              child: Column(
+                                children: [
+                                  buildDateSelector(),
 
-                              const SizedBox(height: 14),
+                                  const SizedBox(height: 14),
 
-                              if (isLoading)
-                                cardContainer(
-                                  child: const Column(
-                                    children: [
-                                      CircularProgressIndicator(
-                                        color: _primaryColor,
+                                  if (isLoading)
+                                    cardContainer(
+                                      child: const Column(
+                                        children: [
+                                          CircularProgressIndicator(
+                                            color: _primaryColor,
+                                          ),
+                                          SizedBox(height: 14),
+                                          Text(
+                                            "Loading report records...",
+                                            style: TextStyle(
+                                              color: _mutedTextColor,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                      SizedBox(height: 14),
-                                      Text(
-                                        "Loading report records...",
-                                        style: TextStyle(
-                                          color: _mutedTextColor,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                )
-                              else if (error != null)
-                                buildErrorCard(error.toString())
-                              else ...[
-                                buildPdfExportCard(
-                                  passedList: passedList,
-                                  failedList: failedList,
-                                  queueItems: queueItems,
-                                ),
+                                    )
+                                  else if (error != null)
+                                    buildErrorCard(error.toString())
+                                  else ...[
+                                    buildPdfExportCard(
+                                      passedList: passedList,
+                                      failedList: failedList,
+                                      queueItems: queueItems,
+                                    ),
 
-                                const SizedBox(height: 14),
+                                    const SizedBox(height: 14),
 
-                                buildSeasonalDetectionCard(
-                                  wide: wide,
-                                  queueItems: queueItems,
-                                  appointments: appointments,
-                                ),
+                                    buildSeasonalDetectionCard(
+                                      wide: wide,
+                                      queueItems: queueItems,
+                                      appointments: appointments,
+                                    ),
 
-                                const SizedBox(height: 14),
+                                    const SizedBox(height: 14),
 
-                                buildSummarySection(
-                                  wide: wide,
-                                  totalServed: totalServed,
-                                  passed: passedList.length,
-                                  failed: failedList.length,
-                                  approved: approvedList.length,
-                                  rejected: rejectedList.length,
-                                  pending: pendingList.length,
-                                ),
+                                    buildSummarySection(
+                                      wide: wide,
+                                      totalServed: totalServed,
+                                      passed: passedList.length,
+                                      failed: failedList.length,
+                                      approved: approvedList.length,
+                                      rejected: rejectedList.length,
+                                      pending: pendingList.length,
+                                    ),
 
-                                const SizedBox(height: 16),
+                                    const SizedBox(height: 16),
 
-                                buildReportDetails(
-                                  date: selectedDate,
-                                  totalServed: totalServed,
-                                  queueItems: queueItems,
-                                  appointments: appointments,
-                                  passedList: passedList,
-                                  failedList: failedList,
-                                  approvedList: approvedList,
-                                  rejectedList: rejectedList,
-                                  pendingList: pendingList,
-                                ),
-                              ],
-                            ],
+                                    buildReportDetails(
+                                      date: selectedDate,
+                                      totalServed: totalServed,
+                                      queueItems: queueItems,
+                                      appointments: appointments,
+                                      passedList: passedList,
+                                      failedList: failedList,
+                                      approvedList: approvedList,
+                                      rejectedList: rejectedList,
+                                      pendingList: pendingList,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
                           ),
                         );
                       },
@@ -908,10 +935,16 @@ class _DailyReportState extends State<DailyReport> {
           LayoutBuilder(
             builder: (context, constraints) {
               final bool narrow = constraints.maxWidth < 520;
+              final bool desktopWeb = kIsWeb && constraints.maxWidth >= 720;
+              final double buttonHeight = desktopWeb ? 44 : 48;
 
               final dailyButton = SizedBox(
-                width: narrow ? double.infinity : null,
-                height: 48,
+                width: desktopWeb
+                    ? 320
+                    : narrow
+                    ? double.infinity
+                    : null,
+                height: buttonHeight,
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _primaryColor,
@@ -932,8 +965,12 @@ class _DailyReportState extends State<DailyReport> {
               );
 
               final monthlyButton = SizedBox(
-                width: narrow ? double.infinity : null,
-                height: 48,
+                width: desktopWeb
+                    ? 320
+                    : narrow
+                    ? double.infinity
+                    : null,
+                height: buttonHeight,
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.green,
@@ -949,6 +986,14 @@ class _DailyReportState extends State<DailyReport> {
                   label: Text("Monthly PDF - $monthLabel"),
                 ),
               );
+
+              if (desktopWeb) {
+                return Wrap(
+                  spacing: 12,
+                  runSpacing: 10,
+                  children: [dailyButton, monthlyButton],
+                );
+              }
 
               if (narrow) {
                 return Column(
@@ -1472,6 +1517,322 @@ class _DailyReportState extends State<DailyReport> {
 
   // ================= REPORT DETAILS =================
 
+  String reportCustomerName(Map<String, dynamic> record) {
+    return (record["name"] ?? record["fullName"] ?? record["plate"] ?? "-")
+        .toString()
+        .trim();
+  }
+
+  List<Map<String, dynamic>> consolidatedReportRecords({
+    required List<Map<String, dynamic>> passedList,
+    required List<Map<String, dynamic>> failedList,
+    required List<Map<String, dynamic>> approvedList,
+    required List<Map<String, dynamic>> rejectedList,
+    required List<Map<String, dynamic>> pendingList,
+  }) {
+    final recordsByKey = <String, Map<String, dynamic>>{};
+    final records = [
+      ...approvedList,
+      ...rejectedList,
+      ...pendingList,
+      ...passedList,
+      ...failedList,
+    ];
+
+    for (final record in records) {
+      final String appointmentId =
+          record["appointmentId"]?.toString().trim() ?? "";
+      final String queue = record["queue"]?.toString().trim() ?? "";
+      final String date = record["date"]?.toString().trim() ?? "";
+      final String name = reportCustomerName(record).toLowerCase();
+      final String key = appointmentId.isNotEmpty
+          ? "appointment:$appointmentId"
+          : "record:$date:$queue:$name";
+
+      recordsByKey[key] = {...?recordsByKey[key], ...record};
+    }
+
+    return recordsByKey.values.toList();
+  }
+
+  Widget buildReportSearchField() {
+    return TextField(
+      controller: reportSearchController,
+      textInputAction: TextInputAction.search,
+      onChanged: (value) {
+        setState(() {
+          reportSearchQuery = value.trim();
+        });
+      },
+      decoration: InputDecoration(
+        labelText: "Search customer name",
+        hintText: "Enter a full or partial name",
+        prefixIcon: const Icon(Icons.search_rounded),
+        suffixIcon: reportSearchQuery.isEmpty
+            ? null
+            : IconButton(
+                tooltip: "Clear search",
+                onPressed: () {
+                  reportSearchController.clear();
+                  setState(() {
+                    reportSearchQuery = "";
+                  });
+                },
+                icon: const Icon(Icons.close_rounded),
+              ),
+        filled: true,
+        fillColor: _softPrimaryColor,
+        labelStyle: const TextStyle(color: _mutedTextColor),
+        hintStyle: const TextStyle(color: _mutedTextColor),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: _borderColor),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: _primaryColor, width: 1.5),
+        ),
+      ),
+    );
+  }
+
+  Widget buildReportSearchResults({
+    required String date,
+    required List<Map<String, dynamic>> passedList,
+    required List<Map<String, dynamic>> failedList,
+    required List<Map<String, dynamic>> approvedList,
+    required List<Map<String, dynamic>> rejectedList,
+    required List<Map<String, dynamic>> pendingList,
+  }) {
+    final String query = reportSearchQuery.toLowerCase();
+    final results =
+        consolidatedReportRecords(
+            passedList: passedList,
+            failedList: failedList,
+            approvedList: approvedList,
+            rejectedList: rejectedList,
+            pendingList: pendingList,
+          ).where((record) {
+            return reportCustomerName(record).toLowerCase().contains(query);
+          }).toList()
+          ..sort((a, b) {
+            return reportCustomerName(
+              a,
+            ).toLowerCase().compareTo(reportCustomerName(b).toLowerCase());
+          });
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _cardColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: _borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.manage_search_rounded,
+                color: _primaryColor,
+                size: 23,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  "Search Results for $date",
+                  style: const TextStyle(
+                    color: _primaryColor,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: _softPrimaryColor,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  "${results.length}",
+                  style: const TextStyle(
+                    color: _primaryColor,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (results.isEmpty)
+            emptyBox(
+              'No customer named “$reportSearchQuery” was found for $date.',
+            )
+          else
+            ...results.map(buildReportSearchResultCard),
+        ],
+      ),
+    );
+  }
+
+  Widget buildReportSearchResultCard(Map<String, dynamic> record) {
+    final String name = reportCustomerName(record);
+    final String status = record["status"]?.toString().trim() ?? "Unknown";
+    final String queue = record["queue"]?.toString().trim() ?? "-";
+    final String plate = record["plate"]?.toString().trim() ?? "-";
+    final String vehicle = (record["vehicle"] ?? record["type"] ?? "-")
+        .toString()
+        .trim();
+    final String municipality =
+        record["municipality"]?.toString().trim() ?? "-";
+    final String email =
+        record["customerEmail"]?.toString().trim() ?? "Not available";
+    final String date = record["date"]?.toString().trim() ?? selectedDate;
+
+    final Color statusColor = switch (status.toLowerCase()) {
+      "passed" || "approved" => Colors.green,
+      "failed" || "rejected" => Colors.red,
+      "pending" => Colors.orange,
+      _ => _primaryColor,
+    };
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _softPrimaryColor,
+        borderRadius: BorderRadius.circular(17),
+        border: Border.all(color: _borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: _primaryColor,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Text(
+                  queue.isNotEmpty ? queue.substring(0, 1) : "-",
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Text(
+                  name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _primaryColor,
+                    fontSize: 15.5,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                decoration: BoxDecoration(
+                  color: statusColor.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  status,
+                  style: TextStyle(
+                    color: statusColor,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final bool useTwoColumns = constraints.maxWidth >= 360;
+              final double itemWidth = useTwoColumns
+                  ? (constraints.maxWidth - 8) / 2
+                  : constraints.maxWidth;
+
+              return Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  reportSearchDetailItem("Queue Number", queue, itemWidth),
+                  reportSearchDetailItem("Plate Number", plate, itemWidth),
+                  reportSearchDetailItem("Vehicle", vehicle, itemWidth),
+                  reportSearchDetailItem(
+                    "Municipality",
+                    municipality,
+                    itemWidth,
+                  ),
+                  reportSearchDetailItem("Email", email, itemWidth),
+                  reportSearchDetailItem("Report Date", date, itemWidth),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget reportSearchDetailItem(String label, String value, double width) {
+    return SizedBox(
+      width: width,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+        decoration: BoxDecoration(
+          color: _cardColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _borderColor),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(
+                color: _mutedTextColor,
+                fontSize: 10.5,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              value.isEmpty ? "-" : value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: _primaryColor,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget buildReportDetails({
     required String date,
     required int totalServed,
@@ -1500,65 +1861,198 @@ class _DailyReportState extends State<DailyReport> {
             title: "Report Details",
           ),
           const SizedBox(height: 12),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: _softPrimaryColor,
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: _borderColor),
-            ),
-            child: Text(
-              "Summary for $date: $totalServed served, ${passedList.length} passed, ${failedList.length} failed, ${approvedList.length} approved appointment(s), ${rejectedList.length} rejected appointment(s), and ${pendingList.length} pending appointment(s).",
-              style: const TextStyle(
-                color: _primaryColor,
-                fontWeight: FontWeight.w700,
-                height: 1.4,
+          buildReportSearchField(),
+          const SizedBox(height: 16),
+          if (reportSearchQuery.isNotEmpty)
+            buildReportSearchResults(
+              date: date,
+              passedList: passedList,
+              failedList: failedList,
+              approvedList: approvedList,
+              rejectedList: rejectedList,
+              pendingList: pendingList,
+            )
+          else ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: _softPrimaryColor,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: _borderColor),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    "Summary for $date",
+                    style: const TextStyle(
+                      color: _primaryColor,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  reportSummaryGroup(
+                    title: "Queue Results",
+                    icon: Icons.groups_rounded,
+                    items: [
+                      (
+                        label: "Served",
+                        value: totalServed,
+                        color: _primaryColor,
+                      ),
+                      (
+                        label: "Passed",
+                        value: passedList.length,
+                        color: Colors.green,
+                      ),
+                      (
+                        label: "Failed",
+                        value: failedList.length,
+                        color: Colors.red,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  reportSummaryGroup(
+                    title: "Appointments",
+                    icon: Icons.calendar_month_rounded,
+                    items: [
+                      (
+                        label: "Approved",
+                        value: approvedList.length,
+                        color: Colors.green,
+                      ),
+                      (
+                        label: "Rejected",
+                        value: rejectedList.length,
+                        color: Colors.red,
+                      ),
+                      (
+                        label: "Pending",
+                        value: pendingList.length,
+                        color: Colors.orange,
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
-          ),
-          const SizedBox(height: 16),
-          reportListSection(
-            title: "Passed Customers",
-            icon: Icons.check_circle_outline_rounded,
-            color: Colors.green,
-            records: passedList,
-            emptyText: "No passed customers for this date.",
-          ),
-          const SizedBox(height: 14),
-          reportListSection(
-            title: "Failed Customers",
-            icon: Icons.cancel_outlined,
-            color: Colors.red,
-            records: failedList,
-            emptyText: "No failed customers for this date.",
-          ),
-          const SizedBox(height: 14),
-          reportListSection(
-            title: "Approved Appointments",
-            icon: Icons.verified_outlined,
-            color: Colors.green,
-            records: approvedList,
-            emptyText: "No approved appointments for this date.",
-          ),
-          const SizedBox(height: 14),
-          reportListSection(
-            title: "Rejected Appointments",
-            icon: Icons.block_rounded,
-            color: Colors.red,
-            records: rejectedList,
-            emptyText: "No rejected appointments for this date.",
-          ),
-          const SizedBox(height: 14),
-          reportListSection(
-            title: "Pending Appointments",
-            icon: Icons.pending_actions_rounded,
-            color: Colors.orange,
-            records: pendingList,
-            emptyText: "No pending appointments for this date.",
-          ),
+            const SizedBox(height: 16),
+            reportListSection(
+              title: "Passed Customers",
+              icon: Icons.check_circle_outline_rounded,
+              color: Colors.green,
+              records: passedList,
+              emptyText: "No passed customers for this date.",
+            ),
+            const SizedBox(height: 14),
+            reportListSection(
+              title: "Failed Customers",
+              icon: Icons.cancel_outlined,
+              color: Colors.red,
+              records: failedList,
+              emptyText: "No failed customers for this date.",
+            ),
+            const SizedBox(height: 14),
+            reportListSection(
+              title: "Approved Appointments",
+              icon: Icons.verified_outlined,
+              color: Colors.green,
+              records: approvedList,
+              emptyText: "No approved appointments for this date.",
+            ),
+            const SizedBox(height: 14),
+            reportListSection(
+              title: "Rejected Appointments",
+              icon: Icons.block_rounded,
+              color: Colors.red,
+              records: rejectedList,
+              emptyText: "No rejected appointments for this date.",
+            ),
+            const SizedBox(height: 14),
+            reportListSection(
+              title: "Pending Appointments",
+              icon: Icons.pending_actions_rounded,
+              color: Colors.orange,
+              records: pendingList,
+              emptyText: "No pending appointments for this date.",
+            ),
+          ],
         ],
       ),
+    );
+  }
+
+  Widget reportSummaryGroup({
+    required String title,
+    required IconData icon,
+    required List<({String label, int value, Color color})> items,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 19, color: _primaryColor),
+            const SizedBox(width: 7),
+            Text(
+              title,
+              style: const TextStyle(
+                color: _primaryColor,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            for (int index = 0; index < items.length; index++) ...[
+              if (index > 0) const SizedBox(width: 8),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _cardColor,
+                    borderRadius: BorderRadius.circular(13),
+                    border: Border.all(color: _borderColor),
+                  ),
+                  child: Column(
+                    children: [
+                      Text(
+                        "${items[index].value}",
+                        style: TextStyle(
+                          color: items[index].color,
+                          fontSize: 21,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          items[index].label,
+                          style: const TextStyle(
+                            color: _mutedTextColor,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ],
     );
   }
 

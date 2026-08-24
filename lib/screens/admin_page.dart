@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
 import '../widgets/app_refresh_indicator.dart';
@@ -56,6 +57,45 @@ const int maxQueueLimit = 80;
 
 String formatDate(DateTime date) {
   return "${date.month}/${date.day}/${date.year}";
+}
+
+String _normalizeWalkInPlateNumber(String value) {
+  return value.trim().toUpperCase();
+}
+
+String? _validateWalkInPlateNumber(String value) {
+  final String plateNumber = _normalizeWalkInPlateNumber(value);
+
+  if (plateNumber.isEmpty) {
+    return "Please enter the vehicle plate number";
+  }
+
+  if (!RegExp(r'^[A-Z0-9]+$').hasMatch(plateNumber)) {
+    return "Use letters and numbers only—no spaces or symbols";
+  }
+
+  if (plateNumber.length < 6 || plateNumber.length > 7) {
+    return "Plate number must contain 6–7 characters";
+  }
+
+  if (!RegExp(r'[A-Z]').hasMatch(plateNumber) ||
+      !RegExp(r'[0-9]').hasMatch(plateNumber)) {
+    return "Plate number must include both letters and digits";
+  }
+
+  return null;
+}
+
+class _UpperCaseTextFormatter extends TextInputFormatter {
+  const _UpperCaseTextFormatter();
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    return newValue.copyWith(text: newValue.text.toUpperCase());
+  }
 }
 
 // ================= ADMIN PAGE =================
@@ -411,6 +451,7 @@ class _AdminPageState extends State<AdminPage> {
 
   void showGenerateDialog(String type) {
     final TextEditingController nameController = TextEditingController();
+    final TextEditingController plateController = TextEditingController();
 
     showDialog(
       context: context,
@@ -424,30 +465,89 @@ class _AdminPageState extends State<AdminPage> {
             fontWeight: FontWeight.w800,
           ),
         ),
-        content: TextField(
-          controller: nameController,
-          style: const TextStyle(
-            color: _primaryColor,
-            fontWeight: FontWeight.w600,
-          ),
-          decoration: InputDecoration(
-            labelText: text("Customer Name", "Pangalan ng Customer"),
-            labelStyle: const TextStyle(color: _mutedTextColor),
-            prefixIcon: const Icon(
-              Icons.person_outline_rounded,
-              color: _primaryColor,
-            ),
-            filled: true,
-            fillColor: _backgroundColor,
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: const BorderSide(color: _borderColor),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: const BorderSide(color: _primaryColor, width: 1.5),
-            ),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                textCapitalization: TextCapitalization.words,
+                style: const TextStyle(
+                  color: _primaryColor,
+                  fontWeight: FontWeight.w600,
+                ),
+                decoration: InputDecoration(
+                  labelText: text("Customer Name", "Pangalan ng Customer"),
+                  labelStyle: const TextStyle(color: _mutedTextColor),
+                  prefixIcon: const Icon(
+                    Icons.person_outline_rounded,
+                    color: _primaryColor,
+                  ),
+                  filled: true,
+                  fillColor: _backgroundColor,
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: const BorderSide(color: _borderColor),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: const BorderSide(
+                      color: _primaryColor,
+                      width: 1.5,
+                    ),
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: plateController,
+                textCapitalization: TextCapitalization.characters,
+                maxLength: 7,
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9]')),
+                  const _UpperCaseTextFormatter(),
+                  LengthLimitingTextInputFormatter(7),
+                ],
+                style: const TextStyle(
+                  color: _primaryColor,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 1.2,
+                ),
+                decoration: InputDecoration(
+                  labelText: text("Plate Number", "Plate Number"),
+                  hintText: "ABC1234",
+                  helperText: text(
+                    "Enter exactly 6–7 letters and numbers",
+                    "Maglagay ng eksaktong 6–7 letra at numero",
+                  ),
+                  counterText: "",
+                  labelStyle: const TextStyle(color: _mutedTextColor),
+                  prefixIcon: const Icon(
+                    Icons.pin_rounded,
+                    color: _primaryColor,
+                  ),
+                  filled: true,
+                  fillColor: _backgroundColor,
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: const BorderSide(color: _borderColor),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: const BorderSide(
+                      color: _primaryColor,
+                      width: 1.5,
+                    ),
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
         actionsPadding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
@@ -475,6 +575,7 @@ class _AdminPageState extends State<AdminPage> {
               final success = await generateQueue(
                 type,
                 nameController.text.trim(),
+                plateController.text,
               );
 
               if (success && context.mounted) {
@@ -490,7 +591,7 @@ class _AdminPageState extends State<AdminPage> {
 
   // ================= GENERATE QUEUE =================
 
-  Future<bool> generateQueue(String type, String name) async {
+  Future<bool> generateQueue(String type, String name, String plate) async {
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -504,6 +605,17 @@ class _AdminPageState extends State<AdminPage> {
       );
       return false;
     }
+
+    final String? plateError = _validateWalkInPlateNumber(plate);
+
+    if (plateError != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(plateError)));
+      return false;
+    }
+
+    final String plateNumber = _normalizeWalkInPlateNumber(plate);
 
     final String selectedDate = selectedQueueDateNotifier.value;
 
@@ -541,6 +653,7 @@ class _AdminPageState extends State<AdminPage> {
       "queueId": queueNumber,
       "queue": queueNumber,
       "name": name,
+      "plate": plateNumber,
       "type": type,
       "date": selectedDate,
       "source": "Walk-in",
@@ -560,6 +673,7 @@ class _AdminPageState extends State<AdminPage> {
         "queueId": queueNumber,
         "queue": queueNumber,
         "name": name,
+        "plate": plateNumber,
         "type": type,
         "date": selectedDate,
         "source": "Walk-in",

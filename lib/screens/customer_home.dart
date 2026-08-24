@@ -6,7 +6,9 @@ import '../widgets/app_refresh_indicator.dart';
 import 'track_page.dart';
 import 'book_appointment.dart';
 import 'booking_status_page.dart';
+import 'customer_login.dart';
 import 'customer_register.dart';
+import 'customer_settings.dart';
 
 const Color _backgroundColor = Color(0xFFF1FAFC);
 const Color _primaryColor = Color(0xFF071F35);
@@ -22,6 +24,8 @@ class CustomerHome extends StatefulWidget {
 }
 
 class _CustomerHomeState extends State<CustomerHome> {
+  bool isLoggingOut = false;
+
   Future<void> refreshCustomerProfile() async {
     final user = FirebaseAuth.instance.currentUser;
 
@@ -43,6 +47,69 @@ class _CustomerHomeState extends State<CustomerHome> {
     loggedInCustomerIdNotifier.value = user.uid;
   }
 
+  Future<void> logout() async {
+    if (isLoggingOut) return;
+
+    final bool shouldLogout =
+        await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) {
+            return AlertDialog(
+              title: const Text("Log out?"),
+              content: const Text(
+                "You will return to the login page and can sign in again anytime.",
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text("CANCEL"),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialogContext, true),
+                  style: FilledButton.styleFrom(backgroundColor: _primaryColor),
+                  child: const Text("LOG OUT"),
+                ),
+              ],
+            );
+          },
+        ) ??
+        false;
+
+    if (!shouldLogout || !mounted) return;
+
+    setState(() {
+      isLoggingOut = true;
+    });
+
+    try {
+      await FirebaseAuth.instance.signOut();
+
+      loggedInCustomerNameNotifier.value = "";
+      loggedInCustomerEmailNotifier.value = "";
+      loggedInCustomerIdNotifier.value = "";
+
+      if (!mounted) return;
+
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const CustomerLogin()),
+        (route) => false,
+      );
+    } catch (_) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Unable to log out. Please try again.")),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          isLoggingOut = false;
+        });
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -59,6 +126,34 @@ class _CustomerHomeState extends State<CustomerHome> {
             letterSpacing: 1.2,
           ),
         ),
+        actions: [
+          IconButton(
+            tooltip: "Customer settings",
+            onPressed: isLoggingOut
+                ? null
+                : () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const CustomerSettings(),
+                      ),
+                    );
+                  },
+            icon: const Icon(Icons.settings_outlined),
+          ),
+          IconButton(
+            tooltip: "Log out",
+            onPressed: isLoggingOut ? null : logout,
+            icon: isLoggingOut
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.logout_rounded),
+          ),
+          const SizedBox(width: 6),
+        ],
       ),
       body: SafeArea(
         child: AppRefreshIndicator(

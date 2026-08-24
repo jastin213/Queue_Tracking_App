@@ -5,8 +5,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:printing/printing.dart';
 
 import 'location_data.dart';
 import 'admin_page.dart';
@@ -22,6 +24,33 @@ const Color _mutedTextColor = Color(0xFF6E7E88);
 const Color _softPrimaryColor = Color(0xFFEAF4F8);
 const int _maxDocumentBytes = 10 * 1024 * 1024;
 const int _firestoreChunkBytes = 650 * 1024;
+
+String normalizePhilippinePlateNumber(String value) {
+  return value.trim().toUpperCase();
+}
+
+String? validatePhilippinePlateNumber(String value) {
+  final String plateNumber = normalizePhilippinePlateNumber(value);
+
+  if (plateNumber.isEmpty) {
+    return "Enter the vehicle plate number.";
+  }
+
+  if (!RegExp(r'^[A-Z0-9]+$').hasMatch(plateNumber)) {
+    return "Use letters and numbers only—no spaces or symbols.";
+  }
+
+  if (plateNumber.length < 6 || plateNumber.length > 7) {
+    return "Plate number must contain 6–7 characters.";
+  }
+
+  if (!RegExp(r'[A-Z]').hasMatch(plateNumber) ||
+      !RegExp(r'[0-9]').hasMatch(plateNumber)) {
+    return "Plate number must include both letters and digits.";
+  }
+
+  return null;
+}
 
 // ================= GLOBAL BOOKING & QUEUE STORAGE =================
 //
@@ -69,6 +98,7 @@ class _BookAppointmentState extends State<BookAppointment> {
   Uint8List? crFileBytes;
 
   bool isSubmitting = false;
+  String? plateNumberError;
 
   static const int maxQueueLimit = 80;
 
@@ -389,6 +419,239 @@ class _BookAppointmentState extends State<BookAppointment> {
     }
   }
 
+  bool isPdfDocument(String fileName) {
+    return fileName.toLowerCase().endsWith('.pdf');
+  }
+
+  Future<void> showSelectedDocumentPreview({
+    required String title,
+    required String fileName,
+    required Uint8List bytes,
+  }) async {
+    final bool isPdf = isPdfDocument(fileName);
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return Dialog(
+          backgroundColor: _cardColor,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 24,
+          ),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760, maxHeight: 760),
+            child: Column(
+              children: [
+                Container(
+                  padding: const EdgeInsets.fromLTRB(18, 10, 8, 10),
+                  decoration: const BoxDecoration(
+                    color: _primaryColor,
+                    borderRadius: BorderRadius.vertical(
+                      top: Radius.circular(20),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 17,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              fileName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(dialogContext),
+                        tooltip: "Close preview",
+                        icon: const Icon(
+                          Icons.close_rounded,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: isPdf
+                      ? PdfPreview(
+                          build: (_) async => bytes,
+                          allowPrinting: false,
+                          allowSharing: false,
+                          canChangeOrientation: false,
+                          canChangePageFormat: false,
+                          pdfFileName: fileName,
+                        )
+                      : Container(
+                          width: double.infinity,
+                          color: Colors.black.withValues(alpha: 0.04),
+                          padding: const EdgeInsets.all(12),
+                          child: InteractiveViewer(
+                            minScale: 0.5,
+                            maxScale: 5,
+                            child: Image.memory(
+                              bytes,
+                              fit: BoxFit.contain,
+                              errorBuilder: (context, error, stackTrace) {
+                                return const Center(
+                                  child: Text(
+                                    "Unable to preview this image.",
+                                    style: TextStyle(
+                                      color: Colors.red,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget selectedDocumentPreview({
+    required String title,
+    required String fileName,
+    required Uint8List bytes,
+  }) {
+    final bool isPdf = isPdfDocument(fileName);
+
+    void openPreview() {
+      showSelectedDocumentPreview(
+        title: title,
+        fileName: fileName,
+        bytes: bytes,
+      );
+    }
+
+    return Column(
+      children: [
+        const SizedBox(height: 12),
+        Material(
+          color: _cardColor,
+          borderRadius: BorderRadius.circular(14),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: isSubmitting ? null : openPreview,
+            child: Container(
+              width: double.infinity,
+              height: isPdf ? 96 : 150,
+              decoration: BoxDecoration(
+                border: Border.all(color: _borderColor),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: isPdf
+                  ? const Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.picture_as_pdf_rounded,
+                          size: 38,
+                          color: Colors.red,
+                        ),
+                        SizedBox(height: 6),
+                        Text(
+                          "PDF selected — tap to view",
+                          style: TextStyle(
+                            color: _primaryColor,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    )
+                  : Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        Image.memory(
+                          bytes,
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) {
+                            return const Center(
+                              child: Text(
+                                "Image preview unavailable",
+                                style: TextStyle(color: _mutedTextColor),
+                              ),
+                            );
+                          },
+                        ),
+                        Positioned(
+                          right: 8,
+                          bottom: 8,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: _primaryColor.withValues(alpha: 0.88),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.zoom_in_rounded,
+                                  color: Colors.white,
+                                  size: 17,
+                                ),
+                                SizedBox(width: 5),
+                                Text(
+                                  "Tap to view",
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: TextButton.icon(
+            onPressed: isSubmitting ? null : openPreview,
+            icon: const Icon(Icons.visibility_outlined, size: 19),
+            label: const Text("View selected file"),
+            style: TextButton.styleFrom(foregroundColor: _primaryColor),
+          ),
+        ),
+      ],
+    );
+  }
+
   String safeStorageFileName(String fileName) {
     return fileName.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
   }
@@ -504,6 +767,10 @@ class _BookAppointmentState extends State<BookAppointment> {
         ? loggedInCustomerId
         : (currentUser?.uid ?? "");
 
+    final String plateNumber = normalizePhilippinePlateNumber(
+      plateController.text,
+    );
+
     if (currentUser == null || customerId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -513,9 +780,23 @@ class _BookAppointmentState extends State<BookAppointment> {
       return;
     }
 
+    final String? currentPlateError = validatePhilippinePlateNumber(
+      plateNumber,
+    );
+
+    if (currentPlateError != null) {
+      setState(() {
+        plateNumberError = currentPlateError;
+      });
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(currentPlateError)));
+      return;
+    }
+
     if (selectedDate == null ||
         customerName.isEmpty ||
-        plateController.text.trim().isEmpty ||
         idFileBytes == null ||
         orFileBytes == null ||
         crFileBytes == null) {
@@ -679,7 +960,7 @@ class _BookAppointmentState extends State<BookAppointment> {
         "customerEmail": customerEmail,
         "fullName": customerName,
         "municipality": selectedMunicipality,
-        "plate": plateController.text.trim().toUpperCase(),
+        "plate": plateNumber,
         "vehicle": selectedVehicle,
         "queue": selectedQueueCode,
         "date": formattedDate,
@@ -1082,10 +1363,11 @@ class _BookAppointmentState extends State<BookAppointment> {
   Widget uploadCard({
     required String title,
     required String? fileName,
+    required Uint8List? fileBytes,
     required VoidCallback onPick,
     required VoidCallback onCamera,
   }) {
-    final bool hasFile = fileName != null;
+    final bool hasFile = fileName != null && fileBytes != null;
 
     return Container(
       width: double.infinity,
@@ -1143,6 +1425,12 @@ class _BookAppointmentState extends State<BookAppointment> {
               ),
             ],
           ),
+          if (hasFile)
+            selectedDocumentPreview(
+              title: title,
+              fileName: fileName,
+              bytes: fileBytes,
+            ),
           const SizedBox(height: 12),
           Row(
             children: [
@@ -1388,8 +1676,41 @@ class _BookAppointmentState extends State<BookAppointment> {
                     controller: plateController,
                     enabled: !isSubmitting,
                     textCapitalization: TextCapitalization.characters,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    maxLength: 7,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(
+                        RegExp(r'[A-Za-z0-9]'),
+                      ),
+                      LengthLimitingTextInputFormatter(7),
+                      TextInputFormatter.withFunction((oldValue, newValue) {
+                        return newValue.copyWith(
+                          text: newValue.text.toUpperCase(),
+                          composing: TextRange.empty,
+                        );
+                      }),
+                    ],
+                    onChanged: (value) {
+                      final String? error = validatePhilippinePlateNumber(
+                        value,
+                      );
+
+                      if (error != plateNumberError) {
+                        setState(() {
+                          plateNumberError = error;
+                        });
+                      }
+                    },
                     style: const TextStyle(color: _primaryColor),
-                    decoration: formDecoration("Enter plate number"),
+                    decoration: formDecoration("Example: ABC1234").copyWith(
+                      errorText: plateNumberError,
+                      errorMaxLines: 2,
+                      helperText:
+                          "Enter exactly as printed: 6–7 letters and numbers.",
+                      helperMaxLines: 2,
+                      counterText: "",
+                    ),
                   ),
                 ],
               ),
@@ -1406,6 +1727,7 @@ class _BookAppointmentState extends State<BookAppointment> {
                   uploadCard(
                     title: "Valid ID",
                     fileName: idFileName,
+                    fileBytes: idFileBytes,
                     onPick: () => pickDocument("ID"),
                     onCamera: () => captureDocument("ID"),
                   ),
@@ -1414,6 +1736,7 @@ class _BookAppointmentState extends State<BookAppointment> {
                   uploadCard(
                     title: "Official Receipt (OR)",
                     fileName: orFileName,
+                    fileBytes: orFileBytes,
                     onPick: () => pickDocument("OR"),
                     onCamera: () => captureDocument("OR"),
                   ),
@@ -1422,6 +1745,7 @@ class _BookAppointmentState extends State<BookAppointment> {
                   uploadCard(
                     title: "Certificate of Registration (CR)",
                     fileName: crFileName,
+                    fileBytes: crFileBytes,
                     onPick: () => pickDocument("CR"),
                     onCamera: () => captureDocument("CR"),
                   ),
