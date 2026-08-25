@@ -1,16 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
+import '../theme/app_theme.dart';
 // ============================================================================
 // THEME COLORS
 // ============================================================================
 
-const Color _backgroundColor = Color(0xFFF1FAFC);
-const Color _primaryColor = Color(0xFF071F35);
-const Color _cardColor = Colors.white;
-const Color _borderColor = Color(0xFFD8E8EE);
-const Color _mutedTextColor = Color(0xFF6E7E88);
-const Color _softPrimaryColor = Color(0xFFEAF4F8);
+const Color _backgroundColor = AppColors.background;
+const Color _primaryColor = AppColors.primary;
+const Color _cardColor = AppColors.surface;
+const Color _borderColor = AppColors.border;
+const Color _mutedTextColor = AppColors.mutedText;
+const Color _softPrimaryColor = AppColors.softPrimary;
 
 // ============================================================================
 // ADMIN SETTINGS GLOBAL NOTIFIERS

@@ -1,5 +1,4 @@
-import 'dart:typed_data';
-
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -10,18 +9,23 @@ import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:printing/printing.dart';
 
+import '../theme/app_theme.dart';
+import '../services/firestore_query_fields.dart';
+import '../services/platform_storage_upload.dart';
+import '../widgets/app_refresh_indicator.dart';
+import '../widgets/app_responsive_content.dart';
 import 'location_data.dart';
 import 'admin_page.dart';
 import 'customer_register.dart';
 
 // ================= COLOR THEME =================
 
-const Color _backgroundColor = Color(0xFFF1FAFC);
-const Color _primaryColor = Color(0xFF071F35);
-const Color _cardColor = Colors.white;
-const Color _borderColor = Color(0xFFD8E8EE);
-const Color _mutedTextColor = Color(0xFF6E7E88);
-const Color _softPrimaryColor = Color(0xFFEAF4F8);
+const Color _backgroundColor = AppColors.background;
+const Color _primaryColor = AppColors.primary;
+const Color _cardColor = AppColors.surface;
+const Color _borderColor = AppColors.border;
+const Color _mutedTextColor = AppColors.mutedText;
+const Color _softPrimaryColor = AppColors.softPrimary;
 const int _maxDocumentBytes = 10 * 1024 * 1024;
 const int _firestoreChunkBytes = 650 * 1024;
 
@@ -98,7 +102,17 @@ class _BookAppointmentState extends State<BookAppointment> {
   Uint8List? crFileBytes;
 
   bool isSubmitting = false;
+  double uploadProgress = 0;
   String? plateNumberError;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+  _appointmentAvailabilitySubscription;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+  _queueAvailabilitySubscription;
+  Set<String> _appointmentUnavailableCodes = {};
+  Set<String> _queueUnavailableCodes = {};
+  bool _appointmentAvailabilityLoaded = false;
+  bool _queueAvailabilityLoaded = false;
+  Object? _availabilityError;
 
   static const int maxQueueLimit = 80;
 
@@ -122,6 +136,8 @@ class _BookAppointmentState extends State<BookAppointment> {
 
   @override
   void dispose() {
+    _appointmentAvailabilitySubscription?.cancel();
+    _queueAvailabilitySubscription?.cancel();
     fullNameController.dispose();
     plateController.dispose();
     super.dispose();
@@ -205,6 +221,144 @@ class _BookAppointmentState extends State<BookAppointment> {
 
   // ================= QUEUE CODE HELPERS =================
 
+  String queueDateId(String date) => date.replaceAll("/", "-");
+
+  CollectionReference<Map<String, dynamic>> queueItemsRef(String date) {
+    return FirebaseFirestore.instance
+        .collection("queues")
+        .doc(queueDateId(date))
+        .collection("items");
+  }
+
+  bool get isAvailabilityLoading =>
+      selectedDate != null &&
+      (!_appointmentAvailabilityLoaded || !_queueAvailabilityLoaded);
+
+  Set<String> get realtimeUnavailableCodes => {
+    ..._appointmentUnavailableCodes,
+    ..._queueUnavailableCodes,
+  };
+
+  Set<String> unavailableAppointmentCodes(
+    QuerySnapshot<Map<String, dynamic>> snapshot,
+  ) {
+    return snapshot.docs
+        .where((doc) {
+          final status = doc.data()["status"]?.toString() ?? "";
+          return status == "Pending" || status == "Approved";
+        })
+        .map((doc) => doc.data()["queue"]?.toString() ?? "")
+        .where((code) {
+          return code.isNotEmpty;
+        })
+        .toSet();
+  }
+
+  Set<String> unavailableQueueCodes(
+    QuerySnapshot<Map<String, dynamic>> snapshot,
+  ) {
+    return snapshot.docs
+        .where((doc) {
+          final status = doc.data()["status"]?.toString() ?? "";
+          return status != "Cancelled" && status != "Reset";
+        })
+        .map((doc) => doc.data()["queue"]?.toString() ?? doc.id)
+        .where((code) {
+          return code.isNotEmpty;
+        })
+        .toSet();
+  }
+
+  void keepSelectedQueueAvailable() {
+    if (selectedDate == null) return;
+    if (selectedQueueCode.isEmpty || isQueueTaken(selectedQueueCode)) {
+      selectedQueueCode = getFirstAvailableQueueCode();
+    }
+  }
+
+  void listenToQueueAvailability() {
+    _appointmentAvailabilitySubscription?.cancel();
+    _queueAvailabilitySubscription?.cancel();
+
+    final date = formattedDate;
+    if (date.isEmpty) return;
+
+    setState(() {
+      _appointmentUnavailableCodes = {};
+      _queueUnavailableCodes = {};
+      _appointmentAvailabilityLoaded = false;
+      _queueAvailabilityLoaded = false;
+      _availabilityError = null;
+    });
+
+    _appointmentAvailabilitySubscription = FirebaseFirestore.instance
+        .collection("appointments")
+        .where("date", isEqualTo: date)
+        .snapshots()
+        .listen(
+          (snapshot) {
+            if (!mounted || formattedDate != date) return;
+            setState(() {
+              _appointmentUnavailableCodes = unavailableAppointmentCodes(
+                snapshot,
+              );
+              _appointmentAvailabilityLoaded = true;
+              _availabilityError = null;
+              keepSelectedQueueAvailable();
+            });
+          },
+          onError: (Object error) {
+            if (!mounted || formattedDate != date) return;
+            setState(() {
+              _appointmentAvailabilityLoaded = true;
+              _availabilityError = error;
+            });
+          },
+        );
+
+    _queueAvailabilitySubscription = queueItemsRef(date).snapshots().listen(
+      (snapshot) {
+        if (!mounted || formattedDate != date) return;
+        setState(() {
+          _queueUnavailableCodes = unavailableQueueCodes(snapshot);
+          _queueAvailabilityLoaded = true;
+          _availabilityError = null;
+          keepSelectedQueueAvailable();
+        });
+      },
+      onError: (Object error) {
+        if (!mounted || formattedDate != date) return;
+        setState(() {
+          _queueAvailabilityLoaded = true;
+          _availabilityError = error;
+        });
+      },
+    );
+  }
+
+  Future<void> refreshQueueAvailability() async {
+    final date = formattedDate;
+    if (date.isEmpty) return;
+
+    final results = await Future.wait([
+      FirebaseFirestore.instance
+          .collection("appointments")
+          .where("date", isEqualTo: date)
+          .get(const GetOptions(source: Source.server)),
+      queueItemsRef(date).get(const GetOptions(source: Source.server)),
+    ]);
+
+    if (!mounted || formattedDate != date) return;
+    setState(() {
+      _appointmentUnavailableCodes = unavailableAppointmentCodes(results[0]);
+      _queueUnavailableCodes = unavailableQueueCodes(results[1]);
+      _appointmentAvailabilityLoaded = true;
+      _queueAvailabilityLoaded = true;
+      _availabilityError = null;
+      keepSelectedQueueAvailable();
+    });
+  }
+
   List<String> getQueueCodes() {
     String prefix = selectedVehicle == "Gas" ? "G" : "D";
 
@@ -215,6 +369,8 @@ class _BookAppointmentState extends State<BookAppointment> {
 
   bool isQueueTaken(String code) {
     if (selectedDate == null) return false;
+
+    if (realtimeUnavailableCodes.contains(code)) return true;
 
     bool inIssued =
         issuedQueueCodesNotifier.value[formattedDate]?.contains(code) ?? false;
@@ -245,15 +401,31 @@ class _BookAppointmentState extends State<BookAppointment> {
   }
 
   Future<bool> isQueueTakenInFirestore(String date, String queueCode) async {
-    final query = await FirebaseFirestore.instance
-        .collection("appointments")
-        .where("date", isEqualTo: date)
-        .where("queue", isEqualTo: queueCode)
-        .where("status", whereIn: ["Pending", "Approved"])
-        .limit(1)
-        .get();
+    final results = await Future.wait([
+      FirebaseFirestore.instance
+          .collection("appointments")
+          .where("date", isEqualTo: date)
+          .get(const GetOptions(source: Source.server)),
+      queueItemsRef(
+        date,
+      ).doc(queueCode).get(const GetOptions(source: Source.server)),
+    ]);
+    final appointmentSnapshot =
+        results[0] as QuerySnapshot<Map<String, dynamic>>;
+    final queueSnapshot = results[1] as DocumentSnapshot<Map<String, dynamic>>;
+    final reservedAppointment = appointmentSnapshot.docs.any((doc) {
+      final data = doc.data();
+      final status = data["status"]?.toString() ?? "";
+      return data["queue"]?.toString() == queueCode &&
+          (status == "Pending" || status == "Approved");
+    });
+    final queueStatus = queueSnapshot.data()?["status"]?.toString() ?? "";
+    final activeQueue =
+        queueSnapshot.exists &&
+        queueStatus != "Cancelled" &&
+        queueStatus != "Reset";
 
-    return query.docs.isNotEmpty;
+    return reservedAppointment || activeQueue;
   }
 
   String getFirstAvailableQueueCode() {
@@ -289,9 +461,12 @@ class _BookAppointmentState extends State<BookAppointment> {
 
     if (picked != null) {
       setState(() {
+        _appointmentUnavailableCodes = {};
+        _queueUnavailableCodes = {};
         selectedDate = picked;
         selectedQueueCode = getFirstAvailableQueueCode();
       });
+      listenToQueueAvailability();
     }
   }
 
@@ -512,6 +687,8 @@ class _BookAppointmentState extends State<BookAppointment> {
                             child: Image.memory(
                               bytes,
                               fit: BoxFit.contain,
+                              cacheWidth: 1600,
+                              filterQuality: FilterQuality.medium,
                               errorBuilder: (context, error, stackTrace) {
                                 return const Center(
                                   child: Text(
@@ -591,6 +768,9 @@ class _BookAppointmentState extends State<BookAppointment> {
                         Image.memory(
                           bytes,
                           fit: BoxFit.cover,
+                          cacheWidth: 600,
+                          cacheHeight: 400,
+                          filterQuality: FilterQuality.medium,
                           errorBuilder: (context, error, stackTrace) {
                             return const Center(
                               child: Text(
@@ -662,6 +842,8 @@ class _BookAppointmentState extends State<BookAppointment> {
     required String documentType,
     required String fileName,
     required Uint8List bytes,
+    required String? filePath,
+    void Function(double progress)? onProgress,
   }) async {
     final String safeFileName = safeStorageFileName(fileName);
     final Reference documentRef = FirebaseStorage.instance.ref().child(
@@ -669,9 +851,11 @@ class _BookAppointmentState extends State<BookAppointment> {
       '${documentType.toLowerCase()}_$safeFileName',
     );
 
-    await documentRef.putData(
-      bytes,
-      SettableMetadata(
+    final UploadTask uploadTask = startPlatformStorageUpload(
+      reference: documentRef,
+      bytes: bytes,
+      filePath: filePath,
+      metadata: SettableMetadata(
         contentType: documentContentType(fileName),
         customMetadata: {
           'appointmentId': appointmentId,
@@ -681,6 +865,20 @@ class _BookAppointmentState extends State<BookAppointment> {
         },
       ),
     );
+    final StreamSubscription<TaskSnapshot> progressSubscription = uploadTask
+        .snapshotEvents
+        .listen((snapshot) {
+          final totalBytes = snapshot.totalBytes;
+          if (totalBytes > 0) {
+            onProgress?.call(snapshot.bytesTransferred / totalBytes);
+          }
+        });
+
+    try {
+      await uploadTask;
+    } finally {
+      await progressSubscription.cancel();
+    }
 
     return (
       path: documentRef.fullPath,
@@ -835,6 +1033,7 @@ class _BookAppointmentState extends State<BookAppointment> {
 
     setState(() {
       isSubmitting = true;
+      uploadProgress = 0;
     });
 
     final List<Reference> uploadedDocumentRefs = [];
@@ -891,6 +1090,10 @@ class _BookAppointmentState extends State<BookAppointment> {
           documentType: 'ID',
           fileName: idFileName ?? 'valid_id.jpg',
           bytes: idFileBytes!,
+          filePath: idFilePath,
+          onProgress: (progress) {
+            if (mounted) setState(() => uploadProgress = progress / 3);
+          },
         );
         idFileUrl = idUpload.url;
         idStoragePath = idUpload.path;
@@ -902,6 +1105,10 @@ class _BookAppointmentState extends State<BookAppointment> {
           documentType: 'OR',
           fileName: orFileName ?? 'official_receipt.jpg',
           bytes: orFileBytes!,
+          filePath: orFilePath,
+          onProgress: (progress) {
+            if (mounted) setState(() => uploadProgress = (1 + progress) / 3);
+          },
         );
         orFileUrl = orUpload.url;
         orStoragePath = orUpload.path;
@@ -913,6 +1120,10 @@ class _BookAppointmentState extends State<BookAppointment> {
           documentType: 'CR',
           fileName: crFileName ?? 'certificate_of_registration.jpg',
           bytes: crFileBytes!,
+          filePath: crFilePath,
+          onProgress: (progress) {
+            if (mounted) setState(() => uploadProgress = (2 + progress) / 3);
+          },
         );
         crFileUrl = crUpload.url;
         crStoragePath = crUpload.path;
@@ -927,6 +1138,7 @@ class _BookAppointmentState extends State<BookAppointment> {
         }
         uploadedDocumentRefs.clear();
         documentBackend = 'firestore';
+        if (mounted) setState(() => uploadProgress = 0.45);
 
         await uploadAppointmentDocumentToFirestore(
           appointmentRef: appointmentRef,
@@ -936,6 +1148,7 @@ class _BookAppointmentState extends State<BookAppointment> {
           bytes: idFileBytes!,
           createdRefs: uploadedFirestoreDocumentRefs,
         );
+        if (mounted) setState(() => uploadProgress = 0.65);
         await uploadAppointmentDocumentToFirestore(
           appointmentRef: appointmentRef,
           customerId: customerId,
@@ -944,6 +1157,7 @@ class _BookAppointmentState extends State<BookAppointment> {
           bytes: orFileBytes!,
           createdRefs: uploadedFirestoreDocumentRefs,
         );
+        if (mounted) setState(() => uploadProgress = 0.82);
         await uploadAppointmentDocumentToFirestore(
           appointmentRef: appointmentRef,
           customerId: customerId,
@@ -952,6 +1166,7 @@ class _BookAppointmentState extends State<BookAppointment> {
           bytes: crFileBytes!,
           createdRefs: uploadedFirestoreDocumentRefs,
         );
+        if (mounted) setState(() => uploadProgress = 1);
       }
 
       final Map<String, dynamic> appointmentData = {
@@ -964,6 +1179,11 @@ class _BookAppointmentState extends State<BookAppointment> {
         "vehicle": selectedVehicle,
         "queue": selectedQueueCode,
         "date": formattedDate,
+        ...firestoreQueryFields(
+          date: formattedDate,
+          plate: plateNumber,
+          name: customerName,
+        ),
         "status": "Pending",
 
         "idFile": idFileName,
@@ -1040,6 +1260,7 @@ class _BookAppointmentState extends State<BookAppointment> {
       if (mounted) {
         setState(() {
           isSubmitting = false;
+          uploadProgress = 0;
         });
       }
     }
@@ -1266,10 +1487,72 @@ class _BookAppointmentState extends State<BookAppointment> {
     );
   }
 
+  Widget liveAvailabilityStatus() {
+    final prefix = selectedVehicle == "Gas" ? "G" : "D";
+    final unavailableCount = realtimeUnavailableCodes.where((code) {
+      return code.startsWith(prefix);
+    }).length;
+    final hasError = _availabilityError != null;
+    final color = hasError
+        ? Colors.red
+        : isAvailabilityLoading
+        ? Colors.blue
+        : Colors.green;
+    final message = hasError
+        ? "Live update unavailable — pull down to retry"
+        : isAvailabilityLoading
+        ? "Connecting to live queue availability..."
+        : "Live availability • $unavailableCount unavailable";
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: color.withValues(alpha: 0.30)),
+      ),
+      child: Row(
+        children: [
+          if (isAvailabilityLoading && !hasError)
+            SizedBox(
+              width: 17,
+              height: 17,
+              child: CircularProgressIndicator(strokeWidth: 2, color: color),
+            )
+          else
+            Icon(
+              hasError ? Icons.sync_problem_rounded : Icons.circle,
+              color: color,
+              size: hasError ? 19 : 11,
+            ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                color: color,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          const Icon(
+            Icons.swipe_down_alt_rounded,
+            color: _mutedTextColor,
+            size: 19,
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget queueCodesView(List<String> codes) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        liveAvailabilityStatus(),
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(14),
@@ -1437,8 +1720,11 @@ class _BookAppointmentState extends State<BookAppointment> {
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed: isSubmitting ? null : onPick,
-                  icon: const Icon(Icons.attach_file, size: 18),
-                  label: const Text("Choose File"),
+                  icon: Icon(
+                    hasFile ? Icons.change_circle_outlined : Icons.attach_file,
+                    size: 18,
+                  ),
+                  label: Text(hasFile ? "Choose Another" : "Choose File"),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: _primaryColor,
                     side: const BorderSide(color: _primaryColor),
@@ -1452,8 +1738,15 @@ class _BookAppointmentState extends State<BookAppointment> {
               Expanded(
                 child: OutlinedButton.icon(
                   onPressed: isSubmitting ? null : onCamera,
-                  icon: const Icon(Icons.camera_alt, size: 18),
-                  label: Text(kIsWeb ? "Camera / Photo" : "Take Photo"),
+                  icon: Icon(
+                    hasFile ? Icons.replay_rounded : Icons.camera_alt,
+                    size: 18,
+                  ),
+                  label: Text(
+                    hasFile
+                        ? (kIsWeb ? "Choose New Photo" : "Retake Photo")
+                        : (kIsWeb ? "Camera / Photo" : "Take Photo"),
+                  ),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: _primaryColor,
                     side: const BorderSide(color: _primaryColor),
@@ -1529,231 +1822,260 @@ class _BookAppointmentState extends State<BookAppointment> {
                 ),
               ],
             ),
-            child: SizedBox(
-              height: 55,
-              child: ElevatedButton(
-                onPressed: isSubmitting ? null : submitBooking,
-                child: isSubmitting
-                    ? const SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.5,
-                          color: Colors.white,
-                        ),
-                      )
-                    : const Text("SUBMIT APPOINTMENT"),
+            child: Align(
+              alignment: Alignment.center,
+              heightFactor: 1,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 880),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 55,
+                  child: ElevatedButton(
+                    onPressed: isSubmitting ? null : submitBooking,
+                    child: isSubmitting
+                        ? Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.5,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                "UPLOADING ${(uploadProgress.clamp(0, 1) * 100).round()}%",
+                              ),
+                            ],
+                          )
+                        : const Text("SUBMIT APPOINTMENT"),
+                  ),
+                ),
               ),
             ),
           ),
         ),
         body: SafeArea(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 26),
-            children: [
-              policyReminder(),
-
-              sectionTitle(
-                number: "1",
-                title: "Appointment Details",
-                subtitle:
-                    "Choose the date, location, vehicle type, and queue code.",
-                icon: Icons.event_available_outlined,
-              ),
-              sectionCard(
+          child: AppRefreshIndicator(
+            onRefresh: refreshQueueAvailability,
+            child: AppResponsiveContent(
+              maxWidth: 880,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: appPagePadding(context, top: 18, bottom: 26),
                 children: [
-                  fieldLabel("Appointment Date"),
-                  dateButton(),
-                  const SizedBox(height: 18),
+                  policyReminder(),
 
-                  fieldLabel("Customer Location"),
-                  DropdownButtonFormField<String>(
-                    value: selectedMunicipality,
-                    decoration: formDecoration("Select Location"),
-                    dropdownColor: _cardColor,
-                    iconEnabledColor: _primaryColor,
-                    style: const TextStyle(color: _primaryColor),
-                    items: albayThirdDistrictLocations.map((loc) {
-                      return DropdownMenuItem(
-                        value: loc.name,
-                        child: Text(loc.name),
-                      );
-                    }).toList(),
-                    onChanged: isSubmitting
-                        ? null
-                        : (v) {
-                            if (v == null) return;
-                            setState(() {
-                              selectedMunicipality = v;
-                            });
-                          },
+                  sectionTitle(
+                    number: "1",
+                    title: "Appointment Details",
+                    subtitle:
+                        "Choose the date, location, vehicle type, and queue code.",
+                    icon: Icons.event_available_outlined,
                   ),
+                  sectionCard(
+                    children: [
+                      fieldLabel("Appointment Date"),
+                      dateButton(),
+                      const SizedBox(height: 18),
 
-                  const SizedBox(height: 18),
-
-                  fieldLabel("Vehicle Type"),
-                  DropdownButtonFormField<String>(
-                    value: selectedVehicle,
-                    decoration: formDecoration("Select Vehicle Type"),
-                    dropdownColor: _cardColor,
-                    iconEnabledColor: _primaryColor,
-                    style: const TextStyle(color: _primaryColor),
-                    items: const [
-                      DropdownMenuItem(value: "Gas", child: Text("Gas")),
-                      DropdownMenuItem(value: "Diesel", child: Text("Diesel")),
-                    ],
-                    onChanged: isSubmitting
-                        ? null
-                        : (v) {
-                            if (v == null) return;
-
-                            setState(() {
-                              selectedVehicle = v;
-
-                              if (selectedDate != null) {
-                                selectedQueueCode =
-                                    getFirstAvailableQueueCode();
-                              } else {
-                                selectedQueueCode = selectedVehicle == "Gas"
-                                    ? "G001"
-                                    : "D001";
-                              }
-                            });
-                          },
-                  ),
-
-                  const SizedBox(height: 18),
-
-                  fieldLabel("Available Queue Codes"),
-                  if (selectedDate == null)
-                    queueMessageBox(
-                      "Please choose an appointment date first to view available queue codes.",
-                    )
-                  else
-                    queueCodesView(codes),
-                ],
-              ),
-
-              sectionTitle(
-                number: "2",
-                title: "Customer Information",
-                subtitle:
-                    "The appointment name is linked to the logged-in customer account.",
-                icon: Icons.person_outline,
-              ),
-              sectionCard(
-                children: [
-                  fieldLabel("Full Name"),
-                  TextField(
-                    controller: fullNameController,
-                    readOnly: loggedInCustomerName.isNotEmpty || isSubmitting,
-                    style: const TextStyle(color: _primaryColor),
-                    decoration: formDecoration("Enter full name").copyWith(
-                      suffixIcon: loggedInCustomerName.isNotEmpty
-                          ? const Icon(
-                              Icons.lock_outline_rounded,
-                              color: _primaryColor,
-                            )
-                          : null,
-                    ),
-                  ),
-                  if (loggedInCustomerName.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    const Text(
-                      "This name is locked to your logged-in account so your appointment status will appear correctly.",
-                      style: TextStyle(
-                        color: _mutedTextColor,
-                        fontSize: 12.5,
-                        height: 1.3,
+                      fieldLabel("Customer Location"),
+                      DropdownButtonFormField<String>(
+                        value: selectedMunicipality,
+                        decoration: formDecoration("Select Location"),
+                        dropdownColor: _cardColor,
+                        iconEnabledColor: _primaryColor,
+                        style: const TextStyle(color: _primaryColor),
+                        items: albayThirdDistrictLocations.map((loc) {
+                          return DropdownMenuItem(
+                            value: loc.name,
+                            child: Text(loc.name),
+                          );
+                        }).toList(),
+                        onChanged: isSubmitting
+                            ? null
+                            : (v) {
+                                if (v == null) return;
+                                setState(() {
+                                  selectedMunicipality = v;
+                                });
+                              },
                       ),
-                    ),
-                  ],
 
-                  const SizedBox(height: 18),
+                      const SizedBox(height: 18),
 
-                  fieldLabel("Plate Number"),
-                  TextField(
-                    controller: plateController,
-                    enabled: !isSubmitting,
-                    textCapitalization: TextCapitalization.characters,
-                    autocorrect: false,
-                    enableSuggestions: false,
-                    maxLength: 7,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(
-                        RegExp(r'[A-Za-z0-9]'),
+                      fieldLabel("Vehicle Type"),
+                      DropdownButtonFormField<String>(
+                        value: selectedVehicle,
+                        decoration: formDecoration("Select Vehicle Type"),
+                        dropdownColor: _cardColor,
+                        iconEnabledColor: _primaryColor,
+                        style: const TextStyle(color: _primaryColor),
+                        items: const [
+                          DropdownMenuItem(value: "Gas", child: Text("Gas")),
+                          DropdownMenuItem(
+                            value: "Diesel",
+                            child: Text("Diesel"),
+                          ),
+                        ],
+                        onChanged: isSubmitting
+                            ? null
+                            : (v) {
+                                if (v == null) return;
+
+                                setState(() {
+                                  selectedVehicle = v;
+
+                                  if (selectedDate != null) {
+                                    selectedQueueCode =
+                                        getFirstAvailableQueueCode();
+                                  } else {
+                                    selectedQueueCode = selectedVehicle == "Gas"
+                                        ? "G001"
+                                        : "D001";
+                                  }
+                                });
+                              },
                       ),
-                      LengthLimitingTextInputFormatter(7),
-                      TextInputFormatter.withFunction((oldValue, newValue) {
-                        return newValue.copyWith(
-                          text: newValue.text.toUpperCase(),
-                          composing: TextRange.empty,
-                        );
-                      }),
+
+                      const SizedBox(height: 18),
+
+                      fieldLabel("Available Queue Codes"),
+                      if (selectedDate == null)
+                        queueMessageBox(
+                          "Please choose an appointment date first to view available queue codes.",
+                        )
+                      else
+                        queueCodesView(codes),
                     ],
-                    onChanged: (value) {
-                      final String? error = validatePhilippinePlateNumber(
-                        value,
-                      );
-
-                      if (error != plateNumberError) {
-                        setState(() {
-                          plateNumberError = error;
-                        });
-                      }
-                    },
-                    style: const TextStyle(color: _primaryColor),
-                    decoration: formDecoration("Example: ABC1234").copyWith(
-                      errorText: plateNumberError,
-                      errorMaxLines: 2,
-                      helperText:
-                          "Enter exactly as printed: 6–7 letters and numbers.",
-                      helperMaxLines: 2,
-                      counterText: "",
-                    ),
                   ),
+
+                  sectionTitle(
+                    number: "2",
+                    title: "Customer Information",
+                    subtitle:
+                        "The appointment name is linked to the logged-in customer account.",
+                    icon: Icons.person_outline,
+                  ),
+                  sectionCard(
+                    children: [
+                      fieldLabel("Full Name"),
+                      TextField(
+                        controller: fullNameController,
+                        readOnly:
+                            loggedInCustomerName.isNotEmpty || isSubmitting,
+                        style: const TextStyle(color: _primaryColor),
+                        decoration: formDecoration("Enter full name").copyWith(
+                          suffixIcon: loggedInCustomerName.isNotEmpty
+                              ? const Icon(
+                                  Icons.lock_outline_rounded,
+                                  color: _primaryColor,
+                                )
+                              : null,
+                        ),
+                      ),
+                      if (loggedInCustomerName.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        const Text(
+                          "This name is locked to your logged-in account so your appointment status will appear correctly.",
+                          style: TextStyle(
+                            color: _mutedTextColor,
+                            fontSize: 12.5,
+                            height: 1.3,
+                          ),
+                        ),
+                      ],
+
+                      const SizedBox(height: 18),
+
+                      fieldLabel("Plate Number"),
+                      TextField(
+                        controller: plateController,
+                        enabled: !isSubmitting,
+                        textCapitalization: TextCapitalization.characters,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        maxLength: 7,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(
+                            RegExp(r'[A-Za-z0-9]'),
+                          ),
+                          LengthLimitingTextInputFormatter(7),
+                          TextInputFormatter.withFunction((oldValue, newValue) {
+                            return newValue.copyWith(
+                              text: newValue.text.toUpperCase(),
+                              composing: TextRange.empty,
+                            );
+                          }),
+                        ],
+                        onChanged: (value) {
+                          final String? error = validatePhilippinePlateNumber(
+                            value,
+                          );
+
+                          if (error != plateNumberError) {
+                            setState(() {
+                              plateNumberError = error;
+                            });
+                          }
+                        },
+                        style: const TextStyle(color: _primaryColor),
+                        decoration: formDecoration("Example: ABC1234").copyWith(
+                          errorText: plateNumberError,
+                          errorMaxLines: 2,
+                          helperText:
+                              "Enter exactly as printed: 6–7 letters and numbers.",
+                          helperMaxLines: 2,
+                          counterText: "",
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  sectionTitle(
+                    number: "3",
+                    title: "Required Documents",
+                    subtitle:
+                        "Upload or capture a photo of each required document.",
+                    icon: Icons.folder_copy_outlined,
+                  ),
+                  sectionCard(
+                    children: [
+                      uploadCard(
+                        title: "Valid ID",
+                        fileName: idFileName,
+                        fileBytes: idFileBytes,
+                        onPick: () => pickDocument("ID"),
+                        onCamera: () => captureDocument("ID"),
+                      ),
+                      const SizedBox(height: 14),
+
+                      uploadCard(
+                        title: "Official Receipt (OR)",
+                        fileName: orFileName,
+                        fileBytes: orFileBytes,
+                        onPick: () => pickDocument("OR"),
+                        onCamera: () => captureDocument("OR"),
+                      ),
+                      const SizedBox(height: 14),
+
+                      uploadCard(
+                        title: "Certificate of Registration (CR)",
+                        fileName: crFileName,
+                        fileBytes: crFileBytes,
+                        onPick: () => pickDocument("CR"),
+                        onCamera: () => captureDocument("CR"),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 80),
                 ],
               ),
-
-              sectionTitle(
-                number: "3",
-                title: "Required Documents",
-                subtitle:
-                    "Upload or capture a photo of each required document.",
-                icon: Icons.folder_copy_outlined,
-              ),
-              sectionCard(
-                children: [
-                  uploadCard(
-                    title: "Valid ID",
-                    fileName: idFileName,
-                    fileBytes: idFileBytes,
-                    onPick: () => pickDocument("ID"),
-                    onCamera: () => captureDocument("ID"),
-                  ),
-                  const SizedBox(height: 14),
-
-                  uploadCard(
-                    title: "Official Receipt (OR)",
-                    fileName: orFileName,
-                    fileBytes: orFileBytes,
-                    onPick: () => pickDocument("OR"),
-                    onCamera: () => captureDocument("OR"),
-                  ),
-                  const SizedBox(height: 14),
-
-                  uploadCard(
-                    title: "Certificate of Registration (CR)",
-                    fileName: crFileName,
-                    fileBytes: crFileBytes,
-                    onPick: () => pickDocument("CR"),
-                    onCamera: () => captureDocument("CR"),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 80),
-            ],
+            ),
           ),
         ),
       ),

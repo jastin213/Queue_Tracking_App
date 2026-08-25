@@ -1,19 +1,20 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
 import 'admin_settings.dart';
 
 // ============================================================================
 // THEME COLORS
 // ============================================================================
 
-const Color _backgroundColor = Color(0xFFF1FAFC);
-const Color _primaryColor = Color(0xFF071F35);
-const Color _cardColor = Colors.white;
-const Color _borderColor = Color(0xFFD8E8EE);
-const Color _mutedTextColor = Color(0xFF6E7E88);
-const Color _softPrimaryColor = Color(0xFFEAF4F8);
-const Color _dangerColor = Color(0xFFE53935);
+const Color _backgroundColor = AppColors.background;
+const Color _primaryColor = AppColors.primary;
+const Color _cardColor = AppColors.surface;
+const Color _borderColor = AppColors.border;
+const Color _mutedTextColor = AppColors.mutedText;
+const Color _softPrimaryColor = AppColors.softPrimary;
+const Color _dangerColor = AppColors.danger;
 
 // Used only for display estimate.
 const int _estimatedMinutesPerCustomer = 9;
@@ -52,15 +53,12 @@ class DisplayPage extends StatelessWidget {
         .orderBy("createdAt")
         .snapshots()
         .map((snapshot) {
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
+          return snapshot.docs.map((doc) {
+            final data = doc.data();
 
-        return {
-          ...data,
-          "queueId": data["queueId"] ?? doc.id,
-        };
-      }).toList();
-    });
+            return {...data, "queueId": data["queueId"] ?? doc.id};
+          }).toList();
+        });
   }
 
   Map<String, dynamic>? getNowServing(List<Map<String, dynamic>> items) {
@@ -99,11 +97,11 @@ class DisplayPage extends StatelessWidget {
       data: Theme.of(context).copyWith(
         scaffoldBackgroundColor: _backgroundColor,
         colorScheme: Theme.of(context).colorScheme.copyWith(
-              primary: _primaryColor,
-              onPrimary: Colors.white,
-              surface: _cardColor,
-              onSurface: _primaryColor,
-            ),
+          primary: _primaryColor,
+          onPrimary: Colors.white,
+          surface: _cardColor,
+          onSurface: _primaryColor,
+        ),
       ),
       child: Scaffold(
         backgroundColor: _backgroundColor,
@@ -113,11 +111,13 @@ class DisplayPage extends StatelessWidget {
             builder: (context, snapshot) {
               final List<Map<String, dynamic>> queueItems = snapshot.data ?? [];
 
-              final Map<String, dynamic>? nowServing =
-                  getNowServing(queueItems);
+              final Map<String, dynamic>? nowServing = getNowServing(
+                queueItems,
+              );
 
-              final List<Map<String, dynamic>> waitingQueue =
-                  getWaitingQueue(queueItems);
+              final List<Map<String, dynamic>> waitingQueue = getWaitingQueue(
+                queueItems,
+              );
 
               return LayoutBuilder(
                 builder: (context, constraints) {
@@ -312,10 +312,7 @@ class DisplayPage extends StatelessWidget {
           Text(
             error,
             textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: _mutedTextColor,
-              height: 1.4,
-            ),
+            style: const TextStyle(color: _mutedTextColor, height: 1.4),
           ),
         ],
       ),
@@ -674,10 +671,7 @@ class DisplayPage extends StatelessWidget {
       borderRadius: BorderRadius.circular(28),
       border: Border.all(color: _borderColor),
       boxShadow: [
-        BoxShadow(
-          color: _primaryColor.withOpacity(0.08),
-          blurRadius: 18,
-        ),
+        BoxShadow(color: _primaryColor.withOpacity(0.08), blurRadius: 18),
       ],
     );
   }

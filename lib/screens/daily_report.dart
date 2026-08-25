@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -5,17 +7,27 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import '../theme/app_theme.dart';
 import '../widgets/analytics_line_chart.dart';
 import '../widgets/app_refresh_indicator.dart';
 
 // ================= COLOR THEME =================
 
-const Color _backgroundColor = Color(0xFFF1FAFC);
-const Color _primaryColor = Color(0xFF071F35);
-const Color _cardColor = Colors.white;
-const Color _borderColor = Color(0xFFD8E8EE);
-const Color _mutedTextColor = Color(0xFF6E7E88);
-const Color _softPrimaryColor = Color(0xFFEAF4F8);
+const Color _backgroundColor = AppColors.background;
+const Color _primaryColor = AppColors.primary;
+const Color _cardColor = AppColors.surface;
+const Color _borderColor = AppColors.border;
+const Color _mutedTextColor = AppColors.mutedText;
+const Color _softPrimaryColor = AppColors.softPrimary;
+
+enum _ReportSection {
+  servedCustomers,
+  passedCustomers,
+  failedCustomers,
+  approvedAppointments,
+  rejectedAppointments,
+  pendingAppointments,
+}
 
 class DailyReport extends StatefulWidget {
   const DailyReport({super.key});
@@ -29,15 +41,39 @@ class _DailyReportState extends State<DailyReport> {
 
   String selectedDate = "";
   String reportSearchQuery = "";
+  _ReportSection? expandedReportSection;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+  _selectedQueueSubscription;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+  _selectedAppointmentSubscription;
+  Timer? _searchDebounce;
+
+  List<Map<String, dynamic>> _selectedQueueItems = [];
+  List<Map<String, dynamic>> _selectedAppointments = [];
+  List<Map<String, dynamic>> _analyticsQueueItems = [];
+  List<Map<String, dynamic>> _analyticsAppointments = [];
+  List<Map<String, dynamic>> _searchQueueItems = [];
+  List<Map<String, dynamic>> _searchAppointments = [];
+  bool _queueLoading = true;
+  bool _appointmentsLoading = true;
+  bool _analyticsLoading = true;
+  bool _searchLoading = false;
+  Object? _reportError;
+  Object? _searchError;
 
   @override
   void initState() {
     super.initState();
     selectedDate = todayDate();
+    _listenToSelectedDate();
+    _loadAnalyticsWindow();
   }
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
+    _selectedQueueSubscription?.cancel();
+    _selectedAppointmentSubscription?.cancel();
     reportSearchController.dispose();
     super.dispose();
   }
@@ -152,54 +188,236 @@ class _DailyReportState extends State<DailyReport> {
     );
 
     if (picked != null) {
-      reportSearchController.clear();
-
       setState(() {
         selectedDate = formatPickedDate(picked);
-        reportSearchQuery = "";
+        expandedReportSection = null;
       });
+      _listenToSelectedDate();
+      _loadAnalyticsWindow();
     }
   }
 
-  // ================= FIRESTORE STREAMS =================
-
-  Stream<List<Map<String, dynamic>>> queueReportStream() {
-    return FirebaseFirestore.instance.collectionGroup("items").snapshots().map((
-      snapshot,
-    ) {
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
-
-        return {...data, "queueId": data["queueId"] ?? doc.id};
-      }).toList();
+  void toggleReportSection(_ReportSection section) {
+    setState(() {
+      expandedReportSection = expandedReportSection == section ? null : section;
     });
   }
 
-  Stream<List<Map<String, dynamic>>> appointmentStream() {
-    return FirebaseFirestore.instance
-        .collection("appointments")
-        .snapshots()
-        .map((snapshot) {
-          return snapshot.docs.map((doc) {
-            final data = doc.data();
+  // ================= FIRESTORE QUERIES =================
 
-            return {...data, "appointmentId": data["appointmentId"] ?? doc.id};
-          }).toList();
+  String queueDateId(String date) => date.replaceAll("/", "-");
+
+  List<Map<String, dynamic>> queueRecords(
+    QuerySnapshot<Map<String, dynamic>> snapshot,
+  ) {
+    return snapshot.docs.map((doc) {
+      final data = doc.data();
+      return {...data, "queueId": data["queueId"] ?? doc.id};
+    }).toList();
+  }
+
+  List<Map<String, dynamic>> appointmentRecords(
+    QuerySnapshot<Map<String, dynamic>> snapshot,
+  ) {
+    return snapshot.docs.map((doc) {
+      final data = doc.data();
+      return {...data, "appointmentId": data["appointmentId"] ?? doc.id};
+    }).toList();
+  }
+
+  void _listenToSelectedDate() {
+    _selectedQueueSubscription?.cancel();
+    _selectedAppointmentSubscription?.cancel();
+
+    if (mounted) {
+      setState(() {
+        _queueLoading = true;
+        _appointmentsLoading = true;
+        _reportError = null;
+      });
+    }
+
+    final firestore = FirebaseFirestore.instance;
+    _selectedQueueSubscription = firestore
+        .collection("queues")
+        .doc(queueDateId(selectedDate))
+        .collection("items")
+        .orderBy("createdAt")
+        .snapshots()
+        .listen(
+          (snapshot) {
+            if (!mounted) return;
+            setState(() {
+              _selectedQueueItems = queueRecords(snapshot);
+              _queueLoading = false;
+            });
+          },
+          onError: (Object error) {
+            if (!mounted) return;
+            setState(() {
+              _queueLoading = false;
+              _reportError = error;
+            });
+          },
+        );
+
+    _selectedAppointmentSubscription = firestore
+        .collection("appointments")
+        .where("date", isEqualTo: selectedDate)
+        .snapshots()
+        .listen(
+          (snapshot) {
+            if (!mounted) return;
+            setState(() {
+              _selectedAppointments = appointmentRecords(snapshot);
+              _appointmentsLoading = false;
+            });
+          },
+          onError: (Object error) {
+            if (!mounted) return;
+            setState(() {
+              _appointmentsLoading = false;
+              _reportError = error;
+            });
+          },
+        );
+  }
+
+  List<String> _analyticsDates() {
+    final selected = parseDate(selectedDate);
+    final firstMonth = DateTime(selected.year, selected.month - 5);
+    final dates = <String>[];
+
+    for (var monthOffset = 0; monthOffset < 6; monthOffset++) {
+      final month = DateTime(firstMonth.year, firstMonth.month + monthOffset);
+      final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
+      for (var day = 1; day <= daysInMonth; day++) {
+        dates.add("${month.month}/$day/${month.year}");
+      }
+    }
+
+    return dates;
+  }
+
+  Iterable<List<String>> _queryChunks(List<String> values) sync* {
+    const chunkSize = 30;
+    for (var index = 0; index < values.length; index += chunkSize) {
+      final end = (index + chunkSize < values.length)
+          ? index + chunkSize
+          : values.length;
+      yield values.sublist(index, end);
+    }
+  }
+
+  Future<void> _loadAnalyticsWindow({bool forceServer = false}) async {
+    if (mounted) {
+      setState(() {
+        _analyticsLoading = true;
+        _reportError = null;
+      });
+    }
+
+    try {
+      final options = forceServer
+          ? const GetOptions(source: Source.server)
+          : null;
+      final firestore = FirebaseFirestore.instance;
+      final dates = _analyticsDates();
+      final queueFutures = <Future<QuerySnapshot<Map<String, dynamic>>>>[];
+      final appointmentFutures =
+          <Future<QuerySnapshot<Map<String, dynamic>>>>[];
+
+      for (final chunk in _queryChunks(dates)) {
+        queueFutures.add(
+          firestore
+              .collectionGroup("items")
+              .where("date", whereIn: chunk)
+              .get(options),
+        );
+        appointmentFutures.add(
+          firestore
+              .collection("appointments")
+              .where("date", whereIn: chunk)
+              .get(options),
+        );
+      }
+
+      final results = await Future.wait([
+        Future.wait(queueFutures),
+        Future.wait(appointmentFutures),
+      ]);
+      final queueSnapshots = results[0];
+      final appointmentSnapshots = results[1];
+
+      if (!mounted) return;
+      setState(() {
+        _analyticsQueueItems = queueSnapshots
+            .expand(queueRecords)
+            .toList(growable: false);
+        _analyticsAppointments = appointmentSnapshots
+            .expand(appointmentRecords)
+            .toList(growable: false);
+        _analyticsLoading = false;
+      });
+    } catch (_) {
+      // Collection-group filters can require a deployed Firestore index.
+      // Preserve older deployments by falling back to a one-time history read.
+      try {
+        final options = forceServer
+            ? const GetOptions(source: Source.server)
+            : null;
+        final results = await Future.wait([
+          FirebaseFirestore.instance.collectionGroup("items").get(options),
+          FirebaseFirestore.instance.collection("appointments").get(options),
+        ]);
+        if (!mounted) return;
+        setState(() {
+          _analyticsQueueItems = queueRecords(results[0]);
+          _analyticsAppointments = appointmentRecords(results[1]);
+          _analyticsLoading = false;
+          _reportError = null;
         });
+      } catch (error) {
+        if (!mounted) return;
+        setState(() {
+          _analyticsLoading = false;
+          _reportError = error;
+        });
+      }
+    }
   }
 
   Future<void> refreshReport() async {
-    await Future.wait([
-      FirebaseFirestore.instance
-          .collectionGroup("items")
-          .get(const GetOptions(source: Source.server)),
-      FirebaseFirestore.instance
-          .collection("appointments")
-          .get(const GetOptions(source: Source.server)),
-    ]);
+    try {
+      final firestore = FirebaseFirestore.instance;
+      final results = await Future.wait([
+        firestore
+            .collection("queues")
+            .doc(queueDateId(selectedDate))
+            .collection("items")
+            .orderBy("createdAt")
+            .get(const GetOptions(source: Source.server)),
+        firestore
+            .collection("appointments")
+            .where("date", isEqualTo: selectedDate)
+            .get(const GetOptions(source: Source.server)),
+      ]);
 
-    if (mounted) {
-      setState(() {});
+      if (mounted) {
+        setState(() {
+          _selectedQueueItems = queueRecords(results[0]);
+          _selectedAppointments = appointmentRecords(results[1]);
+          _reportError = null;
+        });
+      }
+      await _loadAnalyticsWindow(forceServer: true);
+      if (reportSearchQuery.isNotEmpty) {
+        await _searchReports(reportSearchQuery);
+      }
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _reportError = error);
+      rethrow;
     }
   }
 
@@ -708,162 +926,137 @@ class _DailyReportState extends State<DailyReport> {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<List<Map<String, dynamic>>>(
-      stream: queueReportStream(),
-      builder: (context, queueSnapshot) {
-        return StreamBuilder<List<Map<String, dynamic>>>(
-          stream: appointmentStream(),
-          builder: (context, appointmentSnapshot) {
-            final queueItems = queueSnapshot.data ?? [];
-            final appointments = appointmentSnapshot.data ?? [];
+    final queueItems = _selectedQueueItems;
+    final appointments = _selectedAppointments;
+    final passedList = getPassedByDate(queueItems, selectedDate);
+    final failedList = getFailedByDate(queueItems, selectedDate);
+    final approvedList = getApprovedByDate(appointments, selectedDate);
+    final rejectedList = getRejectedByDate(appointments, selectedDate);
+    final pendingList = getPendingByDate(appointments, selectedDate);
+    final totalServed = passedList.length + failedList.length;
+    final isLoading = _queueLoading || _appointmentsLoading;
 
-            final passedList = getPassedByDate(queueItems, selectedDate);
-            final failedList = getFailedByDate(queueItems, selectedDate);
-            final approvedList = getApprovedByDate(appointments, selectedDate);
-            final rejectedList = getRejectedByDate(appointments, selectedDate);
-            final pendingList = getPendingByDate(appointments, selectedDate);
+    return Theme(
+      data: Theme.of(context).copyWith(
+        scaffoldBackgroundColor: _backgroundColor,
+        colorScheme: Theme.of(context).colorScheme.copyWith(
+          primary: _primaryColor,
+          onPrimary: Colors.white,
+          surface: _cardColor,
+          onSurface: _primaryColor,
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: _backgroundColor,
+          foregroundColor: _primaryColor,
+          elevation: 0,
+          centerTitle: false,
+          titleTextStyle: TextStyle(
+            color: _primaryColor,
+            fontSize: 20,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.4,
+          ),
+        ),
+      ),
+      child: Scaffold(
+        appBar: AppBar(title: const Text("Daily Report")),
+        body: SafeArea(
+          child: AppRefreshIndicator(
+            onRefresh: refreshReport,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final bool wide = constraints.maxWidth >= 850;
+                final bool desktopWeb = kIsWeb && constraints.maxWidth >= 900;
 
-            final totalServed = passedList.length + failedList.length;
-
-            final bool isLoading =
-                (queueSnapshot.connectionState == ConnectionState.waiting &&
-                    !queueSnapshot.hasData) ||
-                (appointmentSnapshot.connectionState ==
-                        ConnectionState.waiting &&
-                    !appointmentSnapshot.hasData);
-
-            final Object? error =
-                queueSnapshot.error ?? appointmentSnapshot.error;
-
-            return Theme(
-              data: Theme.of(context).copyWith(
-                scaffoldBackgroundColor: _backgroundColor,
-                colorScheme: Theme.of(context).colorScheme.copyWith(
-                  primary: _primaryColor,
-                  onPrimary: Colors.white,
-                  surface: _cardColor,
-                  onSurface: _primaryColor,
-                ),
-                appBarTheme: const AppBarTheme(
-                  backgroundColor: _backgroundColor,
-                  foregroundColor: _primaryColor,
-                  elevation: 0,
-                  centerTitle: false,
-                  titleTextStyle: TextStyle(
-                    color: _primaryColor,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.4,
+                return SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(
+                    parent: ClampingScrollPhysics(),
                   ),
-                ),
-              ),
-              child: Scaffold(
-                appBar: AppBar(title: const Text("Daily Report")),
-                body: SafeArea(
-                  child: AppRefreshIndicator(
-                    onRefresh: refreshReport,
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        final bool wide = constraints.maxWidth >= 850;
-                        final bool desktopWeb =
-                            kIsWeb && constraints.maxWidth >= 900;
+                  padding: EdgeInsets.fromLTRB(
+                    desktopWeb ? 24 : 16,
+                    10,
+                    desktopWeb ? 24 : 16,
+                    18,
+                  ),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: desktopWeb ? 1240 : double.infinity,
+                      ),
+                      child: Column(
+                        children: [
+                          buildDateSelector(),
 
-                        return SingleChildScrollView(
-                          physics: const AlwaysScrollableScrollPhysics(
-                            parent: ClampingScrollPhysics(),
-                          ),
-                          padding: EdgeInsets.fromLTRB(
-                            desktopWeb ? 24 : 16,
-                            10,
-                            desktopWeb ? 24 : 16,
-                            18,
-                          ),
-                          child: Center(
-                            child: ConstrainedBox(
-                              constraints: BoxConstraints(
-                                maxWidth: desktopWeb ? 1240 : double.infinity,
-                              ),
-                              child: Column(
+                          const SizedBox(height: 14),
+
+                          if (isLoading)
+                            cardContainer(
+                              child: const Column(
                                 children: [
-                                  buildDateSelector(),
-
-                                  const SizedBox(height: 14),
-
-                                  if (isLoading)
-                                    cardContainer(
-                                      child: const Column(
-                                        children: [
-                                          CircularProgressIndicator(
-                                            color: _primaryColor,
-                                          ),
-                                          SizedBox(height: 14),
-                                          Text(
-                                            "Loading report records...",
-                                            style: TextStyle(
-                                              color: _mutedTextColor,
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    )
-                                  else if (error != null)
-                                    buildErrorCard(error.toString())
-                                  else ...[
-                                    buildPdfExportCard(
-                                      passedList: passedList,
-                                      failedList: failedList,
-                                      queueItems: queueItems,
+                                  CircularProgressIndicator(
+                                    color: _primaryColor,
+                                  ),
+                                  SizedBox(height: 14),
+                                  Text(
+                                    "Loading report records...",
+                                    style: TextStyle(
+                                      color: _mutedTextColor,
+                                      fontWeight: FontWeight.w700,
                                     ),
-
-                                    const SizedBox(height: 14),
-
-                                    buildSeasonalDetectionCard(
-                                      wide: wide,
-                                      queueItems: queueItems,
-                                      appointments: appointments,
-                                    ),
-
-                                    const SizedBox(height: 14),
-
-                                    buildSummarySection(
-                                      wide: wide,
-                                      totalServed: totalServed,
-                                      passed: passedList.length,
-                                      failed: failedList.length,
-                                      approved: approvedList.length,
-                                      rejected: rejectedList.length,
-                                      pending: pendingList.length,
-                                    ),
-
-                                    const SizedBox(height: 16),
-
-                                    buildReportDetails(
-                                      date: selectedDate,
-                                      totalServed: totalServed,
-                                      queueItems: queueItems,
-                                      appointments: appointments,
-                                      passedList: passedList,
-                                      failedList: failedList,
-                                      approvedList: approvedList,
-                                      rejectedList: rejectedList,
-                                      pendingList: pendingList,
-                                    ),
-                                  ],
+                                  ),
                                 ],
                               ),
+                            )
+                          else if (_reportError != null)
+                            buildErrorCard(_reportError.toString())
+                          else ...[
+                            buildPdfExportCard(
+                              passedList: passedList,
+                              failedList: failedList,
+                              queueItems: _analyticsQueueItems,
                             ),
-                          ),
-                        );
-                      },
+
+                            const SizedBox(height: 14),
+
+                            buildSeasonalDetectionCard(
+                              wide: wide,
+                              queueItems: _analyticsQueueItems,
+                              appointments: _analyticsAppointments,
+                            ),
+                            if (_analyticsLoading)
+                              const Padding(
+                                padding: EdgeInsets.only(top: 8),
+                                child: LinearProgressIndicator(
+                                  minHeight: 2,
+                                  color: _primaryColor,
+                                  backgroundColor: _softPrimaryColor,
+                                ),
+                              ),
+
+                            const SizedBox(height: 14),
+
+                            buildReportDetails(
+                              date: selectedDate,
+                              totalServed: totalServed,
+                              queueItems: queueItems,
+                              appointments: appointments,
+                              passedList: passedList,
+                              failedList: failedList,
+                              approvedList: approvedList,
+                              rejectedList: rejectedList,
+                              pendingList: pendingList,
+                            ),
+                          ],
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ),
-            );
-          },
-        );
-      },
+                );
+              },
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -1235,6 +1428,9 @@ class _DailyReportState extends State<DailyReport> {
       appointmentValues: visibleEntries
           .map((entry) => entry.value["appointmentActivity"] ?? 0)
           .toList(),
+      failedValues: visibleEntries
+          .map((entry) => entry.value["failed"] ?? 0)
+          .toList(),
     );
   }
 
@@ -1393,134 +1589,242 @@ class _DailyReportState extends State<DailyReport> {
     );
   }
 
-  // ================= SUMMARY SECTION =================
-
-  Widget buildSummarySection({
-    required bool wide,
-    required int totalServed,
-    required int passed,
-    required int failed,
-    required int approved,
-    required int rejected,
-    required int pending,
-  }) {
-    final cards = [
-      summaryContent(
-        title: "Served",
-        value: "$totalServed",
-        icon: Icons.groups_rounded,
-        color: _primaryColor,
-      ),
-      summaryContent(
-        title: "Passed",
-        value: "$passed",
-        icon: Icons.check_circle_outline_rounded,
-        color: Colors.green,
-      ),
-      summaryContent(
-        title: "Failed",
-        value: "$failed",
-        icon: Icons.cancel_outlined,
-        color: Colors.red,
-      ),
-      summaryContent(
-        title: "Approved",
-        value: "$approved",
-        icon: Icons.verified_outlined,
-        color: Colors.green,
-      ),
-      summaryContent(
-        title: "Rejected",
-        value: "$rejected",
-        icon: Icons.block_rounded,
-        color: Colors.red,
-      ),
-      summaryContent(
-        title: "Pending",
-        value: "$pending",
-        icon: Icons.pending_actions_rounded,
-        color: Colors.orange,
-      ),
-    ];
-
-    if (wide) {
-      return Row(
-        children: cards.map((card) {
-          final isLast = cards.last == card;
-
-          return Expanded(
-            child: Padding(
-              padding: EdgeInsets.only(right: isLast ? 0 : 10),
-              child: card,
-            ),
-          );
-        }).toList(),
-      );
-    }
-
-    return Wrap(
-      spacing: 10,
-      runSpacing: 10,
-      alignment: WrapAlignment.center,
-      children: cards.map((card) {
-        return SizedBox(width: 150, child: card);
-      }).toList(),
-    );
-  }
-
-  Widget summaryContent({
-    required String title,
-    required String value,
-    required IconData icon,
-    required Color color,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: cardDecoration(),
-      child: Column(
-        children: [
-          Container(
-            height: 40,
-            width: 40,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Icon(icon, color: color, size: 23),
-          ),
-          const SizedBox(height: 9),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: _primaryColor,
-              fontWeight: FontWeight.w800,
-              fontSize: 12.5,
-            ),
-          ),
-          const SizedBox(height: 6),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              value,
-              style: const TextStyle(
-                color: _primaryColor,
-                fontSize: 27,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   // ================= REPORT DETAILS =================
 
   String reportCustomerName(Map<String, dynamic> record) {
     return (record["name"] ?? record["fullName"] ?? record["plate"] ?? "-")
         .toString()
         .trim();
+  }
+
+  String normalizedPlateSearchValue(dynamic value) {
+    if (value == null) return "";
+
+    return value.toString().trim().toUpperCase().replaceAll(
+      RegExp(r'[^A-Z0-9]'),
+      '',
+    );
+  }
+
+  String normalizedNameSearchValue(dynamic value) {
+    if (value == null) return "";
+
+    return value.toString().trim().toUpperCase().replaceAll(
+      RegExp(r'\s+'),
+      ' ',
+    );
+  }
+
+  Set<String> legacyNameSearchPrefixes(String value) {
+    final String trimmed = value.trim();
+    if (trimmed.isEmpty) return const {};
+
+    final String titleCase = trimmed
+        .split(RegExp(r'\s+'))
+        .map((word) {
+          if (word.isEmpty) return word;
+          return "${word[0].toUpperCase()}${word.substring(1).toLowerCase()}";
+        })
+        .join(" ");
+
+    return {trimmed, trimmed.toLowerCase(), trimmed.toUpperCase(), titleCase};
+  }
+
+  bool recordMatchesReportSearch(
+    Map<String, dynamic> record,
+    String plateQuery,
+    String nameQuery,
+  ) {
+    final String plate = normalizedPlateSearchValue(record["plate"]);
+    final String name = normalizedNameSearchValue(reportCustomerName(record));
+
+    return (plateQuery.isNotEmpty && plate.contains(plateQuery)) ||
+        (nameQuery.isNotEmpty && name.contains(nameQuery));
+  }
+
+  bool isCurrentReportSearch(String plateQuery, String nameQuery) {
+    return normalizedPlateSearchValue(reportSearchController.text) ==
+            plateQuery &&
+        normalizedNameSearchValue(reportSearchController.text) == nameQuery;
+  }
+
+  void _scheduleReportSearch(String value) {
+    _searchDebounce?.cancel();
+    final String plateQuery = normalizedPlateSearchValue(value);
+    final String nameQuery = normalizedNameSearchValue(value);
+    final bool hasQuery = plateQuery.isNotEmpty || nameQuery.isNotEmpty;
+
+    setState(() {
+      reportSearchQuery = value.trim();
+      _searchError = null;
+      if (!hasQuery) {
+        _searchLoading = false;
+        _searchQueueItems = [];
+        _searchAppointments = [];
+      } else {
+        _searchLoading = true;
+      }
+    });
+
+    if (!hasQuery) return;
+    _searchDebounce = Timer(
+      const Duration(milliseconds: 300),
+      () => _searchReports(value.trim()),
+    );
+  }
+
+  Future<void> _searchReports(String value) async {
+    final String plateQuery = normalizedPlateSearchValue(value);
+    final String nameQuery = normalizedNameSearchValue(value);
+    if (plateQuery.isEmpty && nameQuery.isEmpty) return;
+
+    try {
+      final firestore = FirebaseFirestore.instance;
+      final queueQueries = <Future<QuerySnapshot<Map<String, dynamic>>>>[];
+      final appointmentQueries =
+          <Future<QuerySnapshot<Map<String, dynamic>>>>[];
+
+      if (plateQuery.isNotEmpty) {
+        queueQueries.add(
+          firestore
+              .collectionGroup("items")
+              .where("plateNormalized", isGreaterThanOrEqualTo: plateQuery)
+              .where("plateNormalized", isLessThan: "$plateQuery\uf8ff")
+              .limit(50)
+              .get(),
+        );
+        appointmentQueries.add(
+          firestore
+              .collection("appointments")
+              .where("plateNormalized", isGreaterThanOrEqualTo: plateQuery)
+              .where("plateNormalized", isLessThan: "$plateQuery\uf8ff")
+              .limit(50)
+              .get(),
+        );
+      }
+
+      if (nameQuery.isNotEmpty) {
+        queueQueries.add(
+          firestore
+              .collectionGroup("items")
+              .where("nameNormalized", isGreaterThanOrEqualTo: nameQuery)
+              .where("nameNormalized", isLessThan: "$nameQuery\uf8ff")
+              .limit(50)
+              .get(),
+        );
+        appointmentQueries.add(
+          firestore
+              .collection("appointments")
+              .where("nameNormalized", isGreaterThanOrEqualTo: nameQuery)
+              .where("nameNormalized", isLessThan: "$nameQuery\uf8ff")
+              .limit(50)
+              .get(),
+        );
+      }
+
+      // Older records only have `plate`; exact lookup keeps them searchable.
+      if (plateQuery.length >= 6) {
+        queueQueries.add(
+          firestore
+              .collectionGroup("items")
+              .where("plate", isEqualTo: plateQuery)
+              .limit(50)
+              .get(),
+        );
+        appointmentQueries.add(
+          firestore
+              .collection("appointments")
+              .where("plate", isEqualTo: plateQuery)
+              .limit(50)
+              .get(),
+        );
+      }
+
+      // Legacy records may not have `nameNormalized`, so query common casing
+      // variants of their existing name fields as well.
+      for (final prefix in legacyNameSearchPrefixes(value)) {
+        queueQueries.add(
+          firestore
+              .collectionGroup("items")
+              .where("name", isGreaterThanOrEqualTo: prefix)
+              .where("name", isLessThan: "$prefix\uf8ff")
+              .limit(50)
+              .get(),
+        );
+        appointmentQueries.add(
+          firestore
+              .collection("appointments")
+              .where("fullName", isGreaterThanOrEqualTo: prefix)
+              .where("fullName", isLessThan: "$prefix\uf8ff")
+              .limit(50)
+              .get(),
+        );
+      }
+
+      final results = await Future.wait([
+        Future.wait(queueQueries),
+        Future.wait(appointmentQueries),
+      ]);
+      if (!mounted || !isCurrentReportSearch(plateQuery, nameQuery)) return;
+
+      final queueSnapshots = results[0];
+      final appointmentSnapshots = results[1];
+      final queueById = <String, Map<String, dynamic>>{};
+      final appointmentsById = <String, Map<String, dynamic>>{};
+
+      for (final record in queueSnapshots.expand(queueRecords)) {
+        if (!recordMatchesReportSearch(record, plateQuery, nameQuery)) continue;
+        final key =
+            "${record["date"]}:"
+            "${record["queueId"] ?? record["queue"]}";
+        queueById[key] = record;
+      }
+      for (final record in appointmentSnapshots.expand(appointmentRecords)) {
+        if (!recordMatchesReportSearch(record, plateQuery, nameQuery)) continue;
+        final key =
+            record["appointmentId"]?.toString() ??
+            "${record["date"]}:${record["queue"]}";
+        appointmentsById[key] = record;
+      }
+
+      setState(() {
+        _searchQueueItems = queueById.values.toList(growable: false);
+        _searchAppointments = appointmentsById.values.toList(growable: false);
+        _searchLoading = false;
+        _searchError = null;
+      });
+    } catch (_) {
+      if (!mounted || !isCurrentReportSearch(plateQuery, nameQuery)) return;
+      try {
+        final snapshots = await Future.wait([
+          FirebaseFirestore.instance.collectionGroup("items").get(),
+          FirebaseFirestore.instance.collection("appointments").get(),
+        ]);
+        if (!mounted || !isCurrentReportSearch(plateQuery, nameQuery)) return;
+        final queueSearchResults = queueRecords(snapshots[0])
+            .where(
+              (item) => recordMatchesReportSearch(item, plateQuery, nameQuery),
+            )
+            .toList(growable: false);
+        final appointmentSearchResults = appointmentRecords(snapshots[1])
+            .where(
+              (item) => recordMatchesReportSearch(item, plateQuery, nameQuery),
+            )
+            .toList(growable: false);
+        setState(() {
+          _searchQueueItems = queueSearchResults;
+          _searchAppointments = appointmentSearchResults;
+          _searchLoading = false;
+          _searchError = null;
+        });
+      } catch (error) {
+        if (!mounted) return;
+        setState(() {
+          _searchLoading = false;
+          _searchError = error;
+        });
+      }
+    }
   }
 
   List<Map<String, dynamic>> consolidatedReportRecords({
@@ -1559,23 +1863,25 @@ class _DailyReportState extends State<DailyReport> {
     return TextField(
       controller: reportSearchController,
       textInputAction: TextInputAction.search,
-      onChanged: (value) {
-        setState(() {
-          reportSearchQuery = value.trim();
-        });
-      },
+      textCapitalization: TextCapitalization.words,
+      onChanged: _scheduleReportSearch,
       decoration: InputDecoration(
-        labelText: "Search customer name",
-        hintText: "Enter a full or partial name",
+        labelText: "Search plate number or customer name",
+        hintText: "Enter a plate number or name",
         prefixIcon: const Icon(Icons.search_rounded),
         suffixIcon: reportSearchQuery.isEmpty
             ? null
             : IconButton(
                 tooltip: "Clear search",
                 onPressed: () {
+                  _searchDebounce?.cancel();
                   reportSearchController.clear();
                   setState(() {
                     reportSearchQuery = "";
+                    _searchLoading = false;
+                    _searchError = null;
+                    _searchQueueItems = [];
+                    _searchAppointments = [];
                   });
                 },
                 icon: const Icon(Icons.close_rounded),
@@ -1596,29 +1902,48 @@ class _DailyReportState extends State<DailyReport> {
     );
   }
 
-  Widget buildReportSearchResults({
-    required String date,
-    required List<Map<String, dynamic>> passedList,
-    required List<Map<String, dynamic>> failedList,
-    required List<Map<String, dynamic>> approvedList,
-    required List<Map<String, dynamic>> rejectedList,
-    required List<Map<String, dynamic>> pendingList,
-  }) {
-    final String query = reportSearchQuery.toLowerCase();
+  Widget buildReportSearchResults() {
+    final queueItems = _searchQueueItems;
+    final appointments = _searchAppointments;
+    final allPassed = queueItems.where((record) {
+      return record["status"]?.toString().trim().toLowerCase() == "passed";
+    }).toList();
+    final allFailed = queueItems.where((record) {
+      return record["status"]?.toString().trim().toLowerCase() == "failed";
+    }).toList();
+    final allApproved = appointments.where((record) {
+      return record["status"]?.toString().trim().toLowerCase() == "approved";
+    }).toList();
+    final allRejected = appointments.where((record) {
+      return record["status"]?.toString().trim().toLowerCase() == "rejected";
+    }).toList();
+    final allPending = appointments.where((record) {
+      return record["status"]?.toString().trim().toLowerCase() == "pending";
+    }).toList();
+    final String plateQuery = normalizedPlateSearchValue(reportSearchQuery);
+    final String nameQuery = normalizedNameSearchValue(reportSearchQuery);
     final results =
         consolidatedReportRecords(
-            passedList: passedList,
-            failedList: failedList,
-            approvedList: approvedList,
-            rejectedList: rejectedList,
-            pendingList: pendingList,
+            passedList: allPassed,
+            failedList: allFailed,
+            approvedList: allApproved,
+            rejectedList: allRejected,
+            pendingList: allPending,
           ).where((record) {
-            return reportCustomerName(record).toLowerCase().contains(query);
+            return recordMatchesReportSearch(record, plateQuery, nameQuery);
           }).toList()
           ..sort((a, b) {
-            return reportCustomerName(
-              a,
-            ).toLowerCase().compareTo(reportCustomerName(b).toLowerCase());
+            final String aDate = a["date"]?.toString() ?? "";
+            final String bDate = b["date"]?.toString() ?? "";
+            final int dateComparison = parseDate(
+              bDate,
+            ).compareTo(parseDate(aDate));
+
+            if (dateComparison != 0) return dateComparison;
+
+            return (a["queue"]?.toString() ?? "").compareTo(
+              b["queue"]?.toString() ?? "",
+            );
           });
 
     return Container(
@@ -1642,7 +1967,7 @@ class _DailyReportState extends State<DailyReport> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  "Search Results for $date",
+                  "Search Results — All Dates",
                   style: const TextStyle(
                     color: _primaryColor,
                     fontSize: 15,
@@ -1670,9 +1995,19 @@ class _DailyReportState extends State<DailyReport> {
             ],
           ),
           const SizedBox(height: 12),
-          if (results.isEmpty)
+          if (_searchLoading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 18),
+              child: Center(
+                child: CircularProgressIndicator(color: _primaryColor),
+              ),
+            )
+          else if (_searchError != null)
+            emptyBox("Search is temporarily unavailable. Please try again.")
+          else if (results.isEmpty)
             emptyBox(
-              'No customer named “$reportSearchQuery” was found for $date.',
+              'No records found for “$reportSearchQuery” by plate or name '
+              'across all dates.',
             )
           else
             ...results.map(buildReportSearchResultCard),
@@ -1844,13 +2179,11 @@ class _DailyReportState extends State<DailyReport> {
     required List<Map<String, dynamic>> rejectedList,
     required List<Map<String, dynamic>> pendingList,
   }) {
-    if (!hasAnyRecordForDate(
+    final bool hasSelectedDateRecords = hasAnyRecordForDate(
       date: date,
       queueItems: queueItems,
       appointments: appointments,
-    )) {
-      return cardContainer(child: emptyBox("No report records for $date."));
-    }
+    );
 
     return cardContainer(
       child: Column(
@@ -1864,14 +2197,9 @@ class _DailyReportState extends State<DailyReport> {
           buildReportSearchField(),
           const SizedBox(height: 16),
           if (reportSearchQuery.isNotEmpty)
-            buildReportSearchResults(
-              date: date,
-              passedList: passedList,
-              failedList: failedList,
-              approvedList: approvedList,
-              rejectedList: rejectedList,
-              pendingList: pendingList,
-            )
+            buildReportSearchResults()
+          else if (!hasSelectedDateRecords)
+            emptyBox("No report records for $date.")
           else ...[
             Container(
               width: double.infinity,
@@ -1901,16 +2229,22 @@ class _DailyReportState extends State<DailyReport> {
                         label: "Served",
                         value: totalServed,
                         color: _primaryColor,
+                        icon: Icons.groups_rounded,
+                        section: _ReportSection.servedCustomers,
                       ),
                       (
                         label: "Passed",
                         value: passedList.length,
                         color: Colors.green,
+                        icon: Icons.check_circle_outline_rounded,
+                        section: _ReportSection.passedCustomers,
                       ),
                       (
                         label: "Failed",
                         value: failedList.length,
                         color: Colors.red,
+                        icon: Icons.cancel_outlined,
+                        section: _ReportSection.failedCustomers,
                       ),
                     ],
                   ),
@@ -1923,61 +2257,38 @@ class _DailyReportState extends State<DailyReport> {
                         label: "Approved",
                         value: approvedList.length,
                         color: Colors.green,
+                        icon: Icons.verified_outlined,
+                        section: _ReportSection.approvedAppointments,
                       ),
                       (
                         label: "Rejected",
                         value: rejectedList.length,
                         color: Colors.red,
+                        icon: Icons.block_rounded,
+                        section: _ReportSection.rejectedAppointments,
                       ),
                       (
                         label: "Pending",
                         value: pendingList.length,
                         color: Colors.orange,
+                        icon: Icons.pending_actions_rounded,
+                        section: _ReportSection.pendingAppointments,
                       ),
                     ],
                   ),
+                  if (expandedReportSection != null) ...[
+                    const SizedBox(height: 14),
+                    buildExpandedSummaryRecords(
+                      section: expandedReportSection!,
+                      passedList: passedList,
+                      failedList: failedList,
+                      approvedList: approvedList,
+                      rejectedList: rejectedList,
+                      pendingList: pendingList,
+                    ),
+                  ],
                 ],
               ),
-            ),
-            const SizedBox(height: 16),
-            reportListSection(
-              title: "Passed Customers",
-              icon: Icons.check_circle_outline_rounded,
-              color: Colors.green,
-              records: passedList,
-              emptyText: "No passed customers for this date.",
-            ),
-            const SizedBox(height: 14),
-            reportListSection(
-              title: "Failed Customers",
-              icon: Icons.cancel_outlined,
-              color: Colors.red,
-              records: failedList,
-              emptyText: "No failed customers for this date.",
-            ),
-            const SizedBox(height: 14),
-            reportListSection(
-              title: "Approved Appointments",
-              icon: Icons.verified_outlined,
-              color: Colors.green,
-              records: approvedList,
-              emptyText: "No approved appointments for this date.",
-            ),
-            const SizedBox(height: 14),
-            reportListSection(
-              title: "Rejected Appointments",
-              icon: Icons.block_rounded,
-              color: Colors.red,
-              records: rejectedList,
-              emptyText: "No rejected appointments for this date.",
-            ),
-            const SizedBox(height: 14),
-            reportListSection(
-              title: "Pending Appointments",
-              icon: Icons.pending_actions_rounded,
-              color: Colors.orange,
-              records: pendingList,
-              emptyText: "No pending appointments for this date.",
             ),
           ],
         ],
@@ -1988,7 +2299,16 @@ class _DailyReportState extends State<DailyReport> {
   Widget reportSummaryGroup({
     required String title,
     required IconData icon,
-    required List<({String label, int value, Color color})> items,
+    required List<
+      ({
+        String label,
+        int value,
+        Color color,
+        IconData icon,
+        _ReportSection section,
+      })
+    >
+    items,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2013,39 +2333,89 @@ class _DailyReportState extends State<DailyReport> {
             for (int index = 0; index < items.length; index++) ...[
               if (index > 0) const SizedBox(width: 8),
               Expanded(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _cardColor,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
                     borderRadius: BorderRadius.circular(13),
-                    border: Border.all(color: _borderColor),
-                  ),
-                  child: Column(
-                    children: [
-                      Text(
-                        "${items[index].value}",
-                        style: TextStyle(
-                          color: items[index].color,
-                          fontSize: 21,
-                          fontWeight: FontWeight.w900,
+                    onTap: () => toggleReportSection(items[index].section),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: expandedReportSection == items[index].section
+                            ? items[index].color.withValues(alpha: 0.07)
+                            : _cardColor,
+                        borderRadius: BorderRadius.circular(13),
+                        border: Border.all(
+                          color: expandedReportSection == items[index].section
+                              ? items[index].color
+                              : _borderColor,
+                          width: expandedReportSection == items[index].section
+                              ? 1.5
+                              : 1,
                         ),
                       ),
-                      const SizedBox(height: 3),
-                      FittedBox(
-                        fit: BoxFit.scaleDown,
-                        child: Text(
-                          items[index].label,
-                          style: const TextStyle(
-                            color: _mutedTextColor,
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w700,
+                      child: Column(
+                        children: [
+                          Container(
+                            width: 30,
+                            height: 30,
+                            decoration: BoxDecoration(
+                              color: items[index].color.withValues(alpha: 0.10),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Icon(
+                              items[index].icon,
+                              color: items[index].color,
+                              size: 18,
+                            ),
                           ),
-                        ),
+                          const SizedBox(height: 5),
+                          Text(
+                            "${items[index].value}",
+                            style: TextStyle(
+                              color: items[index].color,
+                              fontSize: 21,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  items[index].label,
+                                  style: const TextStyle(
+                                    color: _mutedTextColor,
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(width: 3),
+                                AnimatedRotation(
+                                  turns:
+                                      expandedReportSection ==
+                                          items[index].section
+                                      ? 0.5
+                                      : 0,
+                                  duration: const Duration(milliseconds: 180),
+                                  child: const Icon(
+                                    Icons.keyboard_arrow_down_rounded,
+                                    color: _mutedTextColor,
+                                    size: 16,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -2056,7 +2426,67 @@ class _DailyReportState extends State<DailyReport> {
     );
   }
 
-  Widget reportListSection({
+  Widget buildExpandedSummaryRecords({
+    required _ReportSection section,
+    required List<Map<String, dynamic>> passedList,
+    required List<Map<String, dynamic>> failedList,
+    required List<Map<String, dynamic>> approvedList,
+    required List<Map<String, dynamic>> rejectedList,
+    required List<Map<String, dynamic>> pendingList,
+  }) {
+    switch (section) {
+      case _ReportSection.servedCustomers:
+        return reportRecordsPanel(
+          title: "Served Customers",
+          icon: Icons.groups_rounded,
+          color: _primaryColor,
+          records: [...passedList, ...failedList],
+          emptyText: "No served customers for this date.",
+        );
+      case _ReportSection.passedCustomers:
+        return reportRecordsPanel(
+          title: "Passed Customers",
+          icon: Icons.check_circle_outline_rounded,
+          color: Colors.green,
+          records: passedList,
+          emptyText: "No passed customers for this date.",
+        );
+      case _ReportSection.failedCustomers:
+        return reportRecordsPanel(
+          title: "Failed Customers",
+          icon: Icons.cancel_outlined,
+          color: Colors.red,
+          records: failedList,
+          emptyText: "No failed customers for this date.",
+        );
+      case _ReportSection.approvedAppointments:
+        return reportRecordsPanel(
+          title: "Approved Appointments",
+          icon: Icons.verified_outlined,
+          color: Colors.green,
+          records: approvedList,
+          emptyText: "No approved appointments for this date.",
+        );
+      case _ReportSection.rejectedAppointments:
+        return reportRecordsPanel(
+          title: "Rejected Appointments",
+          icon: Icons.block_rounded,
+          color: Colors.red,
+          records: rejectedList,
+          emptyText: "No rejected appointments for this date.",
+        );
+      case _ReportSection.pendingAppointments:
+        return reportRecordsPanel(
+          title: "Pending Appointments",
+          icon: Icons.pending_actions_rounded,
+          color: Colors.orange,
+          records: pendingList,
+          emptyText: "No pending appointments for this date.",
+        );
+    }
+  }
+
+  Widget reportRecordsPanel({
     required String title,
     required IconData icon,
     required Color color,
@@ -2068,43 +2498,48 @@ class _DailyReportState extends State<DailyReport> {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: _cardColor,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: _borderColor),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(icon, color: color, size: 22),
+              Icon(icon, color: color, size: 21),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   title,
                   style: const TextStyle(
                     color: _primaryColor,
-                    fontWeight: FontWeight.w900,
                     fontSize: 15,
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 5,
+              Text(
+                "${records.length} record${records.length == 1 ? "" : "s"}",
+                style: TextStyle(
+                  color: color,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
                 ),
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  "${records.length}",
-                  style: TextStyle(color: color, fontWeight: FontWeight.w900),
-                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                tooltip: "Hide records",
+                visualDensity: VisualDensity.compact,
+                onPressed: () {
+                  setState(() {
+                    expandedReportSection = null;
+                  });
+                },
+                icon: const Icon(Icons.close_rounded, size: 19),
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const Divider(height: 18, color: _borderColor),
           if (records.isEmpty)
             emptyBox(emptyText)
           else

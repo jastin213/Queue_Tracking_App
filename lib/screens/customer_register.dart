@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
+
+import '../theme/app_theme.dart';
+import '../widgets/app_responsive_content.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-const Color _backgroundColor = Color(0xFFF1FAFC);
-const Color _primaryColor = Color(0xFF071F35);
-const Color _cardColor = Colors.white;
-const Color _borderColor = Color(0xFFD8E8EE);
-const Color _mutedTextColor = Color(0xFF6E7E88);
-const Color _softPrimaryColor = Color(0xFFEAF4F8);
+const Color _backgroundColor = AppColors.background;
+const Color _primaryColor = AppColors.primary;
+const Color _cardColor = AppColors.surface;
+const Color _borderColor = AppColors.border;
+const Color _mutedTextColor = AppColors.mutedText;
+const Color _softPrimaryColor = AppColors.softPrimary;
 
 // ================= CUSTOMER ACCOUNT SESSION STORAGE =================
 //
@@ -15,7 +18,9 @@ const Color _softPrimaryColor = Color(0xFFEAF4F8);
 // The backend now uses Firebase Auth + Firestore.
 // Do not remove these yet because CustomerHome and Appointment Status depend on them.
 
-ValueNotifier<List<Map<String, String>>> registeredCustomers = ValueNotifier([]);
+ValueNotifier<List<Map<String, String>>> registeredCustomers = ValueNotifier(
+  [],
+);
 
 ValueNotifier<String> loggedInCustomerNameNotifier = ValueNotifier("");
 ValueNotifier<String> loggedInCustomerEmailNotifier = ValueNotifier("");
@@ -85,9 +90,9 @@ class _CustomerRegisterState extends State<CustomerRegister> {
         email.isEmpty ||
         selectedAddress.isEmpty ||
         password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Complete all fields")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text("Complete all fields")));
       return;
     }
 
@@ -105,11 +110,8 @@ class _CustomerRegisterState extends State<CustomerRegister> {
     });
 
     try {
-      final UserCredential credential =
-          await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
+      final UserCredential credential = await FirebaseAuth.instance
+          .createUserWithEmailAndPassword(email: email, password: password);
 
       final User? user = credential.user;
 
@@ -146,15 +148,15 @@ class _CustomerRegisterState extends State<CustomerRegister> {
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(getFirebaseErrorMessage(e))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(getFirebaseErrorMessage(e))));
     } catch (e) {
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Account creation failed: $e")),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Account creation failed: $e")));
     } finally {
       if (mounted) {
         setState(() {
@@ -201,11 +203,11 @@ class _CustomerRegisterState extends State<CustomerRegister> {
       data: Theme.of(context).copyWith(
         scaffoldBackgroundColor: _backgroundColor,
         colorScheme: Theme.of(context).colorScheme.copyWith(
-              primary: _primaryColor,
-              onPrimary: Colors.white,
-              surface: _cardColor,
-              onSurface: _primaryColor,
-            ),
+          primary: _primaryColor,
+          onPrimary: Colors.white,
+          surface: _cardColor,
+          onSurface: _primaryColor,
+        ),
         appBarTheme: const AppBarTheme(
           backgroundColor: _backgroundColor,
           foregroundColor: _primaryColor,
@@ -238,243 +240,246 @@ class _CustomerRegisterState extends State<CustomerRegister> {
         appBar: AppBar(title: const Text("Create Account")),
         body: SafeArea(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 26),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: _cardColor,
-                    borderRadius: BorderRadius.circular(26),
-                    border: Border.all(color: _borderColor),
-                    boxShadow: [
-                      BoxShadow(
-                        color: _primaryColor.withValues(alpha: 0.08),
-                        blurRadius: 18,
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        height: 58,
-                        width: 58,
-                        decoration: BoxDecoration(
-                          color: _primaryColor,
-                          borderRadius: BorderRadius.circular(18),
+            padding: appPagePadding(context, top: 18, bottom: 26),
+            child: AppResponsiveContent(
+              maxWidth: 720,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: _cardColor,
+                      borderRadius: BorderRadius.circular(26),
+                      border: Border.all(color: _borderColor),
+                      boxShadow: [
+                        BoxShadow(
+                          color: _primaryColor.withValues(alpha: 0.08),
+                          blurRadius: 18,
                         ),
-                        child: const Icon(
-                          Icons.person_add_alt_1_rounded,
-                          color: Colors.white,
-                          size: 32,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        "Customer Registration",
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w800,
-                          color: _primaryColor,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        "Create your customer account to book appointments and access queue tracking services.",
-                        style: TextStyle(
-                          fontSize: 14.5,
-                          height: 1.5,
-                          color: _mutedTextColor,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 24),
-
-                const Text(
-                  "Account Details",
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                    color: _primaryColor,
-                    letterSpacing: 0.6,
-                  ),
-                ),
-
-                const SizedBox(height: 14),
-
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    color: _cardColor,
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: _borderColor),
-                    boxShadow: [
-                      BoxShadow(
-                        color: _primaryColor.withValues(alpha: 0.06),
-                        blurRadius: 14,
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    children: [
-                      TextField(
-                        controller: fullNameController,
-                        style: const TextStyle(
-                          color: _primaryColor,
-                          fontWeight: FontWeight.w600,
-                        ),
-                        decoration: formDecoration(
-                          label: "Full Name",
-                          hint: "Enter your full name",
-                          icon: Icons.person_outline_rounded,
-                        ),
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      TextField(
-                        controller: emailController,
-                        keyboardType: TextInputType.emailAddress,
-                        style: const TextStyle(
-                          color: _primaryColor,
-                          fontWeight: FontWeight.w600,
-                        ),
-                        decoration: formDecoration(
-                          label: "Email",
-                          hint: "Enter your email address",
-                          icon: Icons.email_outlined,
-                        ),
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      DropdownButtonFormField<String>(
-                        initialValue: selectedAddress,
-                        decoration: formDecoration(
-                          label: "Municipality",
-                          hint: "Select municipality",
-                          icon: Icons.location_on_outlined,
-                        ),
-                        dropdownColor: _cardColor,
-                        iconEnabledColor: _primaryColor,
-                        style: const TextStyle(
-                          color: _primaryColor,
-                          fontWeight: FontWeight.w600,
-                        ),
-                        items: addressList.map((address) {
-                          return DropdownMenuItem(
-                            value: address,
-                            child: Text(address),
-                          );
-                        }).toList(),
-                        onChanged: (value) {
-                          if (value == null) return;
-
-                          setState(() {
-                            selectedAddress = value;
-                          });
-                        },
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      TextField(
-                        controller: passwordController,
-                        obscureText: obscurePassword,
-                        enableSuggestions: false,
-                        autocorrect: false,
-                        style: const TextStyle(
-                          color: _primaryColor,
-                          fontWeight: FontWeight.w600,
-                        ),
-                        decoration: formDecoration(
-                          label: "Password",
-                          hint: "Enter your password",
-                          icon: Icons.lock_outline_rounded,
-                          suffixIcon: IconButton(
-                            tooltip: obscurePassword
-                                ? "Show password"
-                                : "Hide password",
-                            onPressed: isLoading
-                                ? null
-                                : () {
-                                    setState(() {
-                                      obscurePassword = !obscurePassword;
-                                    });
-                                  },
-                            icon: Icon(
-                              obscurePassword
-                                  ? Icons.visibility_off_rounded
-                                  : Icons.visibility_rounded,
-                              color: _primaryColor,
-                            ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          height: 58,
+                          width: 58,
+                          decoration: BoxDecoration(
+                            color: _primaryColor,
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          child: const Icon(
+                            Icons.person_add_alt_1_rounded,
+                            color: Colors.white,
+                            size: 32,
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 18),
-
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: _softPrimaryColor,
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: _borderColor),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(
-                        Icons.info_outline_rounded,
-                        color: _primaryColor,
-                        size: 22,
-                      ),
-                      SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          "Please use a valid email address. This will be used for secure account login.",
+                        const SizedBox(height: 16),
+                        const Text(
+                          "Customer Registration",
                           style: TextStyle(
-                            fontSize: 13,
-                            height: 1.3,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            color: _primaryColor,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          "Create your customer account to book appointments and access queue tracking services.",
+                          style: TextStyle(
+                            fontSize: 14.5,
+                            height: 1.5,
                             color: _mutedTextColor,
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
 
-                const SizedBox(height: 24),
+                  const SizedBox(height: 24),
 
-                SizedBox(
-                  width: double.infinity,
-                  height: 55,
-                  child: ElevatedButton(
-                    onPressed: isLoading ? null : register,
-                    child: isLoading
-                        ? const SizedBox(
-                            height: 22,
-                            width: 22,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.5,
-                              color: Colors.white,
+                  const Text(
+                    "Account Details",
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: _primaryColor,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: _cardColor,
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: _borderColor),
+                      boxShadow: [
+                        BoxShadow(
+                          color: _primaryColor.withValues(alpha: 0.06),
+                          blurRadius: 14,
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      children: [
+                        TextField(
+                          controller: fullNameController,
+                          style: const TextStyle(
+                            color: _primaryColor,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          decoration: formDecoration(
+                            label: "Full Name",
+                            hint: "Enter your full name",
+                            icon: Icons.person_outline_rounded,
+                          ),
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        TextField(
+                          controller: emailController,
+                          keyboardType: TextInputType.emailAddress,
+                          style: const TextStyle(
+                            color: _primaryColor,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          decoration: formDecoration(
+                            label: "Email",
+                            hint: "Enter your email address",
+                            icon: Icons.email_outlined,
+                          ),
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        DropdownButtonFormField<String>(
+                          initialValue: selectedAddress,
+                          decoration: formDecoration(
+                            label: "Municipality",
+                            hint: "Select municipality",
+                            icon: Icons.location_on_outlined,
+                          ),
+                          dropdownColor: _cardColor,
+                          iconEnabledColor: _primaryColor,
+                          style: const TextStyle(
+                            color: _primaryColor,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          items: addressList.map((address) {
+                            return DropdownMenuItem(
+                              value: address,
+                              child: Text(address),
+                            );
+                          }).toList(),
+                          onChanged: (value) {
+                            if (value == null) return;
+
+                            setState(() {
+                              selectedAddress = value;
+                            });
+                          },
+                        ),
+
+                        const SizedBox(height: 16),
+
+                        TextField(
+                          controller: passwordController,
+                          obscureText: obscurePassword,
+                          enableSuggestions: false,
+                          autocorrect: false,
+                          style: const TextStyle(
+                            color: _primaryColor,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          decoration: formDecoration(
+                            label: "Password",
+                            hint: "Enter your password",
+                            icon: Icons.lock_outline_rounded,
+                            suffixIcon: IconButton(
+                              tooltip: obscurePassword
+                                  ? "Show password"
+                                  : "Hide password",
+                              onPressed: isLoading
+                                  ? null
+                                  : () {
+                                      setState(() {
+                                        obscurePassword = !obscurePassword;
+                                      });
+                                    },
+                              icon: Icon(
+                                obscurePassword
+                                    ? Icons.visibility_off_rounded
+                                    : Icons.visibility_rounded,
+                                color: _primaryColor,
+                              ),
                             ),
-                          )
-                        : const Text("CREATE ACCOUNT"),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+
+                  const SizedBox(height: 18),
+
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: _softPrimaryColor,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: _borderColor),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(
+                          Icons.info_outline_rounded,
+                          color: _primaryColor,
+                          size: 22,
+                        ),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            "Please use a valid email address. This will be used for secure account login.",
+                            style: TextStyle(
+                              fontSize: 13,
+                              height: 1.3,
+                              color: _mutedTextColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  SizedBox(
+                    width: double.infinity,
+                    height: 55,
+                    child: ElevatedButton(
+                      onPressed: isLoading ? null : register,
+                      child: isLoading
+                          ? const SizedBox(
+                              height: 22,
+                              width: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Text("CREATE ACCOUNT"),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

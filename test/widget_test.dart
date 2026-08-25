@@ -2,14 +2,37 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:queue_tracking_app/main.dart';
+import 'package:queue_tracking_app/services/firestore_query_fields.dart';
 import 'package:queue_tracking_app/screens/admin_settings.dart';
 import 'package:queue_tracking_app/screens/book_appointment.dart';
 import 'package:queue_tracking_app/screens/customer_home.dart';
 import 'package:queue_tracking_app/screens/customer_settings.dart';
+import 'package:queue_tracking_app/screens/track_page.dart';
 import 'package:queue_tracking_app/widgets/analytics_line_chart.dart';
 import 'package:queue_tracking_app/widgets/app_refresh_indicator.dart';
 
 void main() {
+  test('normalizes customer names for report search', () {
+    expect(normalizeNameForQuery('  jOhN   baptist  '), 'JOHN BAPTIST');
+    expect(
+      firestoreQueryFields(
+        date: '8/25/2026',
+        plate: 'zap123',
+        name: 'John Baptist',
+      )['nameNormalized'],
+      'JOHN BAPTIST',
+    );
+  });
+
+  test('formats long queue durations as hours and minutes', () {
+    expect(formatQueueDuration(0), '0 mins');
+    expect(formatQueueDuration(59), '59 mins');
+    expect(formatQueueDuration(60), '1 hour');
+    expect(formatQueueDuration(61), '1 hour 1 min');
+    expect(formatQueueDuration(174), '2 hours 54 mins');
+    expect(formatQueueDuration(180), '3 hours');
+  });
+
   test('validates Philippine vehicle plate numbers', () {
     expect(validatePhilippinePlateNumber('ABC123'), isNull);
     expect(validatePhilippinePlateNumber('abc1234'), isNull);
@@ -117,7 +140,7 @@ void main() {
     expect(find.text('Refreshed just now'), findsOneWidget);
   });
 
-  testWidgets('analytics line graph renders both data series', (
+  testWidgets('analytics line graph renders all data series', (
     WidgetTester tester,
   ) async {
     await tester.pumpWidget(
@@ -127,6 +150,7 @@ void main() {
             labels: ['Jan\n26', 'Feb\n26', 'Mar\n26'],
             servedValues: [12, 20, 16],
             appointmentValues: [8, 14, 18],
+            failedValues: [2, 3, 1],
           ),
         ),
       ),
@@ -134,6 +158,7 @@ void main() {
 
     expect(find.text('Served'), findsOneWidget);
     expect(find.text('Appointments'), findsOneWidget);
+    expect(find.text('Failed'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

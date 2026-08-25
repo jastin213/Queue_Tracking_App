@@ -2,13 +2,15 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
+import '../theme/app_theme.dart';
+import '../widgets/app_responsive_content.dart';
+import '../widgets/app_section_card.dart';
 import 'customer_register.dart';
 
-const Color _backgroundColor = Color(0xFFF1FAFC);
-const Color _primaryColor = Color(0xFF071F35);
-const Color _cardColor = Colors.white;
-const Color _borderColor = Color(0xFFD8E8EE);
-const Color _mutedTextColor = Color(0xFF6E7E88);
+const Color _backgroundColor = AppColors.background;
+const Color _primaryColor = AppColors.primary;
+const Color _borderColor = AppColors.border;
+const Color _mutedTextColor = AppColors.mutedText;
 
 ValueNotifier<bool> customerVoiceAlertsEnabledNotifier = ValueNotifier(true);
 
@@ -86,147 +88,108 @@ class _CustomerSettingsState extends State<CustomerSettings> {
             behavior: ScrollConfiguration.of(
               context,
             ).copyWith(overscroll: false),
-            child: ListView(
-              physics: const ClampingScrollPhysics(),
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
-              children: [
-                _SettingsCard(
-                  title: "Queue Alert Settings",
-                  icon: Icons.volume_up_rounded,
-                  child: ValueListenableBuilder<bool>(
-                    valueListenable: customerVoiceAlertsEnabledNotifier,
-                    builder: (context, enabled, _) {
-                      return Column(
-                        children: [
-                          SwitchListTile.adaptive(
-                            contentPadding: EdgeInsets.zero,
-                            title: const Text(
-                              "Voice queue alerts",
-                              style: TextStyle(
-                                color: _primaryColor,
-                                fontWeight: FontWeight.w800,
+            child: AppResponsiveContent(
+              maxWidth: 760,
+              child: ListView(
+                physics: const ClampingScrollPhysics(),
+                padding: appPagePadding(context, top: 10),
+                children: [
+                  AppSectionCard(
+                    title: "Queue Alert Settings",
+                    icon: Icons.volume_up_rounded,
+                    child: ValueListenableBuilder<bool>(
+                      valueListenable: customerVoiceAlertsEnabledNotifier,
+                      builder: (context, enabled, _) {
+                        return Column(
+                          children: [
+                            SwitchListTile.adaptive(
+                              contentPadding: EdgeInsets.zero,
+                              title: const Text(
+                                "Voice queue alerts",
+                                style: TextStyle(
+                                  color: _primaryColor,
+                                  fontWeight: FontWeight.w800,
+                                ),
                               ),
+                              subtitle: const Text(
+                                "Say “Please prepare. Your turn is near” when your tracked queue is within five positions.",
+                                style: TextStyle(
+                                  color: _mutedTextColor,
+                                  height: 1.35,
+                                ),
+                              ),
+                              value: enabled,
+                              activeThumbColor: _primaryColor,
+                              onChanged: (value) {
+                                customerVoiceAlertsEnabledNotifier.value =
+                                    value;
+                                if (!value) {
+                                  flutterTts.stop();
+                                }
+                              },
                             ),
-                            subtitle: const Text(
-                              "Say “Please prepare. Your turn is near” when your tracked queue is within five positions.",
-                              style: TextStyle(
-                                color: _mutedTextColor,
-                                height: 1.35,
-                              ),
-                            ),
-                            value: enabled,
-                            activeThumbColor: _primaryColor,
-                            onChanged: (value) {
-                              customerVoiceAlertsEnabledNotifier.value = value;
-                              if (!value) {
-                                flutterTts.stop();
-                              }
-                            },
-                          ),
-                          const SizedBox(height: 8),
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              onPressed: enabled && !isTestingVoice
-                                  ? testVoiceAlert
-                                  : null,
-                              icon: isTestingVoice
-                                  ? const SizedBox(
-                                      width: 18,
-                                      height: 18,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                      ),
-                                    )
-                                  : const Icon(Icons.play_arrow_rounded),
-                              label: Text(
-                                isTestingVoice
-                                    ? "Playing voice alert..."
-                                    : "Test voice alert",
-                              ),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: _primaryColor,
-                                side: const BorderSide(color: _primaryColor),
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 13,
+                            const SizedBox(height: 8),
+                            SizedBox(
+                              width: double.infinity,
+                              child: OutlinedButton.icon(
+                                onPressed: enabled && !isTestingVoice
+                                    ? testVoiceAlert
+                                    : null,
+                                icon: isTestingVoice
+                                    ? const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : const Icon(Icons.play_arrow_rounded),
+                                label: Text(
+                                  isTestingVoice
+                                      ? "Playing voice alert..."
+                                      : "Test voice alert",
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: _primaryColor,
+                                  side: const BorderSide(color: _primaryColor),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 13,
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                        ],
-                      );
-                    },
+                          ],
+                        );
+                      },
+                    ),
                   ),
-                ),
-                const SizedBox(height: 16),
-                _SettingsCard(
-                  title: "Account",
-                  icon: Icons.person_outline_rounded,
-                  child: Column(
-                    children: [
-                      _AccountRow(
-                        label: "Name",
-                        value: customerName.isEmpty ? "Customer" : customerName,
-                      ),
-                      const Divider(height: 24, color: _borderColor),
-                      _AccountRow(
-                        label: "Email",
-                        value: customerEmail.isNotEmpty
-                            ? customerEmail
-                            : (user?.email ?? "Not available"),
-                      ),
-                    ],
+                  const SizedBox(height: 16),
+                  AppSectionCard(
+                    title: "Account",
+                    icon: Icons.person_outline_rounded,
+                    child: Column(
+                      children: [
+                        _AccountRow(
+                          label: "Name",
+                          value: customerName.isEmpty
+                              ? "Customer"
+                              : customerName,
+                        ),
+                        const Divider(height: 24, color: _borderColor),
+                        _AccountRow(
+                          label: "Email",
+                          value: customerEmail.isNotEmpty
+                              ? customerEmail
+                              : (user?.email ?? "Not available"),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _SettingsCard extends StatelessWidget {
-  const _SettingsCard({
-    required this.title,
-    required this.icon,
-    required this.child,
-  });
-
-  final String title;
-  final IconData icon;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: _cardColor,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: _borderColor),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: _primaryColor),
-              const SizedBox(width: 10),
-              Text(
-                title,
-                style: const TextStyle(
-                  color: _primaryColor,
-                  fontSize: 17,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          child,
-        ],
       ),
     );
   }

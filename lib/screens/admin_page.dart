@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
+import '../theme/app_theme.dart';
+import '../services/firestore_query_fields.dart';
+import '../widgets/app_responsive_content.dart';
 import '../widgets/app_refresh_indicator.dart';
 import 'daily_report.dart';
 import 'display_page.dart';
@@ -13,12 +16,12 @@ import 'admin_settings.dart';
 
 // ================= COLOR THEME =================
 
-const Color _backgroundColor = Color(0xFFF1FAFC);
-const Color _primaryColor = Color(0xFF071F35);
-const Color _cardColor = Colors.white;
-const Color _borderColor = Color(0xFFD8E8EE);
-const Color _mutedTextColor = Color(0xFF6E7E88);
-const Color _softPrimaryColor = Color(0xFFEAF4F8);
+const Color _backgroundColor = AppColors.background;
+const Color _primaryColor = AppColors.primary;
+const Color _cardColor = AppColors.surface;
+const Color _borderColor = AppColors.border;
+const Color _mutedTextColor = AppColors.mutedText;
+const Color _softPrimaryColor = AppColors.softPrimary;
 
 // ================= GLOBAL VARIABLES =================
 
@@ -109,6 +112,9 @@ class AdminPage extends StatefulWidget {
 
 class _AdminPageState extends State<AdminPage> {
   final FlutterTts flutterTts = FlutterTts();
+  String _lastScheduledQueueSignature = "";
+  bool _isGeneratingQueue = false;
+  bool _isRefreshingQueue = false;
 
   bool get isFilipino => appLanguageNotifier.value == "Filipino";
 
@@ -165,6 +171,78 @@ class _AdminPageState extends State<AdminPage> {
 
     syncLocalQueueFromFirestore(onlineItems);
     setState(() {});
+  }
+
+  Future<void> refreshQueueFromControl() async {
+    if (_isRefreshingQueue) return;
+
+    setState(() {
+      _isRefreshingQueue = true;
+    });
+
+    try {
+      await refreshQueue();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            behavior: SnackBarBehavior.floating,
+            width: 190,
+            duration: Duration(milliseconds: 900),
+            padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            shape: StadiumBorder(),
+            content: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+                SizedBox(width: 7),
+                Text(
+                  "Refreshed just now",
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                ),
+              ],
+            ),
+          ),
+        );
+    } catch (_) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            behavior: SnackBarBehavior.floating,
+            width: 270,
+            backgroundColor: Colors.red,
+            padding: EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            shape: StadiumBorder(),
+            content: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.error_outline_rounded,
+                  color: Colors.white,
+                  size: 18,
+                ),
+                SizedBox(width: 7),
+                Text(
+                  "Unable to refresh. Please try again.",
+                  style: TextStyle(fontSize: 12.5),
+                ),
+              ],
+            ),
+          ),
+        );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isRefreshingQueue = false;
+        });
+      }
+    }
   }
 
   bool isActiveQueueStatus(String status) {
@@ -231,6 +309,25 @@ class _AdminPageState extends State<AdminPage> {
     };
   }
 
+  void scheduleQueueSyncAfterBuild(
+    String selectedDate,
+    List<Map<String, dynamic>> onlineItems,
+  ) {
+    final signature = <String>[
+      selectedDate,
+      for (final item in onlineItems)
+        "${item["queueId"] ?? item["queue"]}|${item["status"]}|${item["skipSequence"]}|${item["updatedAt"]}",
+    ].join("~");
+
+    if (signature == _lastScheduledQueueSignature) return;
+    _lastScheduledQueueSignature = signature;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || selectedQueueDateNotifier.value != selectedDate) return;
+      syncLocalQueueFromFirestore(onlineItems);
+    });
+  }
+
   Future<bool> queueCodeExistsOnline({
     required String date,
     required String queueCode,
@@ -290,6 +387,11 @@ class _AdminPageState extends State<AdminPage> {
       "queue": queue,
       "date": date,
       "status": status,
+      ...firestoreQueryFields(
+        date: date,
+        plate: customer["plate"],
+        name: customer["name"] ?? customer["fullName"],
+      ),
       "updatedAt": FieldValue.serverTimestamp(),
       ...?extraData,
     }, SetOptions(merge: true));
@@ -349,12 +451,20 @@ class _AdminPageState extends State<AdminPage> {
   // ================= FILTER QUEUE BY SELECTED DATE =================
 
   List<Map<String, dynamic>> getQueueForSelectedDate() {
-    return waitingQueueNotifier.value.where((customer) {
+    final uniqueQueue = <String, Map<String, dynamic>>{};
+
+    for (final customer in waitingQueueNotifier.value.where((customer) {
       final status = customer["status"]?.toString() ?? "Waiting";
 
       return customer["date"] == selectedQueueDateNotifier.value &&
           (status == "Waiting" || status == "Skipped");
-    }).toList();
+    })) {
+      final queueCode = customer["queue"]?.toString() ?? "";
+      final date = customer["date"]?.toString() ?? "";
+      uniqueQueue["$date|$queueCode"] = customer;
+    }
+
+    return uniqueQueue.values.toList(growable: false);
   }
 
   bool isNowServingForSelectedDate() {
@@ -592,6 +702,21 @@ class _AdminPageState extends State<AdminPage> {
   // ================= GENERATE QUEUE =================
 
   Future<bool> generateQueue(String type, String name, String plate) async {
+    if (_isGeneratingQueue) return false;
+    _isGeneratingQueue = true;
+
+    try {
+      return await _generateQueueOnce(type, name, plate);
+    } finally {
+      _isGeneratingQueue = false;
+    }
+  }
+
+  Future<bool> _generateQueueOnce(
+    String type,
+    String name,
+    String plate,
+  ) async {
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -656,6 +781,11 @@ class _AdminPageState extends State<AdminPage> {
       "plate": plateNumber,
       "type": type,
       "date": selectedDate,
+      ...firestoreQueryFields(
+        date: selectedDate,
+        plate: plateNumber,
+        name: name,
+      ),
       "source": "Walk-in",
       "status": "Waiting",
       "createdAt": FieldValue.serverTimestamp(),
@@ -664,23 +794,6 @@ class _AdminPageState extends State<AdminPage> {
 
     try {
       await queueItemsRef(selectedDate).doc(queueNumber).set(queueData);
-
-      final updatedQueue = List<Map<String, dynamic>>.from(
-        waitingQueueNotifier.value,
-      );
-
-      updatedQueue.add({
-        "queueId": queueNumber,
-        "queue": queueNumber,
-        "name": name,
-        "plate": plateNumber,
-        "type": type,
-        "date": selectedDate,
-        "source": "Walk-in",
-        "status": "Waiting",
-      });
-
-      waitingQueueNotifier.value = updatedQueue;
 
       markQueueCodeAsIssued(selectedDate, queueNumber);
 
@@ -706,6 +819,368 @@ class _AdminPageState extends State<AdminPage> {
       );
 
       return false;
+    }
+  }
+
+  // ================= UPDATE WALK-IN QUEUE =================
+
+  bool isWalkInQueueEntry(Map<String, dynamic> customer) {
+    final String appointmentId =
+        customer["appointmentId"]?.toString().trim() ?? "";
+    return appointmentId.isEmpty;
+  }
+
+  Future<void> showEditWalkInQueueDialog(Map<String, dynamic> customer) async {
+    final TextEditingController nameController = TextEditingController(
+      text: customer["name"]?.toString() ?? "",
+    );
+    final TextEditingController plateController = TextEditingController(
+      text: customer["plate"]?.toString() ?? "",
+    );
+    final String queue = customer["queue"]?.toString() ?? "-";
+
+    await showDialog<void>(
+      context: context,
+      builder: (_) {
+        bool isSaving = false;
+
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            return AlertDialog(
+              backgroundColor: _cardColor,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(22),
+              ),
+              title: Text(
+                text("Edit Queue - $queue", "I-edit ang Queue - $queue"),
+                style: const TextStyle(
+                  color: _primaryColor,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: nameController,
+                      enabled: !isSaving,
+                      textCapitalization: TextCapitalization.words,
+                      style: const TextStyle(
+                        color: _primaryColor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      decoration: InputDecoration(
+                        labelText: text(
+                          "Customer Name",
+                          "Pangalan ng Customer",
+                        ),
+                        prefixIcon: const Icon(
+                          Icons.person_outline_rounded,
+                          color: _primaryColor,
+                        ),
+                        filled: true,
+                        fillColor: _backgroundColor,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: plateController,
+                      enabled: !isSaving,
+                      textCapitalization: TextCapitalization.characters,
+                      maxLength: 7,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(
+                          RegExp(r'[A-Za-z0-9]'),
+                        ),
+                        const _UpperCaseTextFormatter(),
+                        LengthLimitingTextInputFormatter(7),
+                      ],
+                      style: const TextStyle(
+                        color: _primaryColor,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 1.2,
+                      ),
+                      decoration: InputDecoration(
+                        labelText: text("Plate Number", "Numero ng Plaka"),
+                        hintText: "ABC1234",
+                        helperText: text(
+                          "Enter exactly 6–7 letters and numbers",
+                          "Maglagay ng eksaktong 6–7 letra at numero",
+                        ),
+                        counterText: "",
+                        prefixIcon: const Icon(
+                          Icons.pin_rounded,
+                          color: _primaryColor,
+                        ),
+                        filled: true,
+                        fillColor: _backgroundColor,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: _softPrimaryColor,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: _borderColor),
+                      ),
+                      child: Text(
+                        text(
+                          "Queue number, date, and vehicle type stay unchanged.",
+                          "Hindi mababago ang queue number, petsa, at uri ng sasakyan.",
+                        ),
+                        style: const TextStyle(
+                          color: _mutedTextColor,
+                          fontSize: 12.5,
+                          height: 1.35,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actionsPadding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+              actions: [
+                OutlinedButton(
+                  onPressed: isSaving
+                      ? null
+                      : () => Navigator.pop(dialogContext),
+                  child: Text(text("Cancel", "Kanselahin")),
+                ),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _primaryColor,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: isSaving
+                      ? null
+                      : () async {
+                          setDialogState(() {
+                            isSaving = true;
+                          });
+
+                          final bool success = await updateWalkInQueue(
+                            customer: customer,
+                            name: nameController.text.trim(),
+                            plate: plateController.text,
+                          );
+
+                          if (!dialogContext.mounted) return;
+
+                          if (success) {
+                            Navigator.pop(dialogContext);
+                          } else {
+                            setDialogState(() {
+                              isSaving = false;
+                            });
+                          }
+                        },
+                  icon: isSaving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.save_rounded),
+                  label: Text(text("UPDATE", "I-UPDATE")),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    nameController.dispose();
+    plateController.dispose();
+  }
+
+  Future<bool> updateWalkInQueue({
+    required Map<String, dynamic> customer,
+    required String name,
+    required String plate,
+  }) async {
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            text(
+              "Please enter customer name",
+              "Pakilagay ang pangalan ng customer",
+            ),
+          ),
+        ),
+      );
+      return false;
+    }
+
+    final String? plateError = _validateWalkInPlateNumber(plate);
+
+    if (plateError != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(plateError)));
+      return false;
+    }
+
+    final String date =
+        customer["date"]?.toString() ?? selectedQueueDateNotifier.value;
+    final String queue = customer["queue"]?.toString() ?? "";
+    final String plateNumber = _normalizeWalkInPlateNumber(plate);
+
+    if (date.isEmpty || queue.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Queue record is incomplete.")),
+      );
+      return false;
+    }
+
+    try {
+      await queueItemsRef(date).doc(queue).update({
+        "name": name,
+        "plate": plateNumber,
+        ...firestoreQueryFields(date: date, plate: plateNumber, name: name),
+        "updatedAt": FieldValue.serverTimestamp(),
+      });
+
+      waitingQueueNotifier.value = waitingQueueNotifier.value.map((item) {
+        final bool matches = item["queue"] == queue && item["date"] == date;
+        return matches ? {...item, "name": name, "plate": plateNumber} : item;
+      }).toList();
+
+      if (!mounted) return true;
+
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            text(
+              "$queue updated successfully",
+              "Matagumpay na na-update ang $queue",
+            ),
+          ),
+        ),
+      );
+      return true;
+    } catch (e) {
+      if (!mounted) return false;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Failed to update queue: $e")));
+      return false;
+    }
+  }
+
+  // ================= DELETE WALK-IN QUEUE =================
+
+  Future<void> showDeleteWalkInQueueDialog(
+    Map<String, dynamic> customer,
+  ) async {
+    final String queue = customer["queue"]?.toString() ?? "-";
+    final String name = customer["name"]?.toString() ?? "-";
+    final String plate = customer["plate"]?.toString() ?? "-";
+
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: _cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        title: Text(
+          text("Delete Walk-In Queue?", "Burahin ang Walk-In Queue?"),
+          style: const TextStyle(
+            color: _primaryColor,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        content: Text(
+          text(
+            "Permanently delete $queue for $name ($plate)? This cannot be undone.",
+            "Permanenteng burahin ang $queue para kay $name ($plate)? Hindi na ito maibabalik.",
+          ),
+          style: const TextStyle(color: _mutedTextColor, height: 1.4),
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+        actions: [
+          OutlinedButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(text("Cancel", "Kanselahin")),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.delete_outline_rounded),
+            label: Text(text("DELETE", "BURAHIN")),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await deleteWalkInQueue(customer);
+    }
+  }
+
+  Future<void> deleteWalkInQueue(Map<String, dynamic> customer) async {
+    final String date =
+        customer["date"]?.toString() ?? selectedQueueDateNotifier.value;
+    final String queue = customer["queue"]?.toString() ?? "";
+
+    if (date.isEmpty || queue.isEmpty) return;
+
+    try {
+      await queueItemsRef(date).doc(queue).delete();
+
+      waitingQueueNotifier.value = waitingQueueNotifier.value.where((item) {
+        return item["queue"] != queue || item["date"] != date;
+      }).toList();
+
+      final updatedIssued = Map<String, List<String>>.from(
+        issuedQueueCodesNotifier.value,
+      );
+      updatedIssued[date] = List<String>.from(updatedIssued[date] ?? const [])
+        ..remove(queue);
+      issuedQueueCodesNotifier.value = updatedIssued;
+
+      if (nowServingNotifier.value?["queue"] == queue &&
+          nowServingNotifier.value?["date"] == date) {
+        nowServingNotifier.value = null;
+      }
+
+      if (!mounted) return;
+
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            text(
+              "$queue permanently deleted",
+              "Permanenteng nabura ang $queue",
+            ),
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Failed to delete queue: $e")));
     }
   }
 
@@ -1146,6 +1621,45 @@ class _AdminPageState extends State<AdminPage> {
 
   bool isTabletScreen(double width) => width >= 650 && width < 900;
 
+  Widget buildRefreshControl(BuildContext context) {
+    final bool showLabel = MediaQuery.sizeOf(context).width >= 700;
+    final Widget icon = _isRefreshingQueue
+        ? const SizedBox.square(
+            dimension: 18,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: _primaryColor,
+            ),
+          )
+        : const Icon(Icons.refresh_rounded);
+
+    if (!showLabel) {
+      return IconButton(
+        key: const Key("admin-refresh-button"),
+        tooltip: text("Refresh queue", "I-refresh ang queue"),
+        onPressed: _isRefreshingQueue ? null : refreshQueueFromControl,
+        icon: icon,
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: OutlinedButton.icon(
+        key: const Key("admin-refresh-button"),
+        onPressed: _isRefreshingQueue ? null : refreshQueueFromControl,
+        icon: icon,
+        label: Text(text("Refresh", "I-refresh")),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: _primaryColor,
+          side: const BorderSide(color: _borderColor),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+    );
+  }
+
   // ================= UI =================
 
   @override
@@ -1157,7 +1671,7 @@ class _AdminPageState extends State<AdminPage> {
           stream: queueItemsStream(selectedDate),
           builder: (context, snapshot) {
             if (snapshot.hasData) {
-              syncLocalQueueFromFirestore(snapshot.data!);
+              scheduleQueueSyncAfterBuild(selectedDate, snapshot.data!);
             }
 
             List<Map<String, dynamic>> selectedDateQueue =
@@ -1209,6 +1723,10 @@ class _AdminPageState extends State<AdminPage> {
                   title: Text(
                     text("Admin Control Panel", "Admin Control Panel"),
                   ),
+                  actions: [
+                    buildRefreshControl(context),
+                    const SizedBox(width: 12),
+                  ],
                 ),
                 body: SafeArea(
                   child: LayoutBuilder(
@@ -1221,59 +1739,64 @@ class _AdminPageState extends State<AdminPage> {
                           ? (constraints.maxHeight - 420).clamp(360.0, 720.0)
                           : 430.0;
 
-                      return AppRefreshIndicator(
-                        onRefresh: refreshQueue,
-                        child: SingleChildScrollView(
-                          physics: const AlwaysScrollableScrollPhysics(),
-                          padding: EdgeInsets.all(pagePadding),
-                          child: ConstrainedBox(
-                            constraints: BoxConstraints(
-                              minHeight:
-                                  constraints.maxHeight - (pagePadding * 2),
-                            ),
-                            child: Column(
-                              children: [
-                                buildDateSelector(),
-                                const SizedBox(height: 14),
-                                buildStatsSection(
-                                  selectedDateQueue: selectedDateQueue,
-                                  compact: !wide,
-                                ),
-                                const SizedBox(height: 18),
-                                if (wide || tablet)
-                                  Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      SizedBox(
-                                        width: wide ? 245 : 215,
-                                        child: buildLeftPanel(),
-                                      ),
-                                      const SizedBox(width: 18),
-                                      Expanded(
-                                        child: buildRightPanel(
+                      return AppResponsiveContent(
+                        maxWidth: 1400,
+                        child: AppRefreshIndicator(
+                          onRefresh: refreshQueue,
+                          child: SingleChildScrollView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            padding: EdgeInsets.all(pagePadding),
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(
+                                minHeight:
+                                    constraints.maxHeight - (pagePadding * 2),
+                              ),
+                              child: Column(
+                                children: [
+                                  buildDateSelector(),
+                                  const SizedBox(height: 14),
+                                  buildStatsSection(
+                                    selectedDateQueue: selectedDateQueue,
+                                    compact: !wide,
+                                  ),
+                                  const SizedBox(height: 18),
+                                  if (wide || tablet)
+                                    Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        SizedBox(
+                                          width: wide ? 245 : 215,
+                                          child: buildLeftPanel(),
+                                        ),
+                                        const SizedBox(width: 18),
+                                        Expanded(
+                                          child: buildRightPanel(
+                                            selectedDateQueue:
+                                                selectedDateQueue,
+                                            displayedNowServing:
+                                                displayedNowServing,
+                                            waitingListHeight:
+                                                waitingListHeight,
+                                          ),
+                                        ),
+                                      ],
+                                    )
+                                  else
+                                    Column(
+                                      children: [
+                                        buildLeftPanel(),
+                                        const SizedBox(height: 16),
+                                        buildRightPanel(
                                           selectedDateQueue: selectedDateQueue,
                                           displayedNowServing:
                                               displayedNowServing,
                                           waitingListHeight: waitingListHeight,
                                         ),
-                                      ),
-                                    ],
-                                  )
-                                else
-                                  Column(
-                                    children: [
-                                      buildLeftPanel(),
-                                      const SizedBox(height: 16),
-                                      buildRightPanel(
-                                        selectedDateQueue: selectedDateQueue,
-                                        displayedNowServing:
-                                            displayedNowServing,
-                                        waitingListHeight: waitingListHeight,
-                                      ),
-                                    ],
-                                  ),
-                              ],
+                                      ],
+                                    ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
@@ -1720,6 +2243,7 @@ class _AdminPageState extends State<AdminPage> {
                     itemCount: selectedDateQueue.length,
                     itemBuilder: (context, index) {
                       final customer = selectedDateQueue[index];
+                      final bool canManageWalkIn = isWalkInQueueEntry(customer);
 
                       return Container(
                         margin: const EdgeInsets.only(bottom: 10),
@@ -1748,14 +2272,43 @@ class _AdminPageState extends State<AdminPage> {
                                           callCustomer(customer);
                                         },
                                       ),
-                                      const SizedBox(width: 8),
-                                      miniButton(
-                                        Icons.close_rounded,
-                                        Colors.red,
-                                        () {
-                                          cancelQueue(customer);
-                                        },
-                                      ),
+                                      if (canManageWalkIn) ...[
+                                        const SizedBox(width: 8),
+                                        miniButton(
+                                          Icons.edit_rounded,
+                                          Colors.orange,
+                                          () {
+                                            showEditWalkInQueueDialog(customer);
+                                          },
+                                          tooltip: text(
+                                            "Edit walk-in",
+                                            "I-edit ang walk-in",
+                                          ),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        miniButton(
+                                          Icons.delete_outline_rounded,
+                                          Colors.red,
+                                          () {
+                                            showDeleteWalkInQueueDialog(
+                                              customer,
+                                            );
+                                          },
+                                          tooltip: text(
+                                            "Delete walk-in",
+                                            "Burahin ang walk-in",
+                                          ),
+                                        ),
+                                      ] else ...[
+                                        const SizedBox(width: 8),
+                                        miniButton(
+                                          Icons.close_rounded,
+                                          Colors.red,
+                                          () {
+                                            cancelQueue(customer);
+                                          },
+                                        ),
+                                      ],
                                     ],
                                   ),
                                 ],
@@ -1772,10 +2325,41 @@ class _AdminPageState extends State<AdminPage> {
                                     callCustomer(customer);
                                   },
                                 ),
-                                const SizedBox(width: 8),
-                                miniButton(Icons.close_rounded, Colors.red, () {
-                                  cancelQueue(customer);
-                                }),
+                                if (canManageWalkIn) ...[
+                                  const SizedBox(width: 8),
+                                  miniButton(
+                                    Icons.edit_rounded,
+                                    Colors.orange,
+                                    () {
+                                      showEditWalkInQueueDialog(customer);
+                                    },
+                                    tooltip: text(
+                                      "Edit walk-in",
+                                      "I-edit ang walk-in",
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  miniButton(
+                                    Icons.delete_outline_rounded,
+                                    Colors.red,
+                                    () {
+                                      showDeleteWalkInQueueDialog(customer);
+                                    },
+                                    tooltip: text(
+                                      "Delete walk-in",
+                                      "Burahin ang walk-in",
+                                    ),
+                                  ),
+                                ] else ...[
+                                  const SizedBox(width: 8),
+                                  miniButton(
+                                    Icons.close_rounded,
+                                    Colors.red,
+                                    () {
+                                      cancelQueue(customer);
+                                    },
+                                  ),
+                                ],
                               ],
                             );
                           },
@@ -1829,6 +2413,16 @@ class _AdminPageState extends State<AdminPage> {
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
                   color: _mutedTextColor,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                "${customer['plate'] ?? '-'} • ${customer['type'] ?? '-'}",
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: _mutedTextColor,
+                  fontSize: 12.5,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -1982,15 +2576,22 @@ class _AdminPageState extends State<AdminPage> {
 
   // ================= MINI BUTTON =================
 
-  Widget miniButton(IconData icon, Color color, VoidCallback onPressed) {
+  Widget miniButton(
+    IconData icon,
+    Color color,
+    VoidCallback onPressed, {
+    String? tooltip,
+  }) {
     return Tooltip(
-      message: icon == Icons.volume_up_rounded
-          ? text("Call", "Tawagin")
-          : icon == Icons.skip_next_rounded
-          ? text("Skip", "I-skip")
-          : icon == Icons.check_rounded
-          ? text("Passed", "Passed")
-          : text("Cancel / Failed", "Cancel / Failed"),
+      message:
+          tooltip ??
+          (icon == Icons.volume_up_rounded
+              ? text("Call", "Tawagin")
+              : icon == Icons.skip_next_rounded
+              ? text("Skip", "I-skip")
+              : icon == Icons.check_rounded
+              ? text("Passed", "Passed")
+              : text("Cancel / Failed", "Cancel / Failed")),
       child: SizedBox(
         width: 42,
         height: 42,

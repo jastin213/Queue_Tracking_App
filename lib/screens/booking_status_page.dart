@@ -2,15 +2,16 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
 import '../widgets/app_refresh_indicator.dart';
+import '../widgets/app_responsive_content.dart';
 import 'customer_register.dart';
 
-const Color _backgroundColor = Color(0xFFF1FAFC);
-const Color _primaryColor = Color(0xFF071F35);
-const Color _cardColor = Colors.white;
-const Color _borderColor = Color(0xFFD8E8EE);
-const Color _mutedTextColor = Color(0xFF6E7E88);
-const Color _softPrimaryColor = Color(0xFFEAF4F8);
+const Color _backgroundColor = AppColors.background;
+const Color _primaryColor = AppColors.primary;
+const Color _cardColor = AppColors.surface;
+const Color _borderColor = AppColors.border;
+const Color _mutedTextColor = AppColors.mutedText;
 
 class BookingStatusPage extends StatelessWidget {
   const BookingStatusPage({super.key});
@@ -130,55 +131,58 @@ class BookingStatusPage extends StatelessWidget {
         body: SafeArea(
           child: AppRefreshIndicator(
             onRefresh: refreshAppointments,
-            child: ValueListenableBuilder<String>(
-              valueListenable: loggedInCustomerNameNotifier,
-              builder: (context, name, _) {
-                return StreamBuilder<List<Map<String, dynamic>>>(
-                  stream: myAppointmentsStream(),
-                  builder: (context, snapshot) {
-                    if (snapshot.connectionState == ConnectionState.waiting) {
+            child: AppResponsiveContent(
+              maxWidth: 900,
+              child: ValueListenableBuilder<String>(
+                valueListenable: loggedInCustomerNameNotifier,
+                builder: (context, name, _) {
+                  return StreamBuilder<List<Map<String, dynamic>>>(
+                    stream: myAppointmentsStream(),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                          children: [
+                            buildHeaderCard(),
+                            const SizedBox(height: 18),
+                            buildLoadingCard(),
+                          ],
+                        );
+                      }
+
+                      if (snapshot.hasError) {
+                        return ListView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                          children: [
+                            buildHeaderCard(),
+                            const SizedBox(height: 18),
+                            buildErrorCard(snapshot.error.toString()),
+                          ],
+                        );
+                      }
+
+                      final appointments = snapshot.data ?? [];
+
                       return ListView(
                         physics: const AlwaysScrollableScrollPhysics(),
                         padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
                         children: [
                           buildHeaderCard(),
                           const SizedBox(height: 18),
-                          buildLoadingCard(),
+                          if (appointments.isEmpty)
+                            buildEmptyCard()
+                          else
+                            ...appointments.map((appointment) {
+                              return buildBookingCard(appointment);
+                            }).toList(),
                         ],
                       );
-                    }
-
-                    if (snapshot.hasError) {
-                      return ListView(
-                        physics: const AlwaysScrollableScrollPhysics(),
-                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-                        children: [
-                          buildHeaderCard(),
-                          const SizedBox(height: 18),
-                          buildErrorCard(snapshot.error.toString()),
-                        ],
-                      );
-                    }
-
-                    final appointments = snapshot.data ?? [];
-
-                    return ListView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-                      children: [
-                        buildHeaderCard(),
-                        const SizedBox(height: 18),
-                        if (appointments.isEmpty)
-                          buildEmptyCard()
-                        else
-                          ...appointments.map((appointment) {
-                            return buildBookingCard(appointment);
-                          }).toList(),
-                      ],
-                    );
-                  },
-                );
-              },
+                    },
+                  );
+                },
+              ),
             ),
           ),
         ),

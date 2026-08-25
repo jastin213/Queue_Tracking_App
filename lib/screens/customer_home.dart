@@ -2,7 +2,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
 import '../widgets/app_refresh_indicator.dart';
+import '../widgets/app_responsive_content.dart';
 import 'track_page.dart';
 import 'book_appointment.dart';
 import 'booking_status_page.dart';
@@ -10,11 +12,11 @@ import 'customer_login.dart';
 import 'customer_register.dart';
 import 'customer_settings.dart';
 
-const Color _backgroundColor = Color(0xFFF1FAFC);
-const Color _primaryColor = Color(0xFF071F35);
-const Color _cardColor = Colors.white;
-const Color _borderColor = Color(0xFFD8E8EE);
-const Color _mutedTextColor = Color(0xFF6E7E88);
+const Color _backgroundColor = AppColors.background;
+const Color _primaryColor = AppColors.primary;
+const Color _cardColor = AppColors.surface;
+const Color _borderColor = AppColors.border;
+const Color _mutedTextColor = AppColors.mutedText;
 
 class CustomerHome extends StatefulWidget {
   const CustomerHome({super.key});
@@ -160,225 +162,252 @@ class _CustomerHomeState extends State<CustomerHome> {
           onRefresh: refreshCustomerProfile,
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                ValueListenableBuilder<String>(
-                  valueListenable: loggedInCustomerNameNotifier,
-                  builder: (context, name, _) {
-                    return Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: _cardColor,
-                        borderRadius: BorderRadius.circular(26),
-                        border: Border.all(color: _borderColor),
-                        boxShadow: [
-                          BoxShadow(
-                            color: _primaryColor.withOpacity(0.08),
-                            blurRadius: 18,
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+            padding: appPagePadding(context),
+            child: AppResponsiveContent(
+              maxWidth: 1120,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ValueListenableBuilder<String>(
+                    valueListenable: loggedInCustomerNameNotifier,
+                    builder: (context, name, _) {
+                      return Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: _cardColor,
+                          borderRadius: BorderRadius.circular(26),
+                          border: Border.all(color: _borderColor),
+                          boxShadow: [
+                            BoxShadow(
+                              color: _primaryColor.withOpacity(0.08),
+                              blurRadius: 18,
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              height: 58,
+                              width: 58,
+                              decoration: BoxDecoration(
+                                color: _primaryColor,
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              child: const Icon(
+                                Icons.directions_car_rounded,
+                                color: Colors.white,
+                                size: 32,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              name.isEmpty
+                                  ? "NPJN Emission Testing Center"
+                                  : "Welcome, $name",
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w800,
+                                color: _primaryColor,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              "Book your emission test appointment, check your appointment confirmation, and track your queue number.",
+                              style: TextStyle(
+                                fontSize: 14.5,
+                                height: 1.5,
+                                color: _mutedTextColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  const Text(
+                    "What would you like to do?",
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: _primaryColor,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      const spacing = 16.0;
+                      final columns = constraints.maxWidth >= 900
+                          ? 3
+                          : constraints.maxWidth >= 620
+                          ? 2
+                          : 1;
+                      final cardWidth =
+                          (constraints.maxWidth - (spacing * (columns - 1))) /
+                          columns;
+
+                      return Wrap(
+                        spacing: spacing,
+                        runSpacing: spacing,
                         children: [
-                          Container(
-                            height: 58,
-                            width: 58,
-                            decoration: BoxDecoration(
-                              color: _primaryColor,
-                              borderRadius: BorderRadius.circular(18),
-                            ),
-                            child: const Icon(
-                              Icons.directions_car_rounded,
-                              color: Colors.white,
-                              size: 32,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            name.isEmpty
-                                ? "NPJN Emission Testing Center"
-                                : "Welcome, $name",
-                            style: const TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.w800,
-                              color: _primaryColor,
-                              letterSpacing: 0.5,
+                          SizedBox(
+                            width: cardWidth,
+                            child: _ActionCard(
+                              icon: Icons.calendar_month_rounded,
+                              title: "Book Appointment",
+                              subtitle:
+                                  "Schedule your emission test before visiting the center.",
+                              isFilled: true,
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const BookAppointment(),
+                                  ),
+                                );
+                              },
                             ),
                           ),
-                          const SizedBox(height: 8),
-                          const Text(
-                            "Book your emission test appointment, check your appointment confirmation, and track your queue number.",
-                            style: TextStyle(
-                              fontSize: 14.5,
-                              height: 1.5,
-                              color: _mutedTextColor,
+                          SizedBox(
+                            width: cardWidth,
+                            child: _ActionCard(
+                              icon: Icons.notifications_active_rounded,
+                              title: "My Appointment Status",
+                              subtitle:
+                                  "Check if your appointment is pending, approved, or rejected.",
+                              isFilled: false,
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const BookingStatusPage(),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                          SizedBox(
+                            width: cardWidth,
+                            child: _ActionCard(
+                              icon: Icons.search_rounded,
+                              title: "Track My Queue",
+                              subtitle:
+                                  "Check your queue position and estimated waiting time.",
+                              isFilled: false,
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => const TrackPage(),
+                                  ),
+                                );
+                              },
                             ),
                           ),
                         ],
-                      ),
-                    );
-                  },
-                ),
-
-                const SizedBox(height: 24),
-
-                const Text(
-                  "What would you like to do?",
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                    color: _primaryColor,
-                    letterSpacing: 0.8,
+                      );
+                    },
                   ),
-                ),
 
-                const SizedBox(height: 14),
+                  const SizedBox(height: 24),
 
-                // 1. BOOK APPOINTMENT
-                _ActionCard(
-                  icon: Icons.calendar_month_rounded,
-                  title: "Book Appointment",
-                  subtitle:
-                      "Schedule your emission test before visiting the center.",
-                  isFilled: true,
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const BookAppointment(),
-                      ),
-                    );
-                  },
-                ),
-
-                const SizedBox(height: 16),
-
-                // 2. MY APPOINTMENT STATUS
-                _ActionCard(
-                  icon: Icons.notifications_active_rounded,
-                  title: "My Appointment Status",
-                  subtitle:
-                      "Check if your appointment is pending, approved, or rejected.",
-                  isFilled: false,
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const BookingStatusPage(),
-                      ),
-                    );
-                  },
-                ),
-
-                const SizedBox(height: 16),
-
-                // 3. TRACK MY QUEUE
-                _ActionCard(
-                  icon: Icons.search_rounded,
-                  title: "Track My Queue",
-                  subtitle:
-                      "Check your queue position and estimated waiting time.",
-                  isFilled: false,
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const TrackPage()),
-                    );
-                  },
-                ),
-
-                const SizedBox(height: 24),
-
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    color: _cardColor,
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: _borderColor),
-                    boxShadow: [
-                      BoxShadow(
-                        color: _primaryColor.withOpacity(0.05),
-                        blurRadius: 14,
-                      ),
-                    ],
-                  ),
-                  child: const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "Services Offered",
-                        style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w800,
-                          color: _primaryColor,
-                          letterSpacing: 0.6,
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: _cardColor,
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: _borderColor),
+                      boxShadow: [
+                        BoxShadow(
+                          color: _primaryColor.withOpacity(0.05),
+                          blurRadius: 14,
                         ),
-                      ),
-                      SizedBox(height: 14),
-                      _InfoRow(
-                        icon: Icons.directions_car_rounded,
-                        text: "Gasoline Vehicle Emission Test",
-                      ),
-                      SizedBox(height: 10),
-                      _InfoRow(
-                        icon: Icons.local_shipping_rounded,
-                        text: "Diesel Vehicle Emission Test",
-                      ),
-                      SizedBox(height: 10),
-                      _InfoRow(
-                        icon: Icons.confirmation_number_rounded,
-                        text: "Queue and Appointment Assistance",
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 18),
-
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    color: _primaryColor.withOpacity(0.04),
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: _primaryColor.withOpacity(0.12)),
-                  ),
-                  child: const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        "Center Information",
-                        style: TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w800,
-                          color: _primaryColor,
-                          letterSpacing: 0.6,
+                      ],
+                    ),
+                    child: const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Services Offered",
+                          style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                            color: _primaryColor,
+                            letterSpacing: 0.6,
+                          ),
                         ),
-                      ),
-                      SizedBox(height: 14),
-                      _InfoRow(
-                        icon: Icons.location_on_rounded,
-                        text: "Ligao City, Albay",
-                      ),
-                      SizedBox(height: 10),
-                      _InfoRow(
-                        icon: Icons.access_time_rounded,
-                        text: "Monday to Saturday",
-                      ),
-                      SizedBox(height: 10),
-                      _InfoRow(
-                        icon: Icons.groups_rounded,
-                        text: "Daily queue limit: 80 customers",
-                      ),
-                    ],
+                        SizedBox(height: 14),
+                        _InfoRow(
+                          icon: Icons.directions_car_rounded,
+                          text: "Gasoline Vehicle Emission Test",
+                        ),
+                        SizedBox(height: 10),
+                        _InfoRow(
+                          icon: Icons.local_shipping_rounded,
+                          text: "Diesel Vehicle Emission Test",
+                        ),
+                        SizedBox(height: 10),
+                        _InfoRow(
+                          icon: Icons.confirmation_number_rounded,
+                          text: "Queue and Appointment Assistance",
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
+
+                  const SizedBox(height: 18),
+
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: _primaryColor.withOpacity(0.04),
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(
+                        color: _primaryColor.withOpacity(0.12),
+                      ),
+                    ),
+                    child: const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Center Information",
+                          style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                            color: _primaryColor,
+                            letterSpacing: 0.6,
+                          ),
+                        ),
+                        SizedBox(height: 14),
+                        _InfoRow(
+                          icon: Icons.location_on_rounded,
+                          text: "Ligao City, Albay",
+                        ),
+                        SizedBox(height: 10),
+                        _InfoRow(
+                          icon: Icons.access_time_rounded,
+                          text: "Monday to Saturday",
+                        ),
+                        SizedBox(height: 10),
+                        _InfoRow(
+                          icon: Icons.groups_rounded,
+                          text: "Daily queue limit: 80 customers",
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

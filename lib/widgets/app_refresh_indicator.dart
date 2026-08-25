@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
+
 class AppRefreshIndicator extends StatefulWidget {
   const AppRefreshIndicator({
     super.key,
@@ -15,8 +17,6 @@ class AppRefreshIndicator extends StatefulWidget {
 }
 
 class _AppRefreshIndicatorState extends State<AppRefreshIndicator> {
-  static const Color _primaryColor = Color(0xFF071F35);
-
   Future<void> _refresh() async {
     try {
       await widget.onRefresh();
@@ -83,7 +83,7 @@ class _AppRefreshIndicatorState extends State<AppRefreshIndicator> {
       behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
       child: RefreshIndicator(
         onRefresh: _refresh,
-        color: _primaryColor,
+        color: AppColors.primary,
         backgroundColor: Colors.white,
         displacement: 30,
         edgeOffset: 0,

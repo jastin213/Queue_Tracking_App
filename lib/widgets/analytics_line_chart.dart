@@ -2,30 +2,34 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../theme/app_theme.dart';
+
 class AnalyticsLineChart extends StatelessWidget {
   const AnalyticsLineChart({
     super.key,
     required this.labels,
     required this.servedValues,
     required this.appointmentValues,
+    required this.failedValues,
   });
 
   final List<String> labels;
   final List<int> servedValues;
   final List<int> appointmentValues;
+  final List<int> failedValues;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
       label:
-          "Line graph comparing monthly served customers and appointment activity",
+          "Line graph comparing monthly served customers, failed customers, and appointment activity",
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.fromLTRB(12, 16, 12, 10),
         decoration: BoxDecoration(
-          color: const Color(0xFFF7FBFD),
+          color: AppColors.background,
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: const Color(0xFFD8E8EE)),
+          border: Border.all(color: AppColors.border),
         ),
         child: Column(
           children: [
@@ -34,11 +38,9 @@ class AnalyticsLineChart extends StatelessWidget {
               spacing: 18,
               runSpacing: 8,
               children: [
-                _ChartLegend(color: Color(0xFF071F35), label: "Served"),
-                _ChartLegend(
-                  color: Color(0xFF1E9E6A),
-                  label: "Appointments",
-                ),
+                _ChartLegend(color: AppColors.primary, label: "Served"),
+                _ChartLegend(color: AppColors.success, label: "Appointments"),
+                _ChartLegend(color: AppColors.danger, label: "Failed"),
               ],
             ),
             const SizedBox(height: 10),
@@ -49,6 +51,7 @@ class AnalyticsLineChart extends StatelessWidget {
                   labels: labels,
                   servedValues: servedValues,
                   appointmentValues: appointmentValues,
+                  failedValues: failedValues,
                 ),
                 child: const SizedBox.expand(),
               ),
@@ -98,16 +101,19 @@ class _AnalyticsLineChartPainter extends CustomPainter {
     required this.labels,
     required this.servedValues,
     required this.appointmentValues,
+    required this.failedValues,
   });
 
   final List<String> labels;
   final List<int> servedValues;
   final List<int> appointmentValues;
+  final List<int> failedValues;
 
-  static const Color _servedColor = Color(0xFF071F35);
-  static const Color _appointmentColor = Color(0xFF1E9E6A);
-  static const Color _gridColor = Color(0xFFD8E8EE);
-  static const Color _labelColor = Color(0xFF6E7E88);
+  static const Color _servedColor = AppColors.primary;
+  static const Color _appointmentColor = AppColors.success;
+  static const Color _failedColor = AppColors.danger;
+  static const Color _gridColor = AppColors.border;
+  static const Color _labelColor = AppColors.mutedText;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -122,7 +128,7 @@ class _AnalyticsLineChartPainter extends CustomPainter {
     final chartHeight = math.max(1.0, size.height - top - bottom);
     final chartBottom = top + chartHeight;
 
-    final allValues = [...servedValues, ...appointmentValues];
+    final allValues = [...servedValues, ...appointmentValues, ...failedValues];
     final rawMax = allValues.isEmpty ? 0 : allValues.reduce(math.max);
     final maxValue = math.max(4, rawMax);
 
@@ -163,6 +169,15 @@ class _AnalyticsLineChartPainter extends CustomPainter {
       height: chartHeight,
       maxValue: maxValue,
     );
+    final failedPoints = _pointsFor(
+      values: failedValues,
+      count: labels.length,
+      left: left,
+      top: top,
+      width: chartWidth,
+      height: chartHeight,
+      maxValue: maxValue,
+    );
 
     if (servedPoints.length > 1) {
       final fillPath = Path()
@@ -185,6 +200,7 @@ class _AnalyticsLineChartPainter extends CustomPainter {
 
     _drawSeries(canvas, servedPoints, _servedColor);
     _drawSeries(canvas, appointmentPoints, _appointmentColor);
+    _drawSeries(canvas, failedPoints, _failedColor);
 
     for (int index = 0; index < labels.length; index++) {
       final x = labels.length == 1
@@ -278,6 +294,7 @@ class _AnalyticsLineChartPainter extends CustomPainter {
   bool shouldRepaint(covariant _AnalyticsLineChartPainter oldDelegate) {
     return oldDelegate.labels != labels ||
         oldDelegate.servedValues != servedValues ||
-        oldDelegate.appointmentValues != appointmentValues;
+        oldDelegate.appointmentValues != appointmentValues ||
+        oldDelegate.failedValues != failedValues;
   }
 }

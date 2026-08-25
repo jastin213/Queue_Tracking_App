@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -5,18 +6,21 @@ import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../theme/app_theme.dart';
+import '../services/firestore_query_fields.dart';
 import '../widgets/app_refresh_indicator.dart';
+import '../widgets/app_responsive_content.dart';
 import 'book_appointment.dart';
 import 'admin_page.dart';
 
 // ================= COLOR THEME =================
 
-const Color _backgroundColor = Color(0xFFF1FAFC);
-const Color _primaryColor = Color(0xFF071F35);
-const Color _cardColor = Colors.white;
-const Color _borderColor = Color(0xFFD8E8EE);
-const Color _mutedTextColor = Color(0xFF6E7E88);
-const Color _softPrimaryColor = Color(0xFFEAF4F8);
+const Color _backgroundColor = AppColors.background;
+const Color _primaryColor = AppColors.primary;
+const Color _cardColor = AppColors.surface;
+const Color _borderColor = AppColors.border;
+const Color _mutedTextColor = AppColors.mutedText;
+const Color _softPrimaryColor = AppColors.softPrimary;
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -28,6 +32,32 @@ class AdminDashboard extends StatefulWidget {
 class _AdminDashboardState extends State<AdminDashboard> {
   DateTime calendarMonth = DateTime(DateTime.now().year, DateTime.now().month);
   DateTime? selectedCalendarDate;
+  final List<StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>
+  _monthSubscriptions = [];
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _pendingSubscription;
+  final Map<int, List<Map<String, dynamic>>> _monthAppointmentChunks = {};
+  List<Map<String, dynamic>> _pendingAppointments = [];
+  int _approvedCount = 0;
+  int _rejectedCount = 0;
+  bool _appointmentsLoading = true;
+  Object? _appointmentsError;
+
+  @override
+  void initState() {
+    super.initState();
+    _listenToPendingAppointments();
+    _listenToAppointmentMonth();
+    _loadAppointmentCounts();
+  }
+
+  @override
+  void dispose() {
+    _pendingSubscription?.cancel();
+    for (final subscription in _monthSubscriptions) {
+      subscription.cancel();
+    }
+    super.dispose();
+  }
 
   // ================= FIRESTORE HELPERS =================
 
@@ -42,36 +72,195 @@ class _AdminDashboardState extends State<AdminDashboard> {
         .collection("items");
   }
 
-  Stream<List<Map<String, dynamic>>> appointmentsStream() {
-    return FirebaseFirestore.instance
+  List<Map<String, dynamic>> appointmentRecords(
+    QuerySnapshot<Map<String, dynamic>> snapshot,
+  ) {
+    final list = snapshot.docs.map((doc) {
+      final data = doc.data();
+      return {...data, "appointmentId": data["appointmentId"] ?? doc.id};
+    }).toList();
+
+    list.sort((a, b) {
+      final aDate = a["createdAt"];
+      final bDate = b["createdAt"];
+      if (aDate is Timestamp && bDate is Timestamp) {
+        return bDate.compareTo(aDate);
+      }
+      return 0;
+    });
+    return list;
+  }
+
+  List<String> _calendarMonthDates() {
+    final days = DateTime(calendarMonth.year, calendarMonth.month + 1, 0).day;
+    return [
+      for (var day = 1; day <= days; day++)
+        "${calendarMonth.month}/$day/${calendarMonth.year}",
+    ];
+  }
+
+  Iterable<List<String>> _queryChunks(List<String> values) sync* {
+    const chunkSize = 30;
+    for (var index = 0; index < values.length; index += chunkSize) {
+      final end = (index + chunkSize < values.length)
+          ? index + chunkSize
+          : values.length;
+      yield values.sublist(index, end);
+    }
+  }
+
+  void _listenToPendingAppointments() {
+    _pendingSubscription?.cancel();
+    _pendingSubscription = FirebaseFirestore.instance
         .collection("appointments")
+        .where("status", isEqualTo: "Pending")
         .snapshots()
-        .map((snapshot) {
-          final list = snapshot.docs.map((doc) {
-            final data = doc.data();
+        .listen(
+          (snapshot) {
+            if (!mounted) return;
+            final records = appointmentRecords(snapshot);
+            setState(() {
+              _pendingAppointments = records;
+              _appointmentsLoading = false;
+              _appointmentsError = null;
+            });
+            pendingBookings.value = records;
+          },
+          onError: (Object error) {
+            if (!mounted) return;
+            setState(() {
+              _appointmentsLoading = false;
+              _appointmentsError = error;
+            });
+          },
+        );
+  }
 
-            return {...data, "appointmentId": data["appointmentId"] ?? doc.id};
-          }).toList();
+  void _listenToAppointmentMonth() {
+    for (final subscription in _monthSubscriptions) {
+      subscription.cancel();
+    }
+    _monthSubscriptions.clear();
+    _monthAppointmentChunks.clear();
+    if (mounted) {
+      setState(() {
+        _appointmentsLoading = true;
+        _appointmentsError = null;
+      });
+    }
 
-          list.sort((a, b) {
-            final aDate = a["createdAt"];
-            final bDate = b["createdAt"];
+    var chunkIndex = 0;
+    for (final dates in _queryChunks(_calendarMonthDates())) {
+      final index = chunkIndex++;
+      final subscription = FirebaseFirestore.instance
+          .collection("appointments")
+          .where("date", whereIn: dates)
+          .snapshots()
+          .listen(
+            (snapshot) {
+              if (!mounted) return;
+              setState(() {
+                _monthAppointmentChunks[index] = appointmentRecords(snapshot);
+                _appointmentsLoading =
+                    _monthAppointmentChunks.length < chunkIndex;
+                _appointmentsError = null;
+              });
+            },
+            onError: (Object error) {
+              if (!mounted) return;
+              setState(() {
+                _appointmentsLoading = false;
+                _appointmentsError = error;
+              });
+            },
+          );
+      _monthSubscriptions.add(subscription);
+    }
+  }
 
-            if (aDate is Timestamp && bDate is Timestamp) {
-              return bDate.compareTo(aDate);
-            }
+  List<Map<String, dynamic>> get _loadedAppointments {
+    final byId = <String, Map<String, dynamic>>{};
+    for (final record in [
+      ..._monthAppointmentChunks.values.expand((records) => records),
+      ..._pendingAppointments,
+    ]) {
+      final key =
+          record["appointmentId"]?.toString() ??
+          "${record["date"]}:${record["queue"]}";
+      byId[key] = record;
+    }
+    return byId.values.toList(growable: false);
+  }
 
-            return 0;
-          });
-
-          return list;
+  Future<void> _loadAppointmentCounts() async {
+    try {
+      final collection = FirebaseFirestore.instance.collection("appointments");
+      final counts = await Future.wait([
+        collection.where("status", isEqualTo: "Approved").count().get(),
+        collection.where("status", isEqualTo: "Rejected").count().get(),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _approvedCount = counts[0].count ?? 0;
+        _rejectedCount = counts[1].count ?? 0;
+      });
+    } catch (_) {
+      // Compatibility fallback for projects where aggregate queries are not
+      // available yet. This runs only when the lightweight count query fails.
+      try {
+        final collection = FirebaseFirestore.instance.collection(
+          "appointments",
+        );
+        final snapshots = await Future.wait([
+          collection.where("status", isEqualTo: "Approved").get(),
+          collection.where("status", isEqualTo: "Rejected").get(),
+        ]);
+        if (!mounted) return;
+        setState(() {
+          _approvedCount = snapshots[0].size;
+          _rejectedCount = snapshots[1].size;
         });
+      } catch (error) {
+        if (!mounted) return;
+        setState(() => _appointmentsError = error);
+      }
+    }
   }
 
   Future<void> refreshAppointments() async {
-    await FirebaseFirestore.instance
-        .collection("appointments")
-        .get(const GetOptions(source: Source.server));
+    final collection = FirebaseFirestore.instance.collection("appointments");
+    final monthFutures = _queryChunks(_calendarMonthDates())
+        .map(
+          (dates) => collection
+              .where("date", whereIn: dates)
+              .get(const GetOptions(source: Source.server)),
+        )
+        .toList();
+    final results = await Future.wait([
+      Future.wait(monthFutures),
+      collection
+          .where("status", isEqualTo: "Pending")
+          .get(const GetOptions(source: Source.server)),
+    ]);
+    final monthSnapshots =
+        results[0] as List<QuerySnapshot<Map<String, dynamic>>>;
+    final pendingSnapshot = results[1] as QuerySnapshot<Map<String, dynamic>>;
+
+    if (mounted) {
+      setState(() {
+        _monthAppointmentChunks
+          ..clear()
+          ..addEntries(
+            monthSnapshots.asMap().entries.map(
+              (entry) => MapEntry(entry.key, appointmentRecords(entry.value)),
+            ),
+          );
+        _pendingAppointments = appointmentRecords(pendingSnapshot);
+        _appointmentsError = null;
+      });
+      pendingBookings.value = _pendingAppointments;
+    }
+    await _loadAppointmentCounts();
   }
 
   // ================= CHECK IF QUEUE IS ALREADY USED =================
@@ -218,6 +407,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
       "customerId": approved["customerId"] ?? "",
       "customerEmail": approved["customerEmail"] ?? "",
       "plate": approved["plate"] ?? "",
+      ...firestoreQueryFields(
+        date: date,
+        plate: approved["plate"],
+        name: approved["fullName"] ?? approved["name"],
+      ),
       "createdAt": FieldValue.serverTimestamp(),
       "updatedAt": FieldValue.serverTimestamp(),
     };
@@ -307,6 +501,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
       batch.update(appointmentRef, {
         "status": "Approved",
+        ...firestoreQueryFields(
+          date: date,
+          plate: booking["plate"],
+          name: booking["fullName"] ?? booking["name"],
+        ),
         "updatedAt": FieldValue.serverTimestamp(),
         "approvedAt": FieldValue.serverTimestamp(),
       });
@@ -324,11 +523,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
         "customerId": booking["customerId"] ?? "",
         "customerEmail": booking["customerEmail"] ?? "",
         "plate": booking["plate"] ?? "",
+        ...firestoreQueryFields(
+          date: date,
+          plate: booking["plate"],
+          name: booking["fullName"] ?? booking["name"],
+        ),
         "createdAt": FieldValue.serverTimestamp(),
         "updatedAt": FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
       await batch.commit();
+      await _loadAppointmentCounts();
 
       pendingBookings.value = pendingBookings.value
           .where((b) => b != booking)
@@ -381,9 +586,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
           .doc(appointmentId)
           .update({
             "status": "Rejected",
+            ...firestoreQueryFields(
+              date: booking["date"],
+              plate: booking["plate"],
+              name: booking["fullName"] ?? booking["name"],
+            ),
             "updatedAt": FieldValue.serverTimestamp(),
             "rejectedAt": FieldValue.serverTimestamp(),
           });
+      await _loadAppointmentCounts();
 
       pendingBookings.value = pendingBookings.value
           .where((b) => b != booking)
@@ -880,6 +1091,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                 child: Image.memory(
                                   document.bytes,
                                   fit: BoxFit.contain,
+                                  cacheWidth: 1600,
+                                  filterQuality: FilterQuality.medium,
                                   errorBuilder: (_, _, _) {
                                     return const Text(
                                       "Unable to display this image.",
@@ -1655,6 +1868,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       );
                       selectedCalendarDate = null;
                     });
+                    _listenToAppointmentMonth();
                   },
                   icon: const Icon(Icons.chevron_left_rounded),
                 ),
@@ -1679,6 +1893,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       );
                       selectedCalendarDate = null;
                     });
+                    _listenToAppointmentMonth();
                   },
                   icon: const Icon(Icons.chevron_right_rounded),
                 ),
@@ -1884,156 +2099,137 @@ class _AdminDashboardState extends State<AdminDashboard> {
       child: Scaffold(
         appBar: AppBar(title: const Text("Admin Appointment Dashboard")),
         body: SafeArea(
-          child: StreamBuilder<List<Map<String, dynamic>>>(
-            stream: appointmentsStream(),
-            builder: (context, snapshot) {
-              final appointments = snapshot.data ?? [];
-              final bookings = appointments.where((appointment) {
-                return appointment["status"]?.toString() == "Pending";
-              }).toList();
+          child: AppResponsiveContent(
+            child: Builder(
+              builder: (context) {
+                final appointments = _loadedAppointments;
+                final bookings = _pendingAppointments;
 
-              pendingBookings.value = bookings;
-
-              int countForStatus(String status) {
-                return appointments.where((appointment) {
-                  return appointment["status"]?.toString() == status;
-                }).length;
-              }
-
-              return AppRefreshIndicator(
-                onRefresh: refreshAppointments,
-                child: ListView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 20),
-                  children: [
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: _softPrimaryColor,
-                        borderRadius: BorderRadius.circular(22),
-                        border: Border.all(color: _borderColor),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(
-                            Icons.dashboard_customize_rounded,
-                            color: _primaryColor,
-                            size: 24,
-                          ),
-                          SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              "Appointment Overview",
-                              style: TextStyle(
-                                color: _primaryColor,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w800,
+                return AppRefreshIndicator(
+                  onRefresh: refreshAppointments,
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: appPagePadding(context, top: 10, bottom: 20),
+                    children: [
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: _softPrimaryColor,
+                          borderRadius: BorderRadius.circular(22),
+                          border: Border.all(color: _borderColor),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(
+                              Icons.dashboard_customize_rounded,
+                              color: _primaryColor,
+                              size: 24,
+                            ),
+                            SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                "Appointment Overview",
+                                style: TextStyle(
+                                  color: _primaryColor,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                ),
                               ),
                             ),
-                          ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          infoCard("Pending", bookings.length.toString()),
+                          const SizedBox(width: 10),
+                          infoCard("Approved", _approvedCount.toString()),
+                          const SizedBox(width: 10),
+                          infoCard("Rejected", _rejectedCount.toString()),
                         ],
                       ),
-                    ),
-                    const SizedBox(height: 14),
-                    Row(
-                      children: [
-                        infoCard(
-                          "Pending",
-                          countForStatus("Pending").toString(),
-                        ),
-                        const SizedBox(width: 10),
-                        infoCard(
-                          "Approved",
-                          countForStatus("Approved").toString(),
-                        ),
-                        const SizedBox(width: 10),
-                        infoCard(
-                          "Rejected",
-                          countForStatus("Rejected").toString(),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    if (snapshot.connectionState == ConnectionState.waiting &&
-                        !snapshot.hasData)
-                      const Padding(
-                        padding: EdgeInsets.all(30),
-                        child: Center(
-                          child: CircularProgressIndicator(
-                            color: _primaryColor,
-                          ),
-                        ),
-                      )
-                    else if (snapshot.hasError)
-                      Container(
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: Colors.red.withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(color: Colors.red),
-                        ),
-                        child: Text(
-                          "Unable to load appointments: ${snapshot.error}",
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.red,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      )
-                    else ...[
-                      buildAppointmentCalendar(appointments),
                       const SizedBox(height: 18),
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: _cardColor,
-                          borderRadius: BorderRadius.circular(24),
-                          border: Border.all(color: _borderColor),
-                          boxShadow: [
-                            BoxShadow(
-                              color: _primaryColor.withValues(alpha: 0.06),
-                              blurRadius: 14,
+                      if (_appointmentsLoading && appointments.isEmpty)
+                        const Padding(
+                          padding: EdgeInsets.all(30),
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              color: _primaryColor,
                             ),
-                          ],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Row(
-                              children: [
-                                Icon(
-                                  Icons.event_note_rounded,
-                                  color: _primaryColor,
-                                  size: 24,
-                                ),
-                                SizedBox(width: 10),
-                                Expanded(
-                                  child: Text(
-                                    "Pending Appointments",
-                                    style: TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.w800,
-                                      color: _primaryColor,
+                          ),
+                        )
+                      else if (_appointmentsError != null)
+                        Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: Colors.red.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(18),
+                            border: Border.all(color: Colors.red),
+                          ),
+                          child: Text(
+                            "Unable to load appointments: $_appointmentsError",
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.red,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        )
+                      else ...[
+                        buildAppointmentCalendar(appointments),
+                        const SizedBox(height: 18),
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: _cardColor,
+                            borderRadius: BorderRadius.circular(24),
+                            border: Border.all(color: _borderColor),
+                            boxShadow: [
+                              BoxShadow(
+                                color: _primaryColor.withValues(alpha: 0.06),
+                                blurRadius: 14,
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Row(
+                                children: [
+                                  Icon(
+                                    Icons.event_note_rounded,
+                                    color: _primaryColor,
+                                    size: 24,
+                                  ),
+                                  SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      "Pending Appointments",
+                                      style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w800,
+                                        color: _primaryColor,
+                                      ),
                                     ),
                                   ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 14),
-                            if (bookings.isEmpty)
-                              emptyPendingAppointments()
-                            else
-                              ...bookings.map(pendingAppointmentCard),
-                          ],
+                                ],
+                              ),
+                              const SizedBox(height: 14),
+                              if (bookings.isEmpty)
+                                emptyPendingAppointments()
+                              else
+                                ...bookings.map(pendingAppointmentCard),
+                            ],
+                          ),
                         ),
-                      ),
+                      ],
                     ],
-                  ],
-                ),
-              );
-            },
+                  ),
+                );
+              },
+            ),
           ),
         ),
       ),

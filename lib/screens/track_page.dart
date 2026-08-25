@@ -4,10 +4,29 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
+import '../theme/app_theme.dart';
 import '../widgets/app_refresh_indicator.dart';
+import '../widgets/app_responsive_content.dart';
 import 'customer_settings.dart';
 import 'ors_service.dart';
 import 'location_data.dart';
+
+String formatQueueDuration(int minutes) {
+  final int safeMinutes = minutes < 0 ? 0 : minutes;
+
+  if (safeMinutes < 60) {
+    return "$safeMinutes ${safeMinutes == 1 ? "min" : "mins"}";
+  }
+
+  final int hours = safeMinutes ~/ 60;
+  final int remainingMinutes = safeMinutes % 60;
+  final String hourText = "$hours ${hours == 1 ? "hour" : "hours"}";
+
+  if (remainingMinutes == 0) return hourText;
+
+  return "$hourText $remainingMinutes "
+      "${remainingMinutes == 1 ? "min" : "mins"}";
+}
 
 class TrackPage extends StatefulWidget {
   const TrackPage({super.key});
@@ -537,14 +556,21 @@ class _TrackPageState extends State<TrackPage> {
 
       if (computedLeaveIn <= 0) {
         leaveAdviceText =
-            "Leave your house now. Your turn is estimated in $estimatedQueueTime mins.";
+            "Leave your house now. Your turn is estimated in "
+            "${formatQueueDuration(estimatedQueueTime)}.";
       } else {
         leaveAdviceText =
-            "Leave your house in $computedLeaveIn mins. Your turn is estimated in $estimatedQueueTime mins.";
+            "Leave your house in ${formatQueueDuration(computedLeaveIn)}. "
+            "Your turn is estimated in "
+            "${formatQueueDuration(estimatedQueueTime)}.";
       }
 
       calculationText =
-          "$estimatedQueueTime mins queue time - ${result.minutes} mins travel time - $bufferMinutes mins buffer = ${computedLeaveIn <= 0 ? 0 : computedLeaveIn} mins before leaving";
+          "${formatQueueDuration(estimatedQueueTime)} queue time - "
+          "${formatQueueDuration(result.minutes)} travel time - "
+          "${formatQueueDuration(bufferMinutes)} buffer = "
+          "${formatQueueDuration(computedLeaveIn <= 0 ? 0 : computedLeaveIn)} "
+          "before leaving";
     });
   }
 
@@ -625,76 +651,80 @@ class _TrackPageState extends State<TrackPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color.fromARGB(255, 227, 242, 248),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text("Track Queue"),
-        backgroundColor: Colors.white,
+        backgroundColor: AppColors.background,
+        foregroundColor: AppColors.primary,
       ),
       body: SafeArea(
-        child: StreamBuilder<List<Map<String, dynamic>>>(
-          stream: todayQueueStream(),
-          builder: (context, snapshot) {
-            final List<Map<String, dynamic>> items = snapshot.data ?? [];
-            final Map<String, dynamic>? nowServing = getNowServing(items);
+        child: AppResponsiveContent(
+          maxWidth: 960,
+          child: StreamBuilder<List<Map<String, dynamic>>>(
+            stream: todayQueueStream(),
+            builder: (context, snapshot) {
+              final List<Map<String, dynamic>> items = snapshot.data ?? [];
+              final Map<String, dynamic>? nowServing = getNowServing(items);
 
-            return LayoutBuilder(
-              builder: (context, constraints) {
-                final bool wide = constraints.maxWidth >= 700;
+              return LayoutBuilder(
+                builder: (context, constraints) {
+                  final bool wide = constraints.maxWidth >= 700;
 
-                return AppRefreshIndicator(
-                  onRefresh: refreshQueue,
-                  child: ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    padding: EdgeInsets.all(wide ? 24 : 16),
-                    children: [
-                      buildNowServingCard(nowServing),
+                  return AppRefreshIndicator(
+                    onRefresh: refreshQueue,
+                    child: ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: EdgeInsets.all(wide ? 24 : 16),
+                      children: [
+                        buildNowServingCard(nowServing),
 
-                      const SizedBox(height: 18),
+                        const SizedBox(height: 18),
 
-                      buildSearchCard(),
+                        buildSearchCard(),
 
-                      const SizedBox(height: 18),
+                        const SizedBox(height: 18),
 
-                      if (trackedQueueNumber.isNotEmpty)
-                        buildLiveQueueStatusCard(snapshot)
-                      else if (statusText.isNotEmpty)
-                        buildQueueStatusCard(
-                          queue: queueNumberText,
-                          status: statusText,
-                          position: positionText,
-                        ),
+                        if (trackedQueueNumber.isNotEmpty)
+                          buildLiveQueueStatusCard(snapshot)
+                        else if (statusText.isNotEmpty)
+                          buildQueueStatusCard(
+                            queue: queueNumberText,
+                            status: statusText,
+                            position: positionText,
+                          ),
 
-                      if (estimatedQueueTime != null) ...[
-                        const SizedBox(height: 14),
-                        buildTimeSummaryCard(),
+                        if (estimatedQueueTime != null) ...[
+                          const SizedBox(height: 14),
+                          buildTimeSummaryCard(),
+                        ],
+
+                        if (isLoadingEta)
+                          const Padding(
+                            padding: EdgeInsets.all(24),
+                            child: Center(child: CircularProgressIndicator()),
+                          ),
+
+                        if (orsStatusText.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          buildInfoNote(orsStatusText),
+                        ],
+
+                        if (leaveAdviceText.isNotEmpty) ...[
+                          const SizedBox(height: 14),
+                          buildLeaveAdviceCard(),
+                        ],
+
+                        if (calculationText.isNotEmpty) ...[
+                          const SizedBox(height: 14),
+                          buildCalculationCard(),
+                        ],
                       ],
-
-                      if (isLoadingEta)
-                        const Padding(
-                          padding: EdgeInsets.all(24),
-                          child: Center(child: CircularProgressIndicator()),
-                        ),
-
-                      if (orsStatusText.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        buildInfoNote(orsStatusText),
-                      ],
-
-                      if (leaveAdviceText.isNotEmpty) ...[
-                        const SizedBox(height: 14),
-                        buildLeaveAdviceCard(),
-                      ],
-
-                      if (calculationText.isNotEmpty) ...[
-                        const SizedBox(height: 14),
-                        buildCalculationCard(),
-                      ],
-                    ],
-                  ),
-                );
-              },
-            );
-          },
+                    ),
+                  );
+                },
+              );
+            },
+          ),
         ),
       ),
     );
@@ -852,7 +882,7 @@ class _TrackPageState extends State<TrackPage> {
           timeItem(
             icon: Icons.schedule,
             title: "Estimated Queue Time",
-            value: "${estimatedQueueTime ?? 0} mins",
+            value: formatQueueDuration(estimatedQueueTime ?? 0),
             subtitle:
                 "Based on position ${queuePosition ?? '-'} × $averageServiceTime mins per customer",
             color: Colors.green,
@@ -862,7 +892,7 @@ class _TrackPageState extends State<TrackPage> {
             timeItem(
               icon: Icons.directions_car,
               title: "Travel Time",
-              value: "$travelMinutes mins",
+              value: formatQueueDuration(travelMinutes!),
               subtitle: "From $municipalityText to NPJN",
               color: Colors.purple,
             ),
@@ -870,7 +900,7 @@ class _TrackPageState extends State<TrackPage> {
             timeItem(
               icon: Icons.add_alarm,
               title: "Safety Buffer",
-              value: "$bufferMinutes mins",
+              value: formatQueueDuration(bufferMinutes),
               subtitle: "Allowance for parking, traffic, and preparation",
               color: Colors.blueGrey,
             ),
@@ -942,23 +972,25 @@ class _TrackPageState extends State<TrackPage> {
           const SizedBox(height: 14),
           calculationLine(
             label: "Queue waiting time",
-            value: "${estimatedQueueTime ?? 0} mins",
+            value: formatQueueDuration(estimatedQueueTime ?? 0),
             icon: Icons.schedule,
           ),
           calculationLine(
             label: "Minus travel time",
-            value: "- ${travelMinutes ?? 0} mins",
+            value: "- ${formatQueueDuration(travelMinutes ?? 0)}",
             icon: Icons.directions_car,
           ),
           calculationLine(
             label: "Minus safety buffer",
-            value: "- $bufferMinutes mins",
+            value: "- ${formatQueueDuration(bufferMinutes)}",
             icon: Icons.add_alarm,
           ),
           const Divider(height: 22),
           calculationLine(
             label: "Recommended leave time",
-            value: "${(leaveInMinutes ?? 0) <= 0 ? 0 : leaveInMinutes} mins",
+            value: formatQueueDuration(
+              (leaveInMinutes ?? 0) <= 0 ? 0 : leaveInMinutes!,
+            ),
             icon: Icons.notifications_active,
             bold: true,
           ),
