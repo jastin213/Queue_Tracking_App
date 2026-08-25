@@ -10,6 +10,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:printing/printing.dart';
 
 import '../theme/app_theme.dart';
+import '../services/document_image_optimizer.dart';
 import '../services/firestore_query_fields.dart';
 import '../services/platform_storage_upload.dart';
 import '../widgets/app_refresh_indicator.dart';
@@ -481,7 +482,7 @@ class _BookAppointmentState extends State<BookAppointment> {
         allowedExtensions: ["jpg", "jpeg", "png", "pdf"],
       );
 
-      if (result == null) return;
+      if (result == null || !mounted) return;
 
       final file = result.files.single;
       final Uint8List? bytes = file.bytes;
@@ -495,7 +496,14 @@ class _BookAppointmentState extends State<BookAppointment> {
         return;
       }
 
-      if (bytes.length > _maxDocumentBytes) {
+      final optimizedImage = await optimizeDocumentImage(
+        bytes: bytes,
+        fileName: file.name,
+      );
+      if (!mounted) return;
+      final Uint8List selectedBytes = optimizedImage.bytes;
+
+      if (selectedBytes.length > _maxDocumentBytes) {
         if (!mounted) return;
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -506,24 +514,41 @@ class _BookAppointmentState extends State<BookAppointment> {
         return;
       }
 
-      final String? safePath = kIsWeb ? null : file.path;
+      final String? safePath = kIsWeb || optimizedImage.wasOptimized
+          ? null
+          : file.path;
 
       setState(() {
         if (type == "ID") {
           idFileName = file.name;
           idFilePath = safePath;
-          idFileBytes = bytes;
+          idFileBytes = selectedBytes;
         } else if (type == "OR") {
           orFileName = file.name;
           orFilePath = safePath;
-          orFileBytes = bytes;
+          orFileBytes = selectedBytes;
         } else if (type == "CR") {
           crFileName = file.name;
           crFilePath = safePath;
-          crFileBytes = bytes;
+          crFileBytes = selectedBytes;
         }
       });
+
+      if (optimizedImage.wasOptimized && mounted) {
+        final double originalMb = bytes.length / (1024 * 1024);
+        final double optimizedMb = selectedBytes.length / (1024 * 1024);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              "Image optimized from ${originalMb.toStringAsFixed(1)} MB "
+              "to ${optimizedMb.toStringAsFixed(1)} MB.",
+            ),
+          ),
+        );
+      }
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("File upload failed: $e")));
@@ -1199,6 +1224,14 @@ class _BookAppointmentState extends State<BookAppointment> {
         "orFileUploaded": true,
         "crFileUploaded": true,
         "documentBackend": documentBackend,
+        "archiveState": "active",
+        "documentsPurged": false,
+        "retentionDeleteAfter": Timestamp.fromDate(
+          DateTime.now().add(const Duration(days: 365)),
+        ),
+        "totalDocumentBytes": idFileBytes!.lengthInBytes +
+            orFileBytes!.lengthInBytes +
+            crFileBytes!.lengthInBytes,
 
         "source": "Appointment",
         "createdAt": FieldValue.serverTimestamp(),

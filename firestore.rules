@@ -97,6 +97,17 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // Lightweight historical copies created by the trusted retention function.
+    match /appointment_archives/{appointmentId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Operational status for automated retention. The Admin SDK bypasses rules.
+    match /system_config/{configId} {
+      allow read, write: if isAdmin();
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }
