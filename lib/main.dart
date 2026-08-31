@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 
 import 'firebase_options.dart';
+import 'screens/display_page.dart';
 import 'screens/home_page.dart';
 import 'theme/app_theme.dart';
 
@@ -23,6 +24,9 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
       home: const HomePage(),
+      routes: {
+        displayPageRoute: (_) => const DisplayPage(showBackButton: false),
+      },
     );
   }
 }

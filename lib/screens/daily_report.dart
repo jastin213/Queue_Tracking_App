@@ -1,12 +1,15 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import '../services/firestore_query_fields.dart';
 import '../theme/app_theme.dart';
 import '../widgets/analytics_line_chart.dart';
 import '../widgets/app_refresh_indicator.dart';
@@ -60,6 +63,7 @@ class _DailyReportState extends State<DailyReport> {
   bool _searchLoading = false;
   Object? _reportError;
   Object? _searchError;
+  final Set<String> _busyReportRecords = <String>{};
 
   @override
   void initState() {
@@ -212,7 +216,11 @@ class _DailyReportState extends State<DailyReport> {
   ) {
     return snapshot.docs.map((doc) {
       final data = doc.data();
-      return {...data, "queueId": data["queueId"] ?? doc.id};
+      return {
+        ...data,
+        "queueId": data["queueId"] ?? doc.id,
+        "_queueDocumentPath": doc.reference.path,
+      };
     }).toList();
   }
 
@@ -221,7 +229,11 @@ class _DailyReportState extends State<DailyReport> {
   ) {
     return snapshot.docs.map((doc) {
       final data = doc.data();
-      return {...data, "appointmentId": data["appointmentId"] ?? doc.id};
+      return {
+        ...data,
+        "appointmentId": data["appointmentId"] ?? doc.id,
+        "_appointmentDocumentPath": doc.reference.path,
+      };
     }).toList();
   }
 
@@ -586,7 +598,7 @@ class _DailyReportState extends State<DailyReport> {
     );
   }
 
-  Future<void> printDailyPdf({
+  Future<Uint8List> generateDailyPdf({
     required List<Map<String, dynamic>> passedList,
     required List<Map<String, dynamic>> failedList,
   }) async {
@@ -648,13 +660,39 @@ class _DailyReportState extends State<DailyReport> {
       ),
     );
 
+    return doc.save();
+  }
+
+  String dailyPdfFileName() {
+    return "NPJN_Daily_Report_${selectedDate.replaceAll('/', '-')}.pdf";
+  }
+
+  Future<void> printDailyPdf({
+    required List<Map<String, dynamic>> passedList,
+    required List<Map<String, dynamic>> failedList,
+  }) async {
+    final bytes = await generateDailyPdf(
+      passedList: passedList,
+      failedList: failedList,
+    );
     await Printing.layoutPdf(
-      name: "NPJN_Daily_Report_$selectedDate.pdf",
-      onLayout: (PdfPageFormat format) async => doc.save(),
+      name: dailyPdfFileName(),
+      onLayout: (PdfPageFormat format) async => bytes,
     );
   }
 
-  Future<void> printMonthlyPdf({
+  Future<void> downloadDailyPdf({
+    required List<Map<String, dynamic>> passedList,
+    required List<Map<String, dynamic>> failedList,
+  }) async {
+    final bytes = await generateDailyPdf(
+      passedList: passedList,
+      failedList: failedList,
+    );
+    await saveOrSharePdf(bytes: bytes, fileName: dailyPdfFileName());
+  }
+
+  Future<Uint8List> generateMonthlyPdf({
     required List<Map<String, dynamic>> queueItems,
   }) async {
     final monthKey = currentMonthKey();
@@ -779,10 +817,57 @@ class _DailyReportState extends State<DailyReport> {
       ),
     );
 
+    return doc.save();
+  }
+
+  String monthlyPdfFileName() {
+    return "NPJN_Monthly_Report_${currentMonthKey()}.pdf";
+  }
+
+  Future<void> printMonthlyPdf({
+    required List<Map<String, dynamic>> queueItems,
+  }) async {
+    final bytes = await generateMonthlyPdf(queueItems: queueItems);
     await Printing.layoutPdf(
-      name: "NPJN_Monthly_Report_$monthKey.pdf",
-      onLayout: (PdfPageFormat format) async => doc.save(),
+      name: monthlyPdfFileName(),
+      onLayout: (PdfPageFormat format) async => bytes,
     );
+  }
+
+  Future<void> downloadMonthlyPdf({
+    required List<Map<String, dynamic>> queueItems,
+  }) async {
+    final bytes = await generateMonthlyPdf(queueItems: queueItems);
+    await saveOrSharePdf(bytes: bytes, fileName: monthlyPdfFileName());
+  }
+
+  Future<void> saveOrSharePdf({
+    required Uint8List bytes,
+    required String fileName,
+  }) async {
+    try {
+      final success = await Printing.sharePdf(bytes: bytes, filename: fileName);
+      if (!success) throw StateError("The PDF could not be saved.");
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            kIsWeb
+                ? "$fileName download started."
+                : "$fileName is ready to save or share.",
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: Colors.red,
+          content: Text("Unable to download the PDF. Please try again."),
+        ),
+      );
+    }
   }
 
   // ================= SEASONAL DETECTION =================
@@ -1113,11 +1198,11 @@ class _DailyReportState extends State<DailyReport> {
         children: [
           sectionHeader(
             icon: Icons.picture_as_pdf_rounded,
-            title: "Printable PDF Reports",
+            title: "Printable & Downloadable PDF Reports",
           ),
           const SizedBox(height: 10),
           const Text(
-            "PDF exports include only Passed and Failed records.",
+            "Print a report or download a soft-copy PDF to save, email, or send to LTO. PDF exports include only Passed and Failed records.",
             style: TextStyle(
               color: _mutedTextColor,
               fontWeight: FontWeight.w600,
@@ -1127,87 +1212,147 @@ class _DailyReportState extends State<DailyReport> {
           const SizedBox(height: 14),
           LayoutBuilder(
             builder: (context, constraints) {
-              final bool narrow = constraints.maxWidth < 520;
-              final bool desktopWeb = kIsWeb && constraints.maxWidth >= 720;
-              final double buttonHeight = desktopWeb ? 44 : 48;
+              final bool twoColumns = constraints.maxWidth >= 760;
+              final double groupWidth = twoColumns
+                  ? (constraints.maxWidth - 12) / 2
+                  : constraints.maxWidth;
 
-              final dailyButton = SizedBox(
-                width: desktopWeb
-                    ? 320
-                    : narrow
-                    ? double.infinity
-                    : null,
-                height: buttonHeight,
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _primaryColor,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                  onPressed: () async {
-                    await printDailyPdf(
+              return Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  buildPdfReportActionGroup(
+                    width: groupWidth,
+                    title: "Daily Report",
+                    subtitle: selectedDate,
+                    icon: Icons.today_rounded,
+                    color: _primaryColor,
+                    onPrint: () => printDailyPdf(
                       passedList: passedList,
                       failedList: failedList,
-                    );
-                  },
-                  icon: const Icon(Icons.today_rounded),
-                  label: Text("Daily PDF - $selectedDate"),
-                ),
-              );
-
-              final monthlyButton = SizedBox(
-                width: desktopWeb
-                    ? 320
-                    : narrow
-                    ? double.infinity
-                    : null,
-                height: buttonHeight,
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    onDownload: () => downloadDailyPdf(
+                      passedList: passedList,
+                      failedList: failedList,
                     ),
                   ),
-                  onPressed: () async {
-                    await printMonthlyPdf(queueItems: queueItems);
-                  },
-                  icon: const Icon(Icons.calendar_view_month_rounded),
-                  label: Text("Monthly PDF - $monthLabel"),
-                ),
-              );
-
-              if (desktopWeb) {
-                return Wrap(
-                  spacing: 12,
-                  runSpacing: 10,
-                  children: [dailyButton, monthlyButton],
-                );
-              }
-
-              if (narrow) {
-                return Column(
-                  children: [
-                    dailyButton,
-                    const SizedBox(height: 10),
-                    monthlyButton,
-                  ],
-                );
-              }
-
-              return Row(
-                children: [
-                  Expanded(child: dailyButton),
-                  const SizedBox(width: 12),
-                  Expanded(child: monthlyButton),
+                  buildPdfReportActionGroup(
+                    width: groupWidth,
+                    title: "Monthly Report",
+                    subtitle: monthLabel,
+                    icon: Icons.calendar_view_month_rounded,
+                    color: Colors.green,
+                    onPrint: () => printMonthlyPdf(queueItems: queueItems),
+                    onDownload: () =>
+                        downloadMonthlyPdf(queueItems: queueItems),
+                  ),
                 ],
               );
             },
           ),
         ],
+      ),
+    );
+  }
+
+  Widget buildPdfReportActionGroup({
+    required double width,
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color color,
+    required Future<void> Function() onPrint,
+    required Future<void> Function() onDownload,
+  }) {
+    return SizedBox(
+      width: width,
+      child: Container(
+        padding: const EdgeInsets.all(13),
+        decoration: BoxDecoration(
+          color: _softPrimaryColor,
+          borderRadius: BorderRadius.circular(17),
+          border: Border.all(color: _borderColor),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 39,
+                  height: 39,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.11),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(icon, color: color, size: 21),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          color: _primaryColor,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: const TextStyle(
+                          color: _mutedTextColor,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final printButton = OutlinedButton.icon(
+                  onPressed: () async => onPrint(),
+                  icon: const Icon(Icons.print_rounded, size: 18),
+                  label: const Text("PRINT"),
+                );
+                final downloadButton = ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: color,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () async => onDownload(),
+                  icon: const Icon(Icons.download_rounded, size: 18),
+                  label: const Text("DOWNLOAD"),
+                );
+
+                if (constraints.maxWidth < 320) {
+                  return Column(
+                    children: [
+                      SizedBox(width: double.infinity, child: printButton),
+                      const SizedBox(height: 8),
+                      SizedBox(width: double.infinity, child: downloadButton),
+                    ],
+                  );
+                }
+
+                return Row(
+                  children: [
+                    Expanded(child: printButton),
+                    const SizedBox(width: 9),
+                    Expanded(child: downloadButton),
+                  ],
+                );
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1859,6 +2004,510 @@ class _DailyReportState extends State<DailyReport> {
     return recordsByKey.values.toList();
   }
 
+  String reportCustomerType(Map<String, dynamic> record) {
+    final String source =
+        record["source"]?.toString().trim().toLowerCase() ?? "";
+    final String appointmentId =
+        record["appointmentId"]?.toString().trim() ?? "";
+    final String appointmentPath =
+        record["_appointmentDocumentPath"]?.toString().trim() ?? "";
+
+    if (source == "appointment" ||
+        appointmentId.isNotEmpty ||
+        appointmentPath.isNotEmpty) {
+      return "Appointment";
+    }
+
+    return "Walk-in";
+  }
+
+  String reportRecordKey(Map<String, dynamic> record) {
+    final String queuePath =
+        record["_queueDocumentPath"]?.toString().trim() ?? "";
+    final String appointmentPath =
+        record["_appointmentDocumentPath"]?.toString().trim() ?? "";
+
+    if (queuePath.isNotEmpty) return queuePath;
+    if (appointmentPath.isNotEmpty) return appointmentPath;
+
+    return "${record["date"]}:${record["queue"]}:"
+        "${record["appointmentId"]}:${reportCustomerName(record)}";
+  }
+
+  DocumentReference<Map<String, dynamic>>? reportAppointmentRef(
+    Map<String, dynamic> record,
+  ) {
+    final String path =
+        record["_appointmentDocumentPath"]?.toString().trim() ?? "";
+    if (path.isNotEmpty) return FirebaseFirestore.instance.doc(path);
+
+    final String appointmentId =
+        record["appointmentId"]?.toString().trim() ?? "";
+    if (appointmentId.isEmpty) return null;
+
+    return FirebaseFirestore.instance
+        .collection("appointments")
+        .doc(appointmentId);
+  }
+
+  Future<DocumentReference<Map<String, dynamic>>?> reportQueueRef(
+    Map<String, dynamic> record,
+  ) async {
+    final String path = record["_queueDocumentPath"]?.toString().trim() ?? "";
+    if (path.isNotEmpty) return FirebaseFirestore.instance.doc(path);
+
+    final String date = record["date"]?.toString().trim() ?? "";
+    final String queue = record["queue"]?.toString().trim() ?? "";
+    final String appointmentId =
+        record["appointmentId"]?.toString().trim() ?? "";
+    if (date.isEmpty || queue.isEmpty || appointmentId.isEmpty) return null;
+
+    final candidate = FirebaseFirestore.instance
+        .collection("queues")
+        .doc(queueDateId(date))
+        .collection("items")
+        .doc(queue);
+    final snapshot = await candidate.get();
+    final linkedAppointmentId =
+        snapshot.data()?["appointmentId"]?.toString().trim() ?? "";
+
+    return snapshot.exists && linkedAppointmentId == appointmentId
+        ? candidate
+        : null;
+  }
+
+  String editableReportValue(dynamic value) {
+    final String text = value?.toString().trim() ?? "";
+    return text == "-" || text == "Not available" ? "" : text;
+  }
+
+  String normalizedEditablePlate(String value) {
+    return value.trim().toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+  }
+
+  Future<void> showEditReportRecordDialog(Map<String, dynamic> record) async {
+    final formKey = GlobalKey<FormState>();
+    final nameController = TextEditingController(
+      text: editableReportValue(record["name"] ?? record["fullName"]),
+    );
+    final plateController = TextEditingController(
+      text: editableReportValue(record["plate"]),
+    );
+    final municipalityController = TextEditingController(
+      text: editableReportValue(record["municipality"]),
+    );
+    final emailController = TextEditingController(
+      text: editableReportValue(record["customerEmail"]),
+    );
+    final String queue = record["queue"]?.toString().trim() ?? "-";
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        bool isSaving = false;
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            InputDecoration fieldDecoration({
+              required String label,
+              required IconData icon,
+              String? hint,
+            }) {
+              return InputDecoration(
+                labelText: label,
+                hintText: hint,
+                prefixIcon: Icon(icon),
+                filled: true,
+                fillColor: _backgroundColor,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(15),
+                ),
+              );
+            }
+
+            return AlertDialog(
+              backgroundColor: _cardColor,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(22),
+              ),
+              title: Text(
+                "Edit Customer - $queue",
+                style: const TextStyle(
+                  color: _primaryColor,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              content: SizedBox(
+                width: 460,
+                child: Form(
+                  key: formKey,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        TextFormField(
+                          controller: nameController,
+                          enabled: !isSaving,
+                          textCapitalization: TextCapitalization.words,
+                          decoration: fieldDecoration(
+                            label: "Customer Name",
+                            icon: Icons.person_outline_rounded,
+                          ),
+                          validator: (value) =>
+                              value == null || value.trim().isEmpty
+                              ? "Customer name is required."
+                              : null,
+                        ),
+                        const SizedBox(height: 13),
+                        TextFormField(
+                          controller: plateController,
+                          enabled: !isSaving,
+                          textCapitalization: TextCapitalization.characters,
+                          maxLength: 7,
+                          inputFormatters: [
+                            FilteringTextInputFormatter.allow(
+                              RegExp(r'[A-Za-z0-9]'),
+                            ),
+                            LengthLimitingTextInputFormatter(7),
+                          ],
+                          decoration: fieldDecoration(
+                            label: "Plate Number",
+                            hint: "ABC1234",
+                            icon: Icons.pin_outlined,
+                          ).copyWith(counterText: ""),
+                          validator: (value) {
+                            final plate = normalizedEditablePlate(value ?? "");
+                            return RegExp(r'^[A-Z0-9]{6,7}$').hasMatch(plate)
+                                ? null
+                                : "Enter exactly 6–7 letters and numbers.";
+                          },
+                        ),
+                        const SizedBox(height: 13),
+                        TextFormField(
+                          controller: municipalityController,
+                          enabled: !isSaving,
+                          textCapitalization: TextCapitalization.words,
+                          decoration: fieldDecoration(
+                            label: "Municipality",
+                            icon: Icons.location_city_outlined,
+                          ),
+                        ),
+                        const SizedBox(height: 13),
+                        TextFormField(
+                          controller: emailController,
+                          enabled: !isSaving,
+                          keyboardType: TextInputType.emailAddress,
+                          decoration: fieldDecoration(
+                            label: "Email (optional)",
+                            icon: Icons.email_outlined,
+                          ),
+                          validator: (value) {
+                            final email = value?.trim() ?? "";
+                            if (email.isEmpty) return null;
+                            return RegExp(
+                                  r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
+                                ).hasMatch(email)
+                                ? null
+                                : "Enter a valid email address.";
+                          },
+                        ),
+                        const SizedBox(height: 13),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: _softPrimaryColor,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: _borderColor),
+                          ),
+                          child: const Text(
+                            "Queue number, date, result, customer type, and "
+                            "vehicle type stay unchanged.",
+                            style: TextStyle(
+                              color: _mutedTextColor,
+                              fontSize: 12.5,
+                              height: 1.35,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              actionsPadding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+              actions: [
+                OutlinedButton(
+                  onPressed: isSaving
+                      ? null
+                      : () => Navigator.pop(dialogContext),
+                  child: const Text("CANCEL"),
+                ),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _primaryColor,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: isSaving
+                      ? null
+                      : () async {
+                          if (!(formKey.currentState?.validate() ?? false)) {
+                            return;
+                          }
+
+                          setDialogState(() => isSaving = true);
+                          final success = await updateReportRecord(
+                            record: record,
+                            name: nameController.text.trim(),
+                            plate: normalizedEditablePlate(
+                              plateController.text,
+                            ),
+                            municipality: municipalityController.text.trim(),
+                            email: emailController.text.trim(),
+                          );
+
+                          if (!dialogContext.mounted) return;
+                          if (success) {
+                            Navigator.pop(dialogContext);
+                          } else {
+                            setDialogState(() => isSaving = false);
+                          }
+                        },
+                  icon: isSaving
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.save_rounded),
+                  label: const Text("SAVE CHANGES"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    nameController.dispose();
+    plateController.dispose();
+    municipalityController.dispose();
+    emailController.dispose();
+  }
+
+  Future<bool> updateReportRecord({
+    required Map<String, dynamic> record,
+    required String name,
+    required String plate,
+    required String municipality,
+    required String email,
+  }) async {
+    final String key = reportRecordKey(record);
+    final String date = record["date"]?.toString().trim() ?? "";
+
+    setState(() => _busyReportRecords.add(key));
+    try {
+      final queueRef = await reportQueueRef(record);
+      final appointmentRef = reportAppointmentRef(record);
+      final queueSnapshot = await queueRef?.get();
+      final appointmentSnapshot = await appointmentRef?.get();
+      final hasQueue = queueSnapshot?.exists ?? false;
+      final hasAppointment = appointmentSnapshot?.exists ?? false;
+
+      if (!hasQueue && !hasAppointment) {
+        throw StateError("The report record no longer exists.");
+      }
+
+      final batch = FirebaseFirestore.instance.batch();
+      final queryFields = firestoreQueryFields(
+        date: date,
+        plate: plate,
+        name: name,
+      );
+
+      if (hasQueue && queueRef != null) {
+        batch.update(queueRef, {
+          "name": name,
+          "plate": plate,
+          "municipality": municipality,
+          "customerEmail": email,
+          ...queryFields,
+          "updatedAt": FieldValue.serverTimestamp(),
+        });
+      }
+      if (hasAppointment && appointmentRef != null) {
+        batch.update(appointmentRef, {
+          "fullName": name,
+          "plate": plate,
+          "municipality": municipality,
+          "customerEmail": email,
+          ...queryFields,
+          "updatedAt": FieldValue.serverTimestamp(),
+        });
+      }
+
+      await batch.commit();
+      await refreshReportAfterMutation();
+
+      if (!mounted) return true;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Customer details updated successfully.")),
+      );
+      return true;
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Unable to update customer details: $error")),
+        );
+      }
+      return false;
+    } finally {
+      if (mounted) setState(() => _busyReportRecords.remove(key));
+    }
+  }
+
+  Future<void> showDeleteReportRecordDialog(Map<String, dynamic> record) async {
+    final String name = reportCustomerName(record);
+    final String queue = record["queue"]?.toString().trim() ?? "-";
+    final String type = reportCustomerType(record);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: _cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+        title: const Text(
+          "Delete Customer Record?",
+          style: TextStyle(color: _primaryColor, fontWeight: FontWeight.w900),
+        ),
+        content: Text(
+          "Permanently delete $queue for $name ($type)? Linked queue and "
+          "appointment records, including uploaded appointment documents, "
+          "will also be removed. The customer's login account will not be "
+          "deleted. This action cannot be undone.",
+          style: const TextStyle(color: _mutedTextColor, height: 1.45),
+        ),
+        actionsPadding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+        actions: [
+          OutlinedButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text("CANCEL"),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.delete_outline_rounded),
+            label: const Text("DELETE"),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) await deleteReportRecord(record);
+  }
+
+  Future<void> deleteFirestoreRefs(
+    List<DocumentReference<Map<String, dynamic>>> references,
+  ) async {
+    for (int start = 0; start < references.length; start += 400) {
+      final batch = FirebaseFirestore.instance.batch();
+      final int end = start + 400 < references.length
+          ? start + 400
+          : references.length;
+      for (final reference in references.sublist(start, end)) {
+        batch.delete(reference);
+      }
+      await batch.commit();
+    }
+  }
+
+  Future<void> deleteAppointmentFiles(
+    DocumentReference<Map<String, dynamic>> appointmentRef,
+    Map<String, dynamic> appointment,
+  ) async {
+    final storagePaths = <String>{
+      for (final field in const [
+        "idStoragePath",
+        "orStoragePath",
+        "crStoragePath",
+      ])
+        if ((appointment[field]?.toString().trim() ?? "").isNotEmpty)
+          appointment[field].toString().trim(),
+    };
+
+    for (final path in storagePaths) {
+      try {
+        await FirebaseStorage.instance.ref(path).delete();
+      } on FirebaseException catch (error) {
+        if (error.code != "object-not-found") rethrow;
+      }
+    }
+
+    final documents = await appointmentRef.collection("documents").get();
+    final documentRefs = <DocumentReference<Map<String, dynamic>>>[];
+    for (final document in documents.docs) {
+      final chunks = await document.reference.collection("chunks").get();
+      await deleteFirestoreRefs(
+        chunks.docs.map((chunk) => chunk.reference).toList(),
+      );
+      documentRefs.add(document.reference);
+    }
+    await deleteFirestoreRefs(documentRefs);
+  }
+
+  Future<void> deleteReportRecord(Map<String, dynamic> record) async {
+    final String key = reportRecordKey(record);
+    final String queue = record["queue"]?.toString().trim() ?? "Customer";
+
+    setState(() => _busyReportRecords.add(key));
+    try {
+      final queueRef = await reportQueueRef(record);
+      final appointmentRef = reportAppointmentRef(record);
+      final appointmentSnapshot = await appointmentRef?.get();
+
+      if (appointmentRef != null && (appointmentSnapshot?.exists ?? false)) {
+        await deleteAppointmentFiles(
+          appointmentRef,
+          appointmentSnapshot!.data() ?? record,
+        );
+      }
+
+      final batch = FirebaseFirestore.instance.batch();
+      if (queueRef != null) batch.delete(queueRef);
+      if (appointmentRef != null) batch.delete(appointmentRef);
+      if (queueRef == null && appointmentRef == null) {
+        throw StateError("The report record could not be located.");
+      }
+      await batch.commit();
+      await refreshReportAfterMutation();
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("$queue was permanently deleted.")),
+      );
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Unable to delete customer record: $error")),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busyReportRecords.remove(key));
+    }
+  }
+
+  Future<void> refreshReportAfterMutation() async {
+    await _loadAnalyticsWindow(forceServer: true);
+    final String query = reportSearchController.text.trim();
+    if (query.isNotEmpty) await _searchReports(query);
+  }
+
   Widget buildReportSearchField() {
     return TextField(
       controller: reportSearchController,
@@ -2029,6 +2678,8 @@ class _DailyReportState extends State<DailyReport> {
     final String email =
         record["customerEmail"]?.toString().trim() ?? "Not available";
     final String date = record["date"]?.toString().trim() ?? selectedDate;
+    final String customerType = reportCustomerType(record);
+    final bool isBusy = _busyReportRecords.contains(reportRecordKey(record));
 
     final Color statusColor = switch (status.toLowerCase()) {
       "passed" || "approved" => Colors.green,
@@ -2121,9 +2772,55 @@ class _DailyReportState extends State<DailyReport> {
                   ),
                   reportSearchDetailItem("Email", email, itemWidth),
                   reportSearchDetailItem("Report Date", date, itemWidth),
+                  reportSearchDetailItem(
+                    "Customer Type",
+                    customerType,
+                    itemWidth,
+                  ),
                 ],
               );
             },
+          ),
+          const SizedBox(height: 12),
+          const Divider(color: _borderColor, height: 1),
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Wrap(
+              spacing: 9,
+              runSpacing: 9,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: isBusy
+                      ? null
+                      : () => showEditReportRecordDialog(record),
+                  icon: const Icon(Icons.edit_outlined, size: 18),
+                  label: const Text("EDIT DETAILS"),
+                ),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                    disabledBackgroundColor: Colors.red.withValues(alpha: 0.35),
+                    disabledForegroundColor: Colors.white,
+                  ),
+                  onPressed: isBusy
+                      ? null
+                      : () => showDeleteReportRecordDialog(record),
+                  icon: isBusy
+                      ? const SizedBox(
+                          width: 17,
+                          height: 17,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.1,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.delete_outline_rounded, size: 18),
+                  label: Text(isBusy ? "WORKING..." : "DELETE RECORD"),
+                ),
+              ],
+            ),
           ),
         ],
       ),

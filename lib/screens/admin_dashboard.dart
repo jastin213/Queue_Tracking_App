@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -37,17 +38,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _pendingSubscription;
   final Map<int, List<Map<String, dynamic>>> _monthAppointmentChunks = {};
   List<Map<String, dynamic>> _pendingAppointments = [];
-  int _approvedCount = 0;
-  int _rejectedCount = 0;
+  int _monthListenGeneration = 0;
   bool _appointmentsLoading = true;
+  bool _isRefreshing = false;
   Object? _appointmentsError;
+  String? _expandedOverviewStatus;
 
   @override
   void initState() {
     super.initState();
     _listenToPendingAppointments();
     _listenToAppointmentMonth();
-    _loadAppointmentCounts();
   }
 
   @override
@@ -137,6 +138,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   void _listenToAppointmentMonth() {
+    final generation = ++_monthListenGeneration;
     for (final subscription in _monthSubscriptions) {
       subscription.cancel();
     }
@@ -158,7 +160,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           .snapshots()
           .listen(
             (snapshot) {
-              if (!mounted) return;
+              if (!mounted || generation != _monthListenGeneration) return;
               setState(() {
                 _monthAppointmentChunks[index] = appointmentRecords(snapshot);
                 _appointmentsLoading =
@@ -167,7 +169,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               });
             },
             onError: (Object error) {
-              if (!mounted) return;
+              if (!mounted || generation != _monthListenGeneration) return;
               setState(() {
                 _appointmentsLoading = false;
                 _appointmentsError = error;
@@ -178,12 +180,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
-  List<Map<String, dynamic>> get _loadedAppointments {
+  List<Map<String, dynamic>> get _monthAppointments {
     final byId = <String, Map<String, dynamic>>{};
-    for (final record in [
-      ..._monthAppointmentChunks.values.expand((records) => records),
-      ..._pendingAppointments,
-    ]) {
+    for (final record in _monthAppointmentChunks.values.expand(
+      (records) => records,
+    )) {
       final key =
           record["appointmentId"]?.toString() ??
           "${record["date"]}:${record["queue"]}";
@@ -192,75 +193,90 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return byId.values.toList(growable: false);
   }
 
-  Future<void> _loadAppointmentCounts() async {
-    try {
-      final collection = FirebaseFirestore.instance.collection("appointments");
-      final counts = await Future.wait([
-        collection.where("status", isEqualTo: "Approved").count().get(),
-        collection.where("status", isEqualTo: "Rejected").count().get(),
-      ]);
-      if (!mounted) return;
-      setState(() {
-        _approvedCount = counts[0].count ?? 0;
-        _rejectedCount = counts[1].count ?? 0;
-      });
-    } catch (_) {
-      // Compatibility fallback for projects where aggregate queries are not
-      // available yet. This runs only when the lightweight count query fails.
-      try {
-        final collection = FirebaseFirestore.instance.collection(
-          "appointments",
-        );
-        final snapshots = await Future.wait([
-          collection.where("status", isEqualTo: "Approved").get(),
-          collection.where("status", isEqualTo: "Rejected").get(),
-        ]);
-        if (!mounted) return;
-        setState(() {
-          _approvedCount = snapshots[0].size;
-          _rejectedCount = snapshots[1].size;
-        });
-      } catch (error) {
-        if (!mounted) return;
-        setState(() => _appointmentsError = error);
-      }
+  int _monthStatusCount(String status) {
+    final normalizedStatus = status.trim().toLowerCase();
+    return _monthAppointments.where((appointment) {
+      return appointment["status"]?.toString().trim().toLowerCase() ==
+          normalizedStatus;
+    }).length;
+  }
+
+  List<Map<String, dynamic>> get _loadedAppointments {
+    final byId = <String, Map<String, dynamic>>{};
+    for (final record in [..._monthAppointments, ..._pendingAppointments]) {
+      final key =
+          record["appointmentId"]?.toString() ??
+          "${record["date"]}:${record["queue"]}";
+      byId[key] = record;
     }
+    return byId.values.toList(growable: false);
   }
 
   Future<void> refreshAppointments() async {
-    final collection = FirebaseFirestore.instance.collection("appointments");
-    final monthFutures = _queryChunks(_calendarMonthDates())
-        .map(
-          (dates) => collection
-              .where("date", whereIn: dates)
-              .get(const GetOptions(source: Source.server)),
-        )
-        .toList();
-    final results = await Future.wait([
-      Future.wait(monthFutures),
-      collection
-          .where("status", isEqualTo: "Pending")
-          .get(const GetOptions(source: Source.server)),
-    ]);
-    final monthSnapshots =
-        results[0] as List<QuerySnapshot<Map<String, dynamic>>>;
-    final pendingSnapshot = results[1] as QuerySnapshot<Map<String, dynamic>>;
+    if (_isRefreshing) return;
+    if (mounted) setState(() => _isRefreshing = true);
 
-    if (mounted) {
-      setState(() {
-        _monthAppointmentChunks
-          ..clear()
-          ..addEntries(
-            monthSnapshots.asMap().entries.map(
-              (entry) => MapEntry(entry.key, appointmentRecords(entry.value)),
-            ),
-          );
-        _pendingAppointments = appointmentRecords(pendingSnapshot);
-        _appointmentsError = null;
-      });
-      pendingBookings.value = _pendingAppointments;
+    try {
+      final collection = FirebaseFirestore.instance.collection("appointments");
+      final monthFutures = _queryChunks(_calendarMonthDates())
+          .map(
+            (dates) => collection
+                .where("date", whereIn: dates)
+                .get(const GetOptions(source: Source.server)),
+          )
+          .toList();
+      final results = await Future.wait([
+        Future.wait(monthFutures),
+        collection
+            .where("status", isEqualTo: "Pending")
+            .get(const GetOptions(source: Source.server)),
+      ]);
+      final monthSnapshots =
+          results[0] as List<QuerySnapshot<Map<String, dynamic>>>;
+      final pendingSnapshot = results[1] as QuerySnapshot<Map<String, dynamic>>;
+
+      if (mounted) {
+        setState(() {
+          _monthAppointmentChunks
+            ..clear()
+            ..addEntries(
+              monthSnapshots.asMap().entries.map(
+                (entry) => MapEntry(entry.key, appointmentRecords(entry.value)),
+              ),
+            );
+          _pendingAppointments = appointmentRecords(pendingSnapshot);
+          _appointmentsError = null;
+        });
+        pendingBookings.value = _pendingAppointments;
+      }
+    } catch (error) {
+      if (mounted) setState(() => _appointmentsError = error);
+      rethrow;
+    } finally {
+      if (mounted) setState(() => _isRefreshing = false);
     }
-    await _loadAppointmentCounts();
+  }
+
+  Future<void> refreshAppointmentsFromWebButton() async {
+    try {
+      await refreshAppointments();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text("Appointments refreshed just now.")),
+        );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            backgroundColor: Colors.red,
+            content: Text("Unable to refresh appointments. Please try again."),
+          ),
+        );
+    }
   }
 
   // ================= CHECK IF QUEUE IS ALREADY USED =================
@@ -533,8 +549,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
       }, SetOptions(merge: true));
 
       await batch.commit();
-      await _loadAppointmentCounts();
-
       pendingBookings.value = pendingBookings.value
           .where((b) => b != booking)
           .toList();
@@ -594,8 +608,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
             "updatedAt": FieldValue.serverTimestamp(),
             "rejectedAt": FieldValue.serverTimestamp(),
           });
-      await _loadAppointmentCounts();
-
       pendingBookings.value = pendingBookings.value
           .where((b) => b != booking)
           .toList();
@@ -1283,7 +1295,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   // ================= INFO CARD =================
 
-  Widget infoCard(String title, String value) {
+  Widget infoCard(String title, int value) {
     IconData icon;
     Color accentColor;
 
@@ -1298,48 +1310,363 @@ class _AdminDashboardState extends State<AdminDashboard> {
       accentColor = Colors.red;
     }
 
+    final bool isExpanded = _expandedOverviewStatus == title;
+
     return Expanded(
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: _cardColor,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(20),
+        child: InkWell(
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: _borderColor),
-          boxShadow: [
-            BoxShadow(color: _primaryColor.withOpacity(0.06), blurRadius: 14),
-          ],
+          onTap: () {
+            setState(() {
+              _expandedOverviewStatus = isExpanded ? null : title;
+            });
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: isExpanded
+                  ? accentColor.withValues(alpha: 0.06)
+                  : _cardColor,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: isExpanded ? accentColor : _borderColor,
+                width: isExpanded ? 1.6 : 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: _primaryColor.withValues(alpha: 0.06),
+                  blurRadius: 14,
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                Container(
+                  height: 42,
+                  width: 42,
+                  decoration: BoxDecoration(
+                    color: accentColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(icon, color: accentColor, size: 24),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    color: _primaryColor,
+                    fontSize: 13,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  value.toString(),
+                  style: const TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.w900,
+                    color: _primaryColor,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        isExpanded ? "Hide customers" : "View customers",
+                        style: TextStyle(
+                          color: accentColor,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(width: 3),
+                      AnimatedRotation(
+                        turns: isExpanded ? 0.5 : 0,
+                        duration: const Duration(milliseconds: 180),
+                        child: Icon(
+                          Icons.keyboard_arrow_down_rounded,
+                          color: accentColor,
+                          size: 17,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
-        child: Column(
-          children: [
+      ),
+    );
+  }
+
+  DateTime appointmentRecordDate(Map<String, dynamic> appointment) {
+    final parts = appointment["date"]?.toString().split("/") ?? const [];
+    if (parts.length != 3) return DateTime(1900);
+
+    final month = int.tryParse(parts[0]) ?? 1;
+    final day = int.tryParse(parts[1]) ?? 1;
+    final year = int.tryParse(parts[2]) ?? 1900;
+    return DateTime(year, month, day);
+  }
+
+  List<Map<String, dynamic>> monthAppointmentsForStatus(String status) {
+    final normalizedStatus = status.trim().toLowerCase();
+    final records = _monthAppointments.where((appointment) {
+      return appointment["status"]?.toString().trim().toLowerCase() ==
+          normalizedStatus;
+    }).toList();
+
+    records.sort((a, b) {
+      final dateComparison = appointmentRecordDate(
+        a,
+      ).compareTo(appointmentRecordDate(b));
+      if (dateComparison != 0) return dateComparison;
+      return (a["queue"]?.toString() ?? "").compareTo(
+        b["queue"]?.toString() ?? "",
+      );
+    });
+    return records;
+  }
+
+  Widget buildMonthStatusAppointments(String status) {
+    final records = monthAppointmentsForStatus(status);
+    final Color color;
+    final IconData icon;
+
+    switch (status) {
+      case "Pending":
+        color = Colors.orange;
+        icon = Icons.pending_actions_rounded;
+      case "Approved":
+        color = Colors.green;
+        icon = Icons.check_circle_outline_rounded;
+      default:
+        color = Colors.red;
+        icon = Icons.cancel_outlined;
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(
+        color: _cardColor,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withValues(alpha: 0.45)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.11),
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: Icon(icon, color: color, size: 22),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "$status Appointments",
+                      style: const TextStyle(
+                        color: _primaryColor,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      calendarMonthLabel(calendarMonth),
+                      style: const TextStyle(
+                        color: _mutedTextColor,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.11),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  "${records.length}",
+                  style: TextStyle(
+                    color: color,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 3),
+              IconButton(
+                tooltip: "Hide $status appointments",
+                visualDensity: VisualDensity.compact,
+                onPressed: () => setState(() => _expandedOverviewStatus = null),
+                icon: const Icon(Icons.close_rounded, size: 19),
+              ),
+            ],
+          ),
+          const Divider(height: 20, color: _borderColor),
+          if (records.isEmpty)
             Container(
-              height: 42,
-              width: 42,
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 22),
               decoration: BoxDecoration(
-                color: accentColor.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(14),
+                color: _softPrimaryColor,
+                borderRadius: BorderRadius.circular(15),
+                border: Border.all(color: _borderColor),
               ),
-              child: Icon(icon, color: accentColor, size: 24),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              title,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontWeight: FontWeight.w800,
-                color: _primaryColor,
-                fontSize: 13,
+              child: Text(
+                "No ${status.toLowerCase()} appointments for "
+                "${calendarMonthLabel(calendarMonth)}.",
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: _mutedTextColor,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              value,
-              style: const TextStyle(
-                fontSize: 28,
-                fontWeight: FontWeight.w900,
-                color: _primaryColor,
+            )
+          else
+            ...records.map(
+              (appointment) => monthStatusAppointmentCard(
+                appointment: appointment,
+                status: status,
+                color: color,
               ),
             ),
-          ],
+        ],
+      ),
+    );
+  }
+
+  Widget monthStatusAppointmentCard({
+    required Map<String, dynamic> appointment,
+    required String status,
+    required Color color,
+  }) {
+    final String queue = appointment["queue"]?.toString().trim() ?? "-";
+    final String name =
+        appointment["fullName"]?.toString().trim() ?? "Customer";
+    final String plate = appointment["plate"]?.toString().trim() ?? "-";
+    final String vehicle = appointment["vehicle"]?.toString().trim() ?? "-";
+    final String municipality =
+        appointment["municipality"]?.toString().trim() ?? "-";
+    final String date = appointment["date"]?.toString().trim() ?? "-";
+    final String queueLetter = queue.isEmpty ? "-" : queue.substring(0, 1);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 9),
+      child: Material(
+        color: _softPrimaryColor,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(15),
+          side: const BorderSide(color: _borderColor),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => showDetails(appointment),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                Container(
+                  width: 46,
+                  height: 46,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: _primaryColor,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Text(
+                    queueLetter,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 11),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name.isEmpty ? "Customer" : name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _primaryColor,
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        "$queue • $plate • $date",
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _mutedTextColor,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        "$vehicle • $municipality",
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _mutedTextColor,
+                          fontSize: 11.5,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 7),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.11),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    status,
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                const Icon(Icons.chevron_right_rounded, color: _mutedTextColor),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -2097,13 +2424,37 @@ class _AdminDashboardState extends State<AdminDashboard> {
         ),
       ),
       child: Scaffold(
-        appBar: AppBar(title: const Text("Admin Appointment Dashboard")),
+        appBar: AppBar(
+          title: const Text("Admin Appointment Dashboard"),
+          actions: [
+            if (kIsWeb)
+              Padding(
+                padding: const EdgeInsets.only(right: 14, top: 7, bottom: 7),
+                child: OutlinedButton.icon(
+                  onPressed: _isRefreshing
+                      ? null
+                      : refreshAppointmentsFromWebButton,
+                  icon: _isRefreshing
+                      ? const SizedBox(
+                          width: 17,
+                          height: 17,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh_rounded, size: 19),
+                  label: Text(_isRefreshing ? "Refreshing" : "Refresh"),
+                ),
+              ),
+          ],
+        ),
         body: SafeArea(
           child: AppResponsiveContent(
             child: Builder(
               builder: (context) {
                 final appointments = _loadedAppointments;
                 final bookings = _pendingAppointments;
+                final monthPendingCount = _monthStatusCount("Pending");
+                final monthApprovedCount = _monthStatusCount("Approved");
+                final monthRejectedCount = _monthStatusCount("Rejected");
 
                 return AppRefreshIndicator(
                   onRefresh: refreshAppointments,
@@ -2119,22 +2470,36 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           borderRadius: BorderRadius.circular(22),
                           border: Border.all(color: _borderColor),
                         ),
-                        child: const Row(
+                        child: Row(
                           children: [
-                            Icon(
+                            const Icon(
                               Icons.dashboard_customize_rounded,
                               color: _primaryColor,
                               size: 24,
                             ),
-                            SizedBox(width: 10),
+                            const SizedBox(width: 10),
                             Expanded(
-                              child: Text(
-                                "Appointment Overview",
-                                style: TextStyle(
-                                  color: _primaryColor,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w800,
-                                ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text(
+                                    "Appointment Overview",
+                                    style: TextStyle(
+                                      color: _primaryColor,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    calendarMonthLabel(calendarMonth),
+                                    style: const TextStyle(
+                                      color: _mutedTextColor,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ],
@@ -2143,13 +2508,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       const SizedBox(height: 14),
                       Row(
                         children: [
-                          infoCard("Pending", bookings.length.toString()),
+                          infoCard("Pending", monthPendingCount),
                           const SizedBox(width: 10),
-                          infoCard("Approved", _approvedCount.toString()),
+                          infoCard("Approved", monthApprovedCount),
                           const SizedBox(width: 10),
-                          infoCard("Rejected", _rejectedCount.toString()),
+                          infoCard("Rejected", monthRejectedCount),
                         ],
                       ),
+                      if (_expandedOverviewStatus != null) ...[
+                        const SizedBox(height: 14),
+                        buildMonthStatusAppointments(_expandedOverviewStatus!),
+                      ],
                       const SizedBox(height: 18),
                       if (_appointmentsLoading && appointments.isEmpty)
                         const Padding(

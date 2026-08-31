@@ -6,7 +6,10 @@
     "node": "22"
   },
   "scripts": {
-    "check": "node --check index.js"
+    "check": "node --check index.js && node --check scripts/demo_data.js",
+    "demo:preview": "node scripts/demo_data.js preview",
+    "demo:seed": "node scripts/demo_data.js seed",
+    "demo:cleanup": "node scripts/demo_data.js cleanup"
   },
   "dependencies": {
     "firebase-admin": "^14.3.0",

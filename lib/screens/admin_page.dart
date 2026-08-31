@@ -1,9 +1,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
+import '../services/browser_tab_opener.dart';
 import '../theme/app_theme.dart';
 import '../services/firestore_query_fields.dart';
 import '../widgets/app_responsive_content.dart';
@@ -103,6 +105,8 @@ class _UpperCaseTextFormatter extends TextInputFormatter {
 
 // ================= ADMIN PAGE =================
 
+enum _DisplayDestination { newTabOpened, newTabBlocked, currentTab }
+
 class AdminPage extends StatefulWidget {
   const AdminPage({super.key});
 
@@ -120,6 +124,90 @@ class _AdminPageState extends State<AdminPage> {
 
   String text(String english, String filipino) {
     return isFilipino ? filipino : english;
+  }
+
+  void _openDisplayInCurrentTab() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const DisplayPage()),
+    );
+  }
+
+  Future<void> _openDisplayPage() async {
+    if (!kIsWeb) {
+      _openDisplayInCurrentTab();
+      return;
+    }
+
+    final destination = await showDialog<_DisplayDestination>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: _cardColor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+          ),
+          title: const Row(
+            children: [
+              Icon(Icons.tv_rounded, color: _primaryColor),
+              SizedBox(width: 10),
+              Expanded(child: Text('Open Display Page')),
+            ],
+          ),
+          content: const Text(
+            'Open the customer-facing queue display in a separate tab so the '
+            'Admin Control Panel stays private and available for multitasking.',
+            style: TextStyle(
+              color: _mutedTextColor,
+              height: 1.45,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('CANCEL'),
+            ),
+            OutlinedButton.icon(
+              onPressed: () =>
+                  Navigator.pop(dialogContext, _DisplayDestination.currentTab),
+              icon: const Icon(Icons.open_in_browser_rounded),
+              label: const Text('OPEN HERE'),
+            ),
+            ElevatedButton.icon(
+              onPressed: () {
+                final opened = openBrowserTab(displayPageUri(Uri.base));
+                Navigator.pop(
+                  dialogContext,
+                  opened
+                      ? _DisplayDestination.newTabOpened
+                      : _DisplayDestination.newTabBlocked,
+                );
+              },
+              icon: const Icon(Icons.open_in_new_rounded),
+              label: const Text('OPEN NEW TAB'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (!mounted || destination == null) return;
+    if (destination == _DisplayDestination.currentTab) {
+      _openDisplayInCurrentTab();
+      return;
+    }
+
+    if (destination == _DisplayDestination.newTabBlocked) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'The browser blocked the display tab. Please allow pop-ups for this '
+            'website and try again.',
+          ),
+        ),
+      );
+    }
   }
 
   // ================= FIRESTORE HELPERS =================
@@ -2072,12 +2160,7 @@ class _AdminPageState extends State<AdminPage> {
                 child: ElevatedButton.icon(
                   icon: const Icon(Icons.tv_rounded),
                   label: Text(text("DISPLAY PAGE", "DISPLAY PAGE")),
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const DisplayPage()),
-                    );
-                  },
+                  onPressed: _openDisplayPage,
                 ),
               ),
               const SizedBox(height: 10),

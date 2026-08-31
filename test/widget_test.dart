@@ -7,11 +7,20 @@ import 'package:queue_tracking_app/screens/admin_settings.dart';
 import 'package:queue_tracking_app/screens/book_appointment.dart';
 import 'package:queue_tracking_app/screens/customer_home.dart';
 import 'package:queue_tracking_app/screens/customer_settings.dart';
+import 'package:queue_tracking_app/screens/display_page.dart';
 import 'package:queue_tracking_app/screens/track_page.dart';
 import 'package:queue_tracking_app/widgets/analytics_line_chart.dart';
 import 'package:queue_tracking_app/widgets/app_refresh_indicator.dart';
 
 void main() {
+  test('builds a dedicated web display route', () {
+    final uri = displayPageUri(
+      Uri.parse('https://npjn-queue-system-jkr.web.app/#/admin'),
+    );
+
+    expect(uri.toString(), 'https://npjn-queue-system-jkr.web.app/#/display');
+  });
+
   test('normalizes customer names for report search', () {
     expect(normalizeNameForQuery('  jOhN   baptist  '), 'JOHN BAPTIST');
     expect(
@@ -168,6 +177,7 @@ void main() {
     await tester.pumpWidget(const MaterialApp(home: AdminSettings()));
 
     expect(find.text('Admin Settings'), findsOneWidget);
+    expect(find.text('Final Defense Demo Data'), findsNothing);
     expect(find.byType(AppRefreshIndicator), findsNothing);
 
     final scrollView = tester.widget<SingleChildScrollView>(
@@ -181,6 +191,7 @@ void main() {
   ) async {
     await tester.pumpWidget(const MaterialApp(home: CustomerHome()));
 
+    expect(find.byTooltip('Appointment notifications'), findsOneWidget);
     expect(find.byTooltip('Customer settings'), findsOneWidget);
     expect(find.byTooltip('Log out'), findsOneWidget);
 

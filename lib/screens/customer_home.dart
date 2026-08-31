@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -27,6 +29,130 @@ class CustomerHome extends StatefulWidget {
 
 class _CustomerHomeState extends State<CustomerHome> {
   bool isLoggingOut = false;
+  bool _appointmentNotificationsLoading = true;
+  Object? _appointmentNotificationsError;
+  List<Map<String, dynamic>> _customerAppointments = [];
+  final Map<String, String> _knownAppointmentStatuses = {};
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+  _appointmentSubscription;
+  bool _receivedInitialAppointmentSnapshot = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _listenToAppointmentNotifications();
+  }
+
+  @override
+  void dispose() {
+    _appointmentSubscription?.cancel();
+    super.dispose();
+  }
+
+  Query<Map<String, dynamic>>? customerAppointmentsQuery() {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      final String uid = user?.uid ?? loggedInCustomerIdNotifier.value.trim();
+      final String email =
+          user?.email?.trim() ?? loggedInCustomerEmailNotifier.value.trim();
+      Query<Map<String, dynamic>> query = FirebaseFirestore.instance.collection(
+        "appointments",
+      );
+
+      if (uid.isNotEmpty) {
+        return query.where("customerId", isEqualTo: uid);
+      }
+      if (email.isNotEmpty) {
+        return query.where("customerEmail", isEqualTo: email);
+      }
+    } catch (_) {
+      // Firebase is unavailable only in isolated widget tests.
+    }
+
+    return null;
+  }
+
+  void _listenToAppointmentNotifications() {
+    final query = customerAppointmentsQuery();
+    if (query == null) {
+      _appointmentNotificationsLoading = false;
+      return;
+    }
+
+    _appointmentSubscription = query.snapshots().listen(
+      (snapshot) {
+        if (!mounted) return;
+        final appointments = snapshot.docs.map((doc) {
+          final data = doc.data();
+          return {...data, "appointmentId": data["appointmentId"] ?? doc.id};
+        }).toList();
+        appointments.sort((a, b) {
+          final aUpdated = a["updatedAt"] ?? a["createdAt"];
+          final bUpdated = b["updatedAt"] ?? b["createdAt"];
+          if (aUpdated is Timestamp && bUpdated is Timestamp) {
+            return bUpdated.compareTo(aUpdated);
+          }
+          return 0;
+        });
+
+        Map<String, dynamic>? changedAppointment;
+        if (_receivedInitialAppointmentSnapshot) {
+          for (final appointment in appointments) {
+            final id = appointment["appointmentId"]?.toString() ?? "";
+            final status = appointment["status"]?.toString() ?? "Pending";
+            final previousStatus = _knownAppointmentStatuses[id];
+            final isDecision = status == "Approved" || status == "Rejected";
+            if (id.isNotEmpty &&
+                isDecision &&
+                previousStatus != null &&
+                previousStatus != status) {
+              changedAppointment = appointment;
+              break;
+            }
+          }
+        }
+
+        _knownAppointmentStatuses
+          ..clear()
+          ..addEntries(
+            appointments.map(
+              (appointment) => MapEntry(
+                appointment["appointmentId"]?.toString() ?? "",
+                appointment["status"]?.toString() ?? "Pending",
+              ),
+            ),
+          );
+        _receivedInitialAppointmentSnapshot = true;
+
+        setState(() {
+          _customerAppointments = appointments;
+          _appointmentNotificationsLoading = false;
+          _appointmentNotificationsError = null;
+        });
+
+        if (changedAppointment != null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) showAppointmentStatusChanged(changedAppointment!);
+          });
+        }
+      },
+      onError: (Object error) {
+        if (!mounted) return;
+        setState(() {
+          _appointmentNotificationsLoading = false;
+          _appointmentNotificationsError = error;
+        });
+      },
+    );
+  }
+
+  Future<void> refreshCustomerHome() async {
+    final query = customerAppointmentsQuery();
+    await Future.wait([
+      refreshCustomerProfile(),
+      if (query != null) query.get(const GetOptions(source: Source.server)),
+    ]);
+  }
 
   Future<void> refreshCustomerProfile() async {
     final user = FirebaseAuth.instance.currentUser;
@@ -47,6 +173,238 @@ class _CustomerHomeState extends State<CustomerHome> {
     loggedInCustomerEmailNotifier.value = (data["email"] ?? user.email ?? "")
         .toString();
     loggedInCustomerIdNotifier.value = user.uid;
+  }
+
+  bool isFinalAppointmentStatus(dynamic value) {
+    final status = value?.toString().trim() ?? "";
+    return status == "Approved" || status == "Rejected";
+  }
+
+  Color appointmentStatusColor(String status) {
+    if (status == "Approved") return Colors.green;
+    if (status == "Rejected") return Colors.red;
+    return Colors.orange;
+  }
+
+  IconData appointmentStatusIcon(String status) {
+    if (status == "Approved") return Icons.check_circle_outline_rounded;
+    if (status == "Rejected") return Icons.cancel_outlined;
+    return Icons.pending_actions_rounded;
+  }
+
+  String appointmentStatusTitle(String status) {
+    if (status == "Approved") return "Appointment Approved";
+    if (status == "Rejected") return "Appointment Rejected";
+    return "Appointment Pending";
+  }
+
+  String appointmentStatusMessage(String status) {
+    if (status == "Approved") {
+      return "Your appointment was approved. Check your schedule and queue code before going to the center.";
+    }
+    if (status == "Rejected") {
+      return "Your appointment was rejected. Check its status and book another schedule if needed.";
+    }
+    return "Your booking is waiting for admin review. This notification updates automatically.";
+  }
+
+  Map<String, dynamic>? get latestAppointmentNotification {
+    if (_customerAppointments.isEmpty) return null;
+    for (final appointment in _customerAppointments) {
+      if (isFinalAppointmentStatus(appointment["status"])) return appointment;
+    }
+    return _customerAppointments.first;
+  }
+
+  int get finalizedAppointmentCount {
+    return _customerAppointments.where((appointment) {
+      return isFinalAppointmentStatus(appointment["status"]);
+    }).length;
+  }
+
+  void openAppointmentStatus() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const BookingStatusPage()),
+    );
+  }
+
+  void showAppointmentStatusChanged(Map<String, dynamic> appointment) {
+    final status = appointment["status"]?.toString() ?? "Pending";
+    final queue = appointment["queue"]?.toString() ?? "-";
+    final color = appointmentStatusColor(status);
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          backgroundColor: color,
+          duration: const Duration(seconds: 6),
+          content: Text("Queue $queue: ${appointmentStatusTitle(status)}"),
+          action: SnackBarAction(
+            label: "VIEW",
+            textColor: Colors.white,
+            onPressed: openAppointmentStatus,
+          ),
+        ),
+      );
+  }
+
+  Widget buildAppointmentNotificationCard() {
+    if (_appointmentNotificationsLoading) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: _cardColor,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: _borderColor),
+        ),
+        child: const Row(
+          children: [
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                "Checking appointment notifications...",
+                style: TextStyle(
+                  color: _mutedTextColor,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_appointmentNotificationsError != null) {
+      return Material(
+        color: _cardColor,
+        borderRadius: BorderRadius.circular(20),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: openAppointmentStatus,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: Colors.red.withValues(alpha: 0.35)),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.error_outline_rounded, color: Colors.red),
+                SizedBox(width: 11),
+                Expanded(
+                  child: Text(
+                    "Appointment notifications are temporarily unavailable. Tap to check your status.",
+                    style: TextStyle(
+                      color: _mutedTextColor,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded, color: _mutedTextColor),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    final appointment = latestAppointmentNotification;
+    if (appointment == null) return const SizedBox.shrink();
+
+    final String status = appointment["status"]?.toString() ?? "Pending";
+    final String queue = appointment["queue"]?.toString() ?? "-";
+    final String date = appointment["date"]?.toString() ?? "-";
+    final Color color = appointmentStatusColor(status);
+
+    return Material(
+      color: _cardColor,
+      borderRadius: BorderRadius.circular(22),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: openAppointmentStatus,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(17),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: color.withValues(alpha: 0.48)),
+            boxShadow: [
+              BoxShadow(color: color.withValues(alpha: 0.07), blurRadius: 14),
+            ],
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                child: Icon(appointmentStatusIcon(status), color: color),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      appointmentStatusTitle(status),
+                      style: TextStyle(
+                        color: color,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "Queue $queue • $date",
+                      style: const TextStyle(
+                        color: _primaryColor,
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      appointmentStatusMessage(status),
+                      style: const TextStyle(
+                        color: _mutedTextColor,
+                        fontSize: 12.5,
+                        height: 1.35,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      finalizedAppointmentCount > 1
+                          ? "VIEW ALL $finalizedAppointmentCount UPDATES"
+                          : "CHECK APPOINTMENT STATUS",
+                      style: TextStyle(
+                        color: color,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 5),
+              const Icon(Icons.chevron_right_rounded, color: _mutedTextColor),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> logout() async {
@@ -130,6 +488,42 @@ class _CustomerHomeState extends State<CustomerHome> {
         ),
         actions: [
           IconButton(
+            tooltip: "Appointment notifications",
+            onPressed: openAppointmentStatus,
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.notifications_outlined),
+                if (finalizedAppointmentCount > 0)
+                  Positioned(
+                    top: -5,
+                    right: -7,
+                    child: Container(
+                      constraints: const BoxConstraints(minWidth: 17),
+                      height: 17,
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: _backgroundColor, width: 1.5),
+                      ),
+                      child: Text(
+                        finalizedAppointmentCount > 9
+                            ? "9+"
+                            : "$finalizedAppointmentCount",
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          IconButton(
             tooltip: "Customer settings",
             onPressed: isLoggingOut
                 ? null
@@ -159,7 +553,7 @@ class _CustomerHomeState extends State<CustomerHome> {
       ),
       body: SafeArea(
         child: AppRefreshIndicator(
-          onRefresh: refreshCustomerProfile,
+          onRefresh: refreshCustomerHome,
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: appPagePadding(context),
@@ -228,6 +622,13 @@ class _CustomerHomeState extends State<CustomerHome> {
                     },
                   ),
 
+                  if (_appointmentNotificationsLoading ||
+                      _appointmentNotificationsError != null ||
+                      latestAppointmentNotification != null) ...[
+                    const SizedBox(height: 16),
+                    buildAppointmentNotificationCard(),
+                  ],
+
                   const SizedBox(height: 24),
 
                   const Text(
@@ -284,14 +685,7 @@ class _CustomerHomeState extends State<CustomerHome> {
                               subtitle:
                                   "Check if your appointment is pending, approved, or rejected.",
                               isFilled: false,
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => const BookingStatusPage(),
-                                  ),
-                                );
-                              },
+                              onTap: openAppointmentStatus,
                             ),
                           ),
                           SizedBox(
