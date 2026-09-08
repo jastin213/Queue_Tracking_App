@@ -4,13 +4,14 @@ import '../theme/app_theme.dart';
 import '../widgets/app_responsive_content.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../services/document_upload_consent.dart';
 
-const Color _backgroundColor = AppColors.background;
-const Color _primaryColor = AppColors.primary;
-const Color _cardColor = AppColors.surface;
-const Color _borderColor = AppColors.border;
-const Color _mutedTextColor = AppColors.mutedText;
-const Color _softPrimaryColor = AppColors.softPrimary;
+Color get _backgroundColor => AppColors.activeBackground;
+Color get _primaryColor => AppColors.activePrimary;
+Color get _cardColor => AppColors.activeSurface;
+Color get _borderColor => AppColors.activeBorder;
+Color get _mutedTextColor => AppColors.activeMutedText;
+Color get _softPrimaryColor => AppColors.activeSoftPrimary;
 
 // ================= CUSTOMER ACCOUNT SESSION STORAGE =================
 //
@@ -140,8 +141,20 @@ class _CustomerRegisterState extends State<CustomerRegister> {
 
       if (!mounted) return;
 
+      final consentAccepted = await ensureDocumentUploadConsent(
+        context,
+        forcePrompt: true,
+      );
+      if (!mounted) return;
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Account Created Successfully")),
+        SnackBar(
+          content: Text(
+            consentAccepted
+                ? "Account created and document authorization saved."
+                : "Account created. Authorization will be required before uploading documents.",
+          ),
+        ),
       );
 
       Navigator.pop(context);
@@ -177,22 +190,22 @@ class _CustomerRegisterState extends State<CustomerRegister> {
       hintText: hint,
       prefixIcon: Icon(icon, color: _primaryColor),
       suffixIcon: suffixIcon,
-      labelStyle: const TextStyle(
+      labelStyle: TextStyle(
         color: _mutedTextColor,
         fontWeight: FontWeight.w600,
       ),
-      hintStyle: const TextStyle(color: _mutedTextColor),
+      hintStyle: TextStyle(color: _mutedTextColor),
       filled: true,
       fillColor: _backgroundColor,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: _borderColor),
+        borderSide: BorderSide(color: _borderColor),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: _primaryColor, width: 1.5),
+        borderSide: BorderSide(color: _primaryColor, width: 1.5),
       ),
     );
   }
@@ -208,7 +221,7 @@ class _CustomerRegisterState extends State<CustomerRegister> {
           surface: _cardColor,
           onSurface: _primaryColor,
         ),
-        appBarTheme: const AppBarTheme(
+        appBarTheme: AppBarTheme(
           backgroundColor: _backgroundColor,
           foregroundColor: _primaryColor,
           elevation: 0,
@@ -277,7 +290,7 @@ class _CustomerRegisterState extends State<CustomerRegister> {
                           ),
                         ),
                         const SizedBox(height: 16),
-                        const Text(
+                        Text(
                           "Customer Registration",
                           style: TextStyle(
                             fontSize: 22,
@@ -287,7 +300,7 @@ class _CustomerRegisterState extends State<CustomerRegister> {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        const Text(
+                        Text(
                           "Create your customer account to book appointments and access queue tracking services.",
                           style: TextStyle(
                             fontSize: 14.5,
@@ -301,7 +314,7 @@ class _CustomerRegisterState extends State<CustomerRegister> {
 
                   const SizedBox(height: 24),
 
-                  const Text(
+                  Text(
                     "Account Details",
                     style: TextStyle(
                       fontSize: 18,
@@ -331,7 +344,7 @@ class _CustomerRegisterState extends State<CustomerRegister> {
                       children: [
                         TextField(
                           controller: fullNameController,
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: _primaryColor,
                             fontWeight: FontWeight.w600,
                           ),
@@ -347,7 +360,7 @@ class _CustomerRegisterState extends State<CustomerRegister> {
                         TextField(
                           controller: emailController,
                           keyboardType: TextInputType.emailAddress,
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: _primaryColor,
                             fontWeight: FontWeight.w600,
                           ),
@@ -369,7 +382,7 @@ class _CustomerRegisterState extends State<CustomerRegister> {
                           ),
                           dropdownColor: _cardColor,
                           iconEnabledColor: _primaryColor,
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: _primaryColor,
                             fontWeight: FontWeight.w600,
                           ),
@@ -395,7 +408,7 @@ class _CustomerRegisterState extends State<CustomerRegister> {
                           obscureText: obscurePassword,
                           enableSuggestions: false,
                           autocorrect: false,
-                          style: const TextStyle(
+                          style: TextStyle(
                             color: _primaryColor,
                             fontWeight: FontWeight.w600,
                           ),
@@ -437,14 +450,14 @@ class _CustomerRegisterState extends State<CustomerRegister> {
                       borderRadius: BorderRadius.circular(18),
                       border: Border.all(color: _borderColor),
                     ),
-                    child: const Row(
+                    child: Row(
                       children: [
                         Icon(
                           Icons.info_outline_rounded,
                           color: _primaryColor,
                           size: 22,
                         ),
-                        SizedBox(width: 10),
+                        const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             "Please use a valid email address. This will be used for secure account login.",

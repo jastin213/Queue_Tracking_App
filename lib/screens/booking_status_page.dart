@@ -3,15 +3,17 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import '../services/notification_time.dart';
 import '../widgets/app_refresh_indicator.dart';
 import '../widgets/app_responsive_content.dart';
 import 'customer_register.dart';
+import 'book_appointment.dart';
 
-const Color _backgroundColor = AppColors.background;
-const Color _primaryColor = AppColors.primary;
-const Color _cardColor = AppColors.surface;
-const Color _borderColor = AppColors.border;
-const Color _mutedTextColor = AppColors.mutedText;
+Color get _backgroundColor => AppColors.activeBackground;
+Color get _primaryColor => AppColors.activePrimary;
+Color get _cardColor => AppColors.activeSurface;
+Color get _borderColor => AppColors.activeBorder;
+Color get _mutedTextColor => AppColors.activeMutedText;
 
 class BookingStatusPage extends StatelessWidget {
   const BookingStatusPage({super.key});
@@ -113,7 +115,7 @@ class BookingStatusPage extends StatelessWidget {
           surface: _cardColor,
           onSurface: _primaryColor,
         ),
-        appBarTheme: const AppBarTheme(
+        appBarTheme: AppBarTheme(
           backgroundColor: _backgroundColor,
           foregroundColor: _primaryColor,
           elevation: 0,
@@ -175,8 +177,8 @@ class BookingStatusPage extends StatelessWidget {
                             buildEmptyCard()
                           else
                             ...appointments.map((appointment) {
-                              return buildBookingCard(appointment);
-                            }).toList(),
+                              return buildBookingCard(context, appointment);
+                            }),
                         ],
                       );
                     },
@@ -222,7 +224,7 @@ class BookingStatusPage extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   "Appointment Confirmation",
                   style: TextStyle(
                     color: _primaryColor,
@@ -235,7 +237,7 @@ class BookingStatusPage extends StatelessWidget {
                   loggedInName.isEmpty
                       ? "Check your appointment status."
                       : "Showing appointments for $loggedInName",
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: _mutedTextColor,
                     fontSize: 13.5,
                     height: 1.35,
@@ -258,10 +260,10 @@ class BookingStatusPage extends StatelessWidget {
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: _borderColor),
       ),
-      child: const Column(
+      child: Column(
         children: [
           CircularProgressIndicator(color: _primaryColor),
-          SizedBox(height: 14),
+          const SizedBox(height: 14),
           Text(
             "Loading your appointment status...",
             textAlign: TextAlign.center,
@@ -301,11 +303,7 @@ class BookingStatusPage extends StatelessWidget {
           Text(
             error,
             textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: _mutedTextColor,
-              height: 1.4,
-              fontSize: 13,
-            ),
+            style: TextStyle(color: _mutedTextColor, height: 1.4, fontSize: 13),
           ),
         ],
       ),
@@ -321,10 +319,10 @@ class BookingStatusPage extends StatelessWidget {
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: _borderColor),
       ),
-      child: const Column(
+      child: Column(
         children: [
           Icon(Icons.inbox_rounded, color: _primaryColor, size: 50),
-          SizedBox(height: 12),
+          const SizedBox(height: 12),
           Text(
             "No appointment found",
             textAlign: TextAlign.center,
@@ -334,7 +332,7 @@ class BookingStatusPage extends StatelessWidget {
               fontWeight: FontWeight.w900,
             ),
           ),
-          SizedBox(height: 8),
+          const SizedBox(height: 8),
           Text(
             "After you book an appointment, your appointment status will appear here as Pending, Approved, or Rejected.",
             textAlign: TextAlign.center,
@@ -345,9 +343,12 @@ class BookingStatusPage extends StatelessWidget {
     );
   }
 
-  Widget buildBookingCard(Map<String, dynamic> booking) {
+  Widget buildBookingCard(BuildContext context, Map<String, dynamic> booking) {
     final status = booking["status"]?.toString() ?? "Pending";
     final color = statusColor(status);
+    final rejectionReason = booking["rejectionReason"]?.toString().trim() ?? "";
+    final adminFeedback = booking["adminFeedback"]?.toString().trim() ?? "";
+    final statusTime = formatNotificationTime(appointmentDecisionTime(booking));
 
     return Container(
       width: double.infinity,
@@ -405,7 +406,7 @@ class BookingStatusPage extends StatelessWidget {
 
           Text(
             statusMessage(status),
-            style: const TextStyle(
+            style: TextStyle(
               color: _mutedTextColor,
               height: 1.45,
               fontSize: 13.5,
@@ -419,6 +420,8 @@ class BookingStatusPage extends StatelessWidget {
           infoRow("Vehicle Type", booking["vehicle"]),
           infoRow("Plate Number", booking["plate"]),
           infoRow("Municipality", booking["municipality"]),
+          infoRow("Barangay", booking["barangay"]),
+          infoRow("Status Updated", statusTime),
 
           if (status == "Approved") ...[
             const SizedBox(height: 14),
@@ -440,6 +443,61 @@ class BookingStatusPage extends StatelessWidget {
               ),
             ),
           ],
+          if (status == "Rejected") ...[
+            const SizedBox(height: 14),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.red.withValues(alpha: 0.25)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "Admin reason",
+                    style: TextStyle(
+                      color: Colors.red,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    rejectionReason.isEmpty
+                        ? "No detailed reason was recorded for this older appointment."
+                        : rejectionReason,
+                    style: TextStyle(
+                      color: _primaryColor,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  if (adminFeedback.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      adminFeedback,
+                      style: TextStyle(color: _mutedTextColor, height: 1.4),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const BookAppointment()),
+                  );
+                },
+                icon: const Icon(Icons.event_available_rounded),
+                label: const Text("CHOOSE ANOTHER SLOT"),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -455,7 +513,7 @@ class BookingStatusPage extends StatelessWidget {
             width: 115,
             child: Text(
               "$label:",
-              style: const TextStyle(
+              style: TextStyle(
                 color: _primaryColor,
                 fontWeight: FontWeight.w800,
               ),
@@ -466,7 +524,7 @@ class BookingStatusPage extends StatelessWidget {
               value == null || value.toString().isEmpty
                   ? "-"
                   : value.toString(),
-              style: const TextStyle(
+              style: TextStyle(
                 color: _mutedTextColor,
                 fontWeight: FontWeight.w600,
               ),

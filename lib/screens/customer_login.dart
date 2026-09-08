@@ -9,11 +9,11 @@ import 'customer_home.dart';
 import 'admin_page.dart';
 import 'track_page.dart';
 
-const Color _backgroundColor = AppColors.background;
-const Color _primaryColor = AppColors.primary;
-const Color _cardColor = AppColors.surface;
-const Color _borderColor = AppColors.border;
-const Color _mutedTextColor = AppColors.mutedText;
+Color get _backgroundColor => AppColors.activeBackground;
+Color get _primaryColor => AppColors.activePrimary;
+Color get _cardColor => AppColors.activeSurface;
+Color get _borderColor => AppColors.activeBorder;
+Color get _mutedTextColor => AppColors.activeMutedText;
 
 class CustomerLogin extends StatefulWidget {
   const CustomerLogin({super.key});
@@ -89,11 +89,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          icon: const Icon(
-            Icons.lock_reset_rounded,
-            color: _primaryColor,
-            size: 36,
-          ),
+          icon: Icon(Icons.lock_reset_rounded, color: _primaryColor, size: 36),
           title: const Text("Reset Password"),
           content: Form(
             key: formKey,
@@ -101,7 +97,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   "Enter your registered email. We will send a secure link where you can create a new password.",
                   style: TextStyle(height: 1.4, color: _mutedTextColor),
                 ),
@@ -260,10 +256,22 @@ class _CustomerLoginState extends State<CustomerLogin> {
       }
 
       if (role == "customer" || role == "user") {
+        final authEmail = user.email?.trim() ?? email;
+        if (authEmail.isNotEmpty && data["email"]?.toString() != authEmail) {
+          await FirebaseFirestore.instance
+              .collection("users")
+              .doc(user.uid)
+              .set({
+                "email": authEmail,
+                "pendingEmail": FieldValue.delete(),
+                "emailChangeRequestedAt": FieldValue.delete(),
+                "updatedAt": FieldValue.serverTimestamp(),
+              }, SetOptions(merge: true));
+        }
+
         loggedInCustomerNameNotifier.value =
             (data["fullName"] ?? user.displayName ?? "").toString();
-        loggedInCustomerEmailNotifier.value =
-            (data["email"] ?? user.email ?? email).toString();
+        loggedInCustomerEmailNotifier.value = authEmail;
         loggedInCustomerIdNotifier.value = user.uid;
 
         Navigator.pushReplacement(
@@ -314,22 +322,22 @@ class _CustomerLoginState extends State<CustomerLogin> {
       hintText: hint,
       prefixIcon: Icon(icon, color: _primaryColor),
       suffixIcon: suffixIcon,
-      labelStyle: const TextStyle(
+      labelStyle: TextStyle(
         color: _mutedTextColor,
         fontWeight: FontWeight.w600,
       ),
-      hintStyle: const TextStyle(color: _mutedTextColor),
+      hintStyle: TextStyle(color: _mutedTextColor),
       filled: true,
       fillColor: _backgroundColor,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: _borderColor),
+        borderSide: BorderSide(color: _borderColor),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: _primaryColor, width: 1.5),
+        borderSide: BorderSide(color: _primaryColor, width: 1.5),
       ),
     );
   }
@@ -395,7 +403,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
 
                     const SizedBox(height: 22),
 
-                    const Text(
+                    Text(
                       "Account Login",
                       textAlign: TextAlign.center,
                       style: TextStyle(
@@ -408,7 +416,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
 
                     const SizedBox(height: 8),
 
-                    const Text(
+                    Text(
                       "Continue as a walk-in, or use your registered account.",
                       textAlign: TextAlign.center,
                       style: TextStyle(
@@ -502,7 +510,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
 
                     const SizedBox(height: 18),
 
-                    const Row(
+                    Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         SizedBox(
@@ -510,7 +518,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
                           child: Divider(color: _borderColor),
                         ),
                         Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 12),
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
                           child: Text(
                             "ACCOUNT",
                             style: TextStyle(
@@ -548,7 +556,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Align(
+                          Align(
                             alignment: Alignment.centerLeft,
                             child: Text(
                               "Login or Create Account",
@@ -565,7 +573,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
                           TextField(
                             controller: emailController,
                             keyboardType: TextInputType.emailAddress,
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: _primaryColor,
                               fontWeight: FontWeight.w600,
                             ),
@@ -583,7 +591,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
                             obscureText: obscurePassword,
                             enableSuggestions: false,
                             autocorrect: false,
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: _primaryColor,
                               fontWeight: FontWeight.w600,
                             ),
@@ -622,7 +630,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
                                 isSendingPasswordReset
                                     ? "Sending reset link..."
                                     : "Forgot Password?",
-                                style: const TextStyle(
+                                style: TextStyle(
                                   color: _primaryColor,
                                   fontWeight: FontWeight.w700,
                                 ),
@@ -658,7 +666,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
                             alignment: WrapAlignment.center,
                             crossAxisAlignment: WrapCrossAlignment.center,
                             children: [
-                              const Text(
+                              Text(
                                 "No account yet?",
                                 style: TextStyle(
                                   color: _mutedTextColor,
@@ -677,7 +685,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
                                           ),
                                         );
                                       },
-                                child: const Text(
+                                child: Text(
                                   "Create Account",
                                   style: TextStyle(
                                     color: _primaryColor,
@@ -693,7 +701,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
 
                     const SizedBox(height: 24),
 
-                    const Text(
+                    Text(
                       "Queue · Appointment · Tracking",
                       textAlign: TextAlign.center,
                       style: TextStyle(

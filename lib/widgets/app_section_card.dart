@@ -33,13 +33,13 @@ class AppSectionCard extends StatelessWidget {
       width: double.infinity,
       padding: padding,
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: AppColors.activeSurface,
         borderRadius: BorderRadius.circular(AppRadii.card),
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: AppColors.activeBorder),
         boxShadow: showShadow
             ? [
                 BoxShadow(
-                  color: AppColors.primary.withValues(alpha: 0.06),
+                  color: AppColors.activePrimary.withValues(alpha: 0.06),
                   blurRadius: 16,
                   offset: const Offset(0, 4),
                 ),
@@ -58,10 +58,10 @@ class AppSectionCard extends StatelessWidget {
                     width: 40,
                     height: 40,
                     decoration: BoxDecoration(
-                      color: AppColors.softPrimary,
+                      color: AppColors.activeSoftPrimary,
                       borderRadius: BorderRadius.circular(AppRadii.control),
                     ),
-                    child: Icon(icon, color: AppColors.primary, size: 22),
+                    child: Icon(icon, color: AppColors.activePrimary, size: 22),
                   ),
                   const SizedBox(width: AppSpacing.md),
                 ],
@@ -72,8 +72,8 @@ class AppSectionCard extends StatelessWidget {
                       if (title != null)
                         Text(
                           title!,
-                          style: const TextStyle(
-                            color: AppColors.primary,
+                          style: TextStyle(
+                            color: AppColors.activePrimary,
                             fontSize: 17,
                             fontWeight: FontWeight.w800,
                           ),
@@ -82,8 +82,8 @@ class AppSectionCard extends StatelessWidget {
                         const SizedBox(height: AppSpacing.xs),
                         Text(
                           subtitle!,
-                          style: const TextStyle(
-                            color: AppColors.mutedText,
+                          style: TextStyle(
+                            color: AppColors.activeMutedText,
                             fontSize: 13,
                             height: 1.35,
                           ),

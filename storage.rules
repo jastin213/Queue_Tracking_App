@@ -10,7 +10,7 @@ service firebase.storage {
       return isSignedIn()
           && firestore.get(
             /databases/(default)/documents/users/$(request.auth.uid)
-          ).data.role == 'admin';
+          ).data.role in ['admin', 'Admin', 'ADMIN'];
     }
 
     function isAllowedAppointmentDocument() {

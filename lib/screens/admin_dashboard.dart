@@ -4,10 +4,12 @@ import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../theme/app_theme.dart';
+import '../services/appointment_lifecycle.dart';
 import '../services/firestore_query_fields.dart';
 import '../widgets/app_refresh_indicator.dart';
 import '../widgets/app_responsive_content.dart';
@@ -16,15 +18,17 @@ import 'admin_page.dart';
 
 // ================= COLOR THEME =================
 
-const Color _backgroundColor = AppColors.background;
-const Color _primaryColor = AppColors.primary;
-const Color _cardColor = AppColors.surface;
-const Color _borderColor = AppColors.border;
-const Color _mutedTextColor = AppColors.mutedText;
-const Color _softPrimaryColor = AppColors.softPrimary;
+Color get _backgroundColor => AppColors.activeBackground;
+Color get _primaryColor => AppColors.activePrimary;
+Color get _cardColor => AppColors.activeSurface;
+Color get _borderColor => AppColors.activeBorder;
+Color get _mutedTextColor => AppColors.activeMutedText;
+Color get _softPrimaryColor => AppColors.activeSoftPrimary;
 
 class AdminDashboard extends StatefulWidget {
-  const AdminDashboard({super.key});
+  const AdminDashboard({super.key, this.initialAppointmentId});
+
+  final String? initialAppointmentId;
 
   @override
   State<AdminDashboard> createState() => _AdminDashboardState();
@@ -43,6 +47,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   bool _isRefreshing = false;
   Object? _appointmentsError;
   String? _expandedOverviewStatus;
+  bool _openedInitialAppointment = false;
 
   @override
   void initState() {
@@ -119,13 +124,23 @@ class _AdminDashboardState extends State<AdminDashboard> {
         .listen(
           (snapshot) {
             if (!mounted) return;
-            final records = appointmentRecords(snapshot);
+            final records = appointmentRecords(
+              snapshot,
+            ).where((record) => !isPastPendingAppointment(record)).toList();
+            unawaited(
+              expirePastPendingAppointmentDocuments(snapshot.docs).catchError((
+                _,
+              ) {
+                return 0;
+              }),
+            );
             setState(() {
               _pendingAppointments = records;
               _appointmentsLoading = false;
               _appointmentsError = null;
             });
             pendingBookings.value = records;
+            _openInitialAppointmentIfAvailable(records);
           },
           onError: (Object error) {
             if (!mounted) return;
@@ -135,6 +150,28 @@ class _AdminDashboardState extends State<AdminDashboard> {
             });
           },
         );
+  }
+
+  void _openInitialAppointmentIfAvailable(
+    List<Map<String, dynamic>> appointments,
+  ) {
+    final initialId = widget.initialAppointmentId?.trim() ?? '';
+    if (_openedInitialAppointment || initialId.isEmpty) return;
+
+    Map<String, dynamic>? appointment;
+    for (final candidate in appointments) {
+      if (candidate['appointmentId']?.toString() == initialId) {
+        appointment = candidate;
+        break;
+      }
+    }
+    if (appointment == null) return;
+
+    _openedInitialAppointment = true;
+    final selectedAppointment = appointment;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) showDetails(selectedAppointment);
+    });
   }
 
   void _listenToAppointmentMonth() {
@@ -244,10 +281,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 (entry) => MapEntry(entry.key, appointmentRecords(entry.value)),
               ),
             );
-          _pendingAppointments = appointmentRecords(pendingSnapshot);
+          _pendingAppointments = appointmentRecords(
+            pendingSnapshot,
+          ).where((record) => !isPastPendingAppointment(record)).toList();
           _appointmentsError = null;
         });
         pendingBookings.value = _pendingAppointments;
+        unawaited(
+          expirePastPendingAppointmentDocuments(
+            pendingSnapshot.docs,
+          ).catchError((_) => 0),
+        );
       }
     } catch (error) {
       if (mounted) setState(() => _appointmentsError = error);
@@ -390,6 +434,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           "date": approved["date"],
           "source": "Appointment",
           "municipality": approved["municipality"],
+          "barangay": approved["barangay"],
           "status": "Waiting",
           "appointmentId": approved["appointmentId"],
           "customerId": approved["customerId"],
@@ -419,6 +464,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       "source": "Appointment",
       "status": "Waiting",
       "municipality": approved["municipality"] ?? "",
+      "barangay": approved["barangay"] ?? "",
       "appointmentId": approved["appointmentId"] ?? "",
       "customerId": approved["customerId"] ?? "",
       "customerEmail": approved["customerEmail"] ?? "",
@@ -535,6 +581,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         "source": "Appointment",
         "status": "Waiting",
         "municipality": booking["municipality"] ?? "",
+        "barangay": booking["barangay"] ?? "",
         "appointmentId": appointmentId,
         "customerId": booking["customerId"] ?? "",
         "customerEmail": booking["customerEmail"] ?? "",
@@ -583,7 +630,126 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   // ================= REJECT APPOINTMENT =================
 
-  Future<void> rejectBooking(Map<String, dynamic> booking) async {
+  Future<_RejectionDetails?> requestRejectionDetails(
+    Map<String, dynamic> booking,
+  ) async {
+    const reasons = <String>[
+      "Queue slot already taken",
+      "Valid ID could not be verified",
+      "Official Receipt (OR) could not be verified",
+      "Certificate of Registration (CR) could not be verified",
+      "Information does not match the submitted documents",
+      "Suspected invalid or altered document",
+      "Other",
+    ];
+    final feedbackController = TextEditingController();
+    String? selectedReason;
+    bool showValidation = false;
+
+    final result = await showDialog<_RejectionDetails>(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text(
+                "Reject ${booking['queue'] ?? 'appointment'}",
+                style: TextStyle(color: _primaryColor),
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Give the customer a clear reason and tell them what to do next.",
+                      style: TextStyle(color: _mutedTextColor),
+                    ),
+                    const SizedBox(height: 16),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedReason,
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        labelText: "Rejection reason",
+                        errorText: showValidation && selectedReason == null
+                            ? "Select a reason."
+                            : null,
+                      ),
+                      items: reasons
+                          .map(
+                            (reason) => DropdownMenuItem(
+                              value: reason,
+                              child: Text(reason),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        setDialogState(() {
+                          selectedReason = value;
+                          showValidation = false;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: feedbackController,
+                      minLines: 3,
+                      maxLines: 5,
+                      maxLength: 300,
+                      decoration: InputDecoration(
+                        labelText: "Message / feedback for customer",
+                        hintText:
+                            "Example: This slot was already taken. Please choose another available queue code.",
+                        alignLabelWithHint: true,
+                        errorText:
+                            showValidation &&
+                                feedbackController.text.trim().isEmpty
+                            ? "Enter a short message for the customer."
+                            : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text("CANCEL"),
+                ),
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(backgroundColor: Colors.red),
+                  onPressed: () {
+                    final feedback = feedbackController.text.trim();
+                    if (selectedReason == null || feedback.isEmpty) {
+                      setDialogState(() => showValidation = true);
+                      return;
+                    }
+                    Navigator.pop(
+                      dialogContext,
+                      _RejectionDetails(
+                        reason: selectedReason!,
+                        feedback: feedback,
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.cancel_outlined),
+                  label: const Text("REJECT APPOINTMENT"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+    feedbackController.dispose();
+    return result;
+  }
+
+  Future<bool> rejectBooking(
+    Map<String, dynamic> booking, {
+    required String reason,
+    required String feedback,
+  }) async {
     final String appointmentId = booking["appointmentId"]?.toString() ?? "";
     final String queue = booking["queue"]?.toString() ?? "";
 
@@ -591,7 +757,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Appointment ID is missing.")),
       );
-      return;
+      return false;
     }
 
     try {
@@ -600,6 +766,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
           .doc(appointmentId)
           .update({
             "status": "Rejected",
+            "rejectionReason": reason,
+            "adminFeedback": feedback,
             ...firestoreQueryFields(
               date: booking["date"],
               plate: booking["plate"],
@@ -614,20 +782,27 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
       rejectedBookings.value = [
         ...rejectedBookings.value,
-        {...booking, "status": "Rejected"},
+        {
+          ...booking,
+          "status": "Rejected",
+          "rejectionReason": reason,
+          "adminFeedback": feedback,
+        },
       ];
 
-      if (!mounted) return;
+      if (!mounted) return true;
 
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("$queue rejected")));
+      return true;
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted) return false;
 
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("Rejection failed: $e")));
+      return false;
     }
   }
 
@@ -657,9 +832,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.fromLTRB(18, 14, 10, 14),
-                      decoration: const BoxDecoration(
+                      decoration: BoxDecoration(
                         color: _primaryColor,
-                        borderRadius: BorderRadius.vertical(
+                        borderRadius: const BorderRadius.vertical(
                           top: Radius.circular(22),
                         ),
                       ),
@@ -713,10 +888,22 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                     "Municipality",
                                     booking['municipality'],
                                   ),
+                                  detailRow("Barangay", booking['barangay']),
                                   detailRow("Plate Number", booking['plate']),
                                   detailRow("Vehicle Type", booking['vehicle']),
                                   detailRow("Date", booking['date']),
                                   detailRow("Status", booking['status']),
+                                  if (booking['status']?.toString() ==
+                                      'Rejected') ...[
+                                    detailRow(
+                                      "Rejection Reason",
+                                      booking['rejectionReason'],
+                                    ),
+                                    detailRow(
+                                      "Admin Feedback",
+                                      booking['adminFeedback'],
+                                    ),
+                                  ],
                                   detailRow("Email", booking['customerEmail']),
                                 ],
                               ),
@@ -724,7 +911,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
                             const SizedBox(height: 22),
 
-                            const Text(
+                            Text(
                               "Submitted Documents",
                               style: TextStyle(
                                 fontSize: 17,
@@ -739,6 +926,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               title: "Valid ID",
                               fileName: booking["idFile"],
                               fileUrl: booking["idFileUrl"],
+                              storagePath: booking["idStoragePath"],
                               isUploaded: booking["idFileUploaded"],
                               appointmentId: booking["appointmentId"],
                               documentType: "ID",
@@ -747,6 +935,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               title: "Official Receipt (OR)",
                               fileName: booking["orFile"],
                               fileUrl: booking["orFileUrl"],
+                              storagePath: booking["orStoragePath"],
                               isUploaded: booking["orFileUploaded"],
                               appointmentId: booking["appointmentId"],
                               documentType: "OR",
@@ -755,6 +944,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               title: "Certificate of Registration (CR)",
                               fileName: booking["crFile"],
                               fileUrl: booking["crFileUrl"],
+                              storagePath: booking["crStoragePath"],
                               isUploaded: booking["crFileUploaded"],
                               appointmentId: booking["appointmentId"],
                               documentType: "CR",
@@ -770,7 +960,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                 borderRadius: BorderRadius.circular(16),
                                 border: Border.all(color: _borderColor),
                               ),
-                              child: const Text(
+                              child: Text(
                                 "Select VIEW FILE to open the document uploaded by the customer.",
                                 style: TextStyle(
                                   color: _mutedTextColor,
@@ -788,10 +978,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     if (canReviewBooking)
                       Container(
                         padding: const EdgeInsets.all(14),
-                        decoration: const BoxDecoration(
+                        decoration: BoxDecoration(
                           color: _cardColor,
                           border: Border(top: BorderSide(color: _borderColor)),
-                          borderRadius: BorderRadius.vertical(
+                          borderRadius: const BorderRadius.vertical(
                             bottom: Radius.circular(22),
                           ),
                         ),
@@ -862,11 +1052,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                   onPressed: isProcessing
                                       ? null
                                       : () async {
+                                          final rejection =
+                                              await requestRejectionDetails(
+                                                booking,
+                                              );
+                                          if (rejection == null ||
+                                              !context.mounted) {
+                                            return;
+                                          }
+
                                           setDialogState(() {
                                             isProcessing = true;
                                           });
 
-                                          await rejectBooking(booking);
+                                          final success = await rejectBooking(
+                                            booking,
+                                            reason: rejection.reason,
+                                            feedback: rejection.feedback,
+                                          );
 
                                           if (!context.mounted) return;
 
@@ -874,7 +1077,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                             isProcessing = false;
                                           });
 
-                                          Navigator.pop(context);
+                                          if (success) {
+                                            Navigator.pop(context);
+                                          }
                                         },
                                   child: isProcessing
                                       ? const SizedBox(
@@ -919,7 +1124,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             width: 120,
             child: Text(
               "$label:",
-              style: const TextStyle(
+              style: TextStyle(
                 fontWeight: FontWeight.w800,
                 color: _primaryColor,
               ),
@@ -930,7 +1135,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               value == null || value.toString().isEmpty
                   ? "-"
                   : value.toString(),
-              style: const TextStyle(
+              style: TextStyle(
                 color: _mutedTextColor,
                 fontWeight: FontWeight.w600,
               ),
@@ -1014,9 +1219,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
               children: [
                 Container(
                   padding: const EdgeInsets.fromLTRB(18, 10, 8, 10),
-                  decoration: const BoxDecoration(
+                  decoration: BoxDecoration(
                     color: _primaryColor,
-                    borderRadius: BorderRadius.vertical(
+                    borderRadius: const BorderRadius.vertical(
                       top: Radius.circular(20),
                     ),
                   ),
@@ -1054,7 +1259,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         builder: (context, snapshot) {
                           if (snapshot.connectionState !=
                               ConnectionState.done) {
-                            return const Center(
+                            return Center(
                               child: CircularProgressIndicator(
                                 color: _primaryColor,
                               ),
@@ -1131,11 +1336,31 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   Future<void> openDocument({
     required dynamic fileUrl,
+    required dynamic storagePath,
     required dynamic appointmentId,
     required String documentType,
     required String title,
   }) async {
-    final String url = fileUrl?.toString().trim() ?? '';
+    String url = fileUrl?.toString().trim() ?? '';
+    final String protectedStoragePath = storagePath?.toString().trim() ?? '';
+
+    if (url.isEmpty && protectedStoragePath.isNotEmpty) {
+      try {
+        url = await FirebaseStorage.instance
+            .ref(protectedStoragePath)
+            .getDownloadURL();
+      } catch (_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              "Unable to access this protected document. Confirm that you are signed in as an admin.",
+            ),
+          ),
+        );
+        return;
+      }
+    }
 
     if (url.isEmpty) {
       final String id = appointmentId?.toString().trim() ?? '';
@@ -1188,6 +1413,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     required String title,
     required dynamic fileName,
     required dynamic fileUrl,
+    required dynamic storagePath,
     required dynamic isUploaded,
     required dynamic appointmentId,
     required String documentType,
@@ -1197,7 +1423,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
         : fileName.toString();
 
     final bool hasUploadedFile =
-        (fileUrl?.toString().trim().isNotEmpty ?? false) || isUploaded == true;
+        (fileUrl?.toString().trim().isNotEmpty ?? false) ||
+        (storagePath?.toString().trim().isNotEmpty ?? false) ||
+        isUploaded == true;
 
     return Container(
       width: double.infinity,
@@ -1240,7 +1468,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontWeight: FontWeight.w800,
                         color: _primaryColor,
                       ),
@@ -1268,6 +1496,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   ? () {
                       openDocument(
                         fileUrl: fileUrl,
+                        storagePath: storagePath,
                         appointmentId: appointmentId,
                         documentType: documentType,
                         title: title,
@@ -1281,7 +1510,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               ),
               style: OutlinedButton.styleFrom(
                 foregroundColor: _primaryColor,
-                side: const BorderSide(color: _borderColor),
+                side: BorderSide(color: _borderColor),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -1357,7 +1586,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 Text(
                   title,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.w800,
                     color: _primaryColor,
                     fontSize: 13,
@@ -1366,7 +1595,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 const SizedBox(height: 8),
                 Text(
                   value.toString(),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 28,
                     fontWeight: FontWeight.w900,
                     color: _primaryColor,
@@ -1408,7 +1637,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   DateTime appointmentRecordDate(Map<String, dynamic> appointment) {
-    final parts = appointment["date"]?.toString().split("/") ?? const [];
+    final parts = appointment["date"]?.toString().split("/") ?? [];
     if (parts.length != 3) return DateTime(1900);
 
     final month = int.tryParse(parts[0]) ?? 1;
@@ -1482,7 +1711,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   children: [
                     Text(
                       "$status Appointments",
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: _primaryColor,
                         fontSize: 16,
                         fontWeight: FontWeight.w900,
@@ -1491,7 +1720,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     const SizedBox(height: 2),
                     Text(
                       calendarMonthLabel(calendarMonth),
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: _mutedTextColor,
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -1524,7 +1753,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               ),
             ],
           ),
-          const Divider(height: 20, color: _borderColor),
+          Divider(height: 20, color: _borderColor),
           if (records.isEmpty)
             Container(
               width: double.infinity,
@@ -1538,7 +1767,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 "No ${status.toLowerCase()} appointments for "
                 "${calendarMonthLabel(calendarMonth)}.",
                 textAlign: TextAlign.center,
-                style: const TextStyle(
+                style: TextStyle(
                   color: _mutedTextColor,
                   fontWeight: FontWeight.w700,
                 ),
@@ -1578,7 +1807,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         color: _softPrimaryColor,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(15),
-          side: const BorderSide(color: _borderColor),
+          side: BorderSide(color: _borderColor),
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -1613,7 +1842,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         name.isEmpty ? "Customer" : name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: _primaryColor,
                           fontSize: 14.5,
                           fontWeight: FontWeight.w900,
@@ -1624,7 +1853,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         "$queue • $plate • $date",
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: _mutedTextColor,
                           fontSize: 12.5,
                           fontWeight: FontWeight.w700,
@@ -1635,7 +1864,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         "$vehicle • $municipality",
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: _mutedTextColor,
                           fontSize: 11.5,
                         ),
@@ -1663,7 +1892,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   ),
                 ),
                 const SizedBox(width: 4),
-                const Icon(Icons.chevron_right_rounded, color: _mutedTextColor),
+                Icon(Icons.chevron_right_rounded, color: _mutedTextColor),
               ],
             ),
           ),
@@ -1672,7 +1901,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  Widget emptyPendingAppointments() {
+  Widget emptyPendingAppointments({
+    String message = "No pending appointments for this date",
+  }) {
     return Center(
       child: Container(
         width: double.infinity,
@@ -1682,13 +1913,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
           borderRadius: BorderRadius.circular(18),
           border: Border.all(color: _borderColor),
         ),
-        child: const Column(
+        child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.inbox_rounded, color: _primaryColor, size: 42),
-            SizedBox(height: 10),
+            const SizedBox(height: 10),
             Text(
-              "No pending appointments",
+              message,
               style: TextStyle(
                 color: _primaryColor,
                 fontWeight: FontWeight.w800,
@@ -1739,7 +1970,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               children: [
                 Text(
                   "$queue - ${booking['plate'] ?? '-'}",
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w900,
                     color: _primaryColor,
@@ -1748,7 +1979,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 const SizedBox(height: 5),
                 Text(
                   "${booking['fullName'] ?? '-'} • ${booking['municipality'] ?? '-'}",
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: _mutedTextColor,
                     fontWeight: FontWeight.w600,
                   ),
@@ -1756,7 +1987,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 const SizedBox(height: 3),
                 Text(
                   "${booking['vehicle'] ?? '-'} • ${booking['date'] ?? '-'}",
-                  style: const TextStyle(color: _mutedTextColor, fontSize: 13),
+                  style: TextStyle(color: _mutedTextColor, fontSize: 13),
                 ),
                 const SizedBox(height: 6),
                 Container(
@@ -1927,7 +2158,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       "Approved Customers",
                       style: TextStyle(
                         color: _primaryColor,
@@ -1938,7 +2169,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     const SizedBox(height: 2),
                     Text(
                       calendarFullDateLabel(selectedDate),
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: _mutedTextColor,
                         fontSize: 12.5,
                         fontWeight: FontWeight.w600,
@@ -1977,14 +2208,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 borderRadius: BorderRadius.circular(15),
                 border: Border.all(color: _borderColor),
               ),
-              child: const Column(
+              child: Column(
                 children: [
                   Icon(
                     Icons.event_busy_outlined,
                     color: _mutedTextColor,
                     size: 32,
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   Text(
                     "No approved customers for this date.",
                     textAlign: TextAlign.center,
@@ -2018,7 +2249,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         color: _cardColor,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(15),
-          side: const BorderSide(color: _borderColor),
+          side: BorderSide(color: _borderColor),
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -2056,7 +2287,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               name.isEmpty ? "Customer" : name,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 color: _primaryColor,
                                 fontSize: 14.5,
                                 fontWeight: FontWeight.w900,
@@ -2089,7 +2320,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         "$queue • ${plate.isEmpty ? 'No plate' : plate}",
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: _primaryColor,
                           fontSize: 12.5,
                           fontWeight: FontWeight.w700,
@@ -2100,7 +2331,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         "${vehicle.isEmpty ? 'Vehicle not specified' : vehicle} • ${municipality.isEmpty ? 'Municipality not specified' : municipality}",
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: _mutedTextColor,
                           fontSize: 11.5,
                         ),
@@ -2109,7 +2340,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   ),
                 ),
                 const SizedBox(width: 5),
-                const Icon(Icons.chevron_right_rounded, color: _mutedTextColor),
+                Icon(Icons.chevron_right_rounded, color: _mutedTextColor),
               ],
             ),
           ),
@@ -2146,14 +2377,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
             children: [
               Icon(
                 Icons.calendar_month_rounded,
                 color: _primaryColor,
                 size: 24,
               ),
-              SizedBox(width: 10),
+              const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   "Appointment Availability",
@@ -2167,7 +2398,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             ],
           ),
           const SizedBox(height: 6),
-          const Text(
+          Text(
             "Select a date to view approved customers. Availability updates automatically from Pending and Approved appointments.",
             style: TextStyle(
               color: _mutedTextColor,
@@ -2203,7 +2434,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   child: Text(
                     calendarMonthLabel(calendarMonth),
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: _primaryColor,
                       fontSize: 16,
                       fontWeight: FontWeight.w900,
@@ -2285,10 +2516,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
               return Tooltip(
                 message: isFull
-                    ? "${calendarDateKey(date)} is fully booked. Tap to view approved customers."
+                    ? "${calendarDateKey(date)} is fully booked. Tap to view appointments."
                     : isAvailable
-                    ? "${calendarDateKey(date)} has ${maxQueueLimit - booked} slot(s) available. Tap to view approved customers."
-                    : "${calendarDateKey(date)} is unavailable for booking. Tap to view approved customers.",
+                    ? "${calendarDateKey(date)} has ${maxQueueLimit - booked} slot(s) available. Tap to view appointments."
+                    : "${calendarDateKey(date)} is unavailable for booking. Tap to view appointments.",
                 child: Material(
                   color: Colors.transparent,
                   borderRadius: BorderRadius.circular(12),
@@ -2373,13 +2604,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 borderRadius: BorderRadius.circular(15),
                 border: Border.all(color: _borderColor),
               ),
-              child: const Row(
+              child: Row(
                 children: [
                   Icon(Icons.touch_app_rounded, color: _primaryColor, size: 21),
-                  SizedBox(width: 9),
+                  const SizedBox(width: 9),
                   Expanded(
                     child: Text(
-                      "Tap any date to view its approved customers.",
+                      "Tap any date to view its approved and pending appointments.",
                       style: TextStyle(
                         color: _primaryColor,
                         fontSize: 12.5,
@@ -2410,7 +2641,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           surface: _cardColor,
           onSurface: _primaryColor,
         ),
-        appBarTheme: const AppBarTheme(
+        appBarTheme: AppBarTheme(
           backgroundColor: _backgroundColor,
           foregroundColor: _primaryColor,
           elevation: 0,
@@ -2451,7 +2682,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
             child: Builder(
               builder: (context) {
                 final appointments = _loadedAppointments;
-                final bookings = _pendingAppointments;
+                final selectedDateKey = selectedCalendarDate == null
+                    ? null
+                    : calendarDateKey(selectedCalendarDate!);
+                final bookings = selectedDateKey == null
+                    ? <Map<String, dynamic>>[]
+                    : _pendingAppointments.where((appointment) {
+                        return appointment["date"]?.toString() ==
+                            selectedDateKey;
+                      }).toList();
                 final monthPendingCount = _monthStatusCount("Pending");
                 final monthApprovedCount = _monthStatusCount("Approved");
                 final monthRejectedCount = _monthStatusCount("Rejected");
@@ -2472,7 +2711,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         ),
                         child: Row(
                           children: [
-                            const Icon(
+                            Icon(
                               Icons.dashboard_customize_rounded,
                               color: _primaryColor,
                               size: 24,
@@ -2482,7 +2721,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text(
+                                  Text(
                                     "Appointment Overview",
                                     style: TextStyle(
                                       color: _primaryColor,
@@ -2493,7 +2732,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                   const SizedBox(height: 2),
                                   Text(
                                     calendarMonthLabel(calendarMonth),
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       color: _mutedTextColor,
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
@@ -2521,8 +2760,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       ],
                       const SizedBox(height: 18),
                       if (_appointmentsLoading && appointments.isEmpty)
-                        const Padding(
-                          padding: EdgeInsets.all(30),
+                        Padding(
+                          padding: const EdgeInsets.all(30),
                           child: Center(
                             child: CircularProgressIndicator(
                               color: _primaryColor,
@@ -2565,28 +2804,52 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Row(
+                              Row(
                                 children: [
                                   Icon(
                                     Icons.event_note_rounded,
                                     color: _primaryColor,
                                     size: 24,
                                   ),
-                                  SizedBox(width: 10),
+                                  const SizedBox(width: 10),
                                   Expanded(
-                                    child: Text(
-                                      "Pending Appointments",
-                                      style: TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.w800,
-                                        color: _primaryColor,
-                                      ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          "Pending Appointments",
+                                          style: TextStyle(
+                                            fontSize: 18,
+                                            fontWeight: FontWeight.w800,
+                                            color: _primaryColor,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          selectedCalendarDate == null
+                                              ? "Select a date in the calendar"
+                                              : calendarFullDateLabel(
+                                                  selectedCalendarDate!,
+                                                ),
+                                          style: TextStyle(
+                                            color: _mutedTextColor,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ],
                               ),
                               const SizedBox(height: 14),
-                              if (bookings.isEmpty)
+                              if (selectedCalendarDate == null)
+                                emptyPendingAppointments(
+                                  message:
+                                      "Select a calendar date to view its pending appointments.",
+                                )
+                              else if (bookings.isEmpty)
                                 emptyPendingAppointments()
                               else
                                 ...bookings.map(pendingAppointmentCard),
@@ -2606,6 +2869,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 }
 
+class _RejectionDetails {
+  const _RejectionDetails({required this.reason, required this.feedback});
+
+  final String reason;
+  final String feedback;
+}
+
 class _CalendarWeekday extends StatelessWidget {
   const _CalendarWeekday(this.label);
 
@@ -2617,7 +2887,7 @@ class _CalendarWeekday extends StatelessWidget {
       child: Text(
         label,
         textAlign: TextAlign.center,
-        style: const TextStyle(
+        style: TextStyle(
           color: _mutedTextColor,
           fontSize: 9.5,
           fontWeight: FontWeight.w900,
@@ -2646,7 +2916,7 @@ class _CalendarLegend extends StatelessWidget {
         const SizedBox(width: 6),
         Text(
           label,
-          style: const TextStyle(
+          style: TextStyle(
             color: _mutedTextColor,
             fontSize: 11.5,
             fontWeight: FontWeight.w700,

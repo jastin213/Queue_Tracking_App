@@ -3,8 +3,11 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../theme/app_theme.dart';
+import '../services/notification_time.dart';
+import '../services/customer_preferences.dart';
 import '../widgets/app_refresh_indicator.dart';
 import '../widgets/app_responsive_content.dart';
 import 'track_page.dart';
@@ -14,11 +17,11 @@ import 'customer_login.dart';
 import 'customer_register.dart';
 import 'customer_settings.dart';
 
-const Color _backgroundColor = AppColors.background;
-const Color _primaryColor = AppColors.primary;
-const Color _cardColor = AppColors.surface;
-const Color _borderColor = AppColors.border;
-const Color _mutedTextColor = AppColors.mutedText;
+Color get _backgroundColor => AppColors.activeBackground;
+Color get _primaryColor => AppColors.activePrimary;
+Color get _cardColor => AppColors.activeSurface;
+Color get _borderColor => AppColors.activeBorder;
+Color get _mutedTextColor => AppColors.activeMutedText;
 
 class CustomerHome extends StatefulWidget {
   const CustomerHome({super.key});
@@ -28,11 +31,11 @@ class CustomerHome extends StatefulWidget {
 }
 
 class _CustomerHomeState extends State<CustomerHome> {
+  final GlobalKey _notificationButtonKey = GlobalKey();
   bool isLoggingOut = false;
-  bool _appointmentNotificationsLoading = true;
-  Object? _appointmentNotificationsError;
   List<Map<String, dynamic>> _customerAppointments = [];
   final Map<String, String> _knownAppointmentStatuses = {};
+  final Set<String> _readAppointmentNotifications = {};
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
   _appointmentSubscription;
   bool _receivedInitialAppointmentSnapshot = false;
@@ -40,7 +43,41 @@ class _CustomerHomeState extends State<CustomerHome> {
   @override
   void initState() {
     super.initState();
-    _listenToAppointmentNotifications();
+    _initializeAppointmentNotifications();
+  }
+
+  String get _notificationPreferenceKey {
+    String accountId = loggedInCustomerIdNotifier.value.trim();
+    try {
+      accountId = FirebaseAuth.instance.currentUser?.uid ?? accountId;
+    } catch (_) {
+      // Firebase is unavailable only in isolated widget tests.
+    }
+    return "read_appointment_notifications_${accountId.isEmpty ? 'customer' : accountId}";
+  }
+
+  String _appointmentNotificationKey(Map<String, dynamic> appointment) {
+    final id = appointment["appointmentId"]?.toString().trim() ?? "";
+    final fallback = [
+      appointment["queue"],
+      appointment["date"],
+      appointment["plate"],
+    ].map((value) => value?.toString() ?? "").join("|");
+    final status = appointment["status"]?.toString().trim() ?? "Pending";
+    return "${id.isEmpty ? fallback : id}|$status";
+  }
+
+  Future<void> _initializeAppointmentNotifications() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      _readAppointmentNotifications.addAll(
+        preferences.getStringList(_notificationPreferenceKey) ?? const [],
+      );
+    } catch (_) {
+      // Notifications still work for this session if local storage is blocked.
+    }
+
+    if (mounted) _listenToAppointmentNotifications();
   }
 
   @override
@@ -75,7 +112,6 @@ class _CustomerHomeState extends State<CustomerHome> {
   void _listenToAppointmentNotifications() {
     final query = customerAppointmentsQuery();
     if (query == null) {
-      _appointmentNotificationsLoading = false;
       return;
     }
 
@@ -126,22 +162,17 @@ class _CustomerHomeState extends State<CustomerHome> {
 
         setState(() {
           _customerAppointments = appointments;
-          _appointmentNotificationsLoading = false;
-          _appointmentNotificationsError = null;
         });
 
-        if (changedAppointment != null) {
+        if (changedAppointment != null &&
+            customerAppointmentRemindersEnabledNotifier.value) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) showAppointmentStatusChanged(changedAppointment!);
           });
         }
       },
       onError: (Object error) {
-        if (!mounted) return;
-        setState(() {
-          _appointmentNotificationsLoading = false;
-          _appointmentNotificationsError = error;
-        });
+        debugPrint("Appointment notification stream error: $error");
       },
     );
   }
@@ -186,53 +217,225 @@ class _CustomerHomeState extends State<CustomerHome> {
     return Colors.orange;
   }
 
-  IconData appointmentStatusIcon(String status) {
-    if (status == "Approved") return Icons.check_circle_outline_rounded;
-    if (status == "Rejected") return Icons.cancel_outlined;
-    return Icons.pending_actions_rounded;
-  }
-
   String appointmentStatusTitle(String status) {
     if (status == "Approved") return "Appointment Approved";
     if (status == "Rejected") return "Appointment Rejected";
     return "Appointment Pending";
   }
 
-  String appointmentStatusMessage(String status) {
-    if (status == "Approved") {
-      return "Your appointment was approved. Check your schedule and queue code before going to the center.";
-    }
-    if (status == "Rejected") {
-      return "Your appointment was rejected. Check its status and book another schedule if needed.";
-    }
-    return "Your booking is waiting for admin review. This notification updates automatically.";
-  }
-
-  Map<String, dynamic>? get latestAppointmentNotification {
-    if (_customerAppointments.isEmpty) return null;
-    for (final appointment in _customerAppointments) {
-      if (isFinalAppointmentStatus(appointment["status"])) return appointment;
-    }
-    return _customerAppointments.first;
-  }
-
-  int get finalizedAppointmentCount {
+  int get unreadAppointmentCount {
     return _customerAppointments.where((appointment) {
-      return isFinalAppointmentStatus(appointment["status"]);
+      return isFinalAppointmentStatus(appointment["status"]) &&
+          !_readAppointmentNotifications.contains(
+            _appointmentNotificationKey(appointment),
+          );
     }).length;
   }
 
   void openAppointmentStatus() {
+    final readKeys = _customerAppointments
+        .where((appointment) => isFinalAppointmentStatus(appointment["status"]))
+        .map(_appointmentNotificationKey);
+
+    setState(() {
+      _readAppointmentNotifications.addAll(readKeys);
+    });
+    unawaited(_saveReadAppointmentNotifications());
+
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const BookingStatusPage()),
     );
   }
 
+  Future<void> showAppointmentNotificationPopover() async {
+    final buttonContext = _notificationButtonKey.currentContext;
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    final button = buttonContext?.findRenderObject() as RenderBox?;
+    if (button == null || overlay == null) return;
+
+    final unreadNotifications = _customerAppointments
+        .where(
+          (appointment) =>
+              isFinalAppointmentStatus(appointment["status"]) &&
+              !_readAppointmentNotifications.contains(
+                _appointmentNotificationKey(appointment),
+              ),
+        )
+        .toList();
+    final notifications = unreadNotifications.take(8).toList();
+    final readKeys = unreadNotifications.map(_appointmentNotificationKey);
+    setState(() => _readAppointmentNotifications.addAll(readKeys));
+    unawaited(_saveReadAppointmentNotifications());
+
+    final buttonTopLeft = button.localToGlobal(Offset.zero, ancestor: overlay);
+    final availableWidth = overlay.size.width - 24;
+    final menuWidth = availableWidth < 360 ? availableWidth : 360.0;
+    final desiredLeft = buttonTopLeft.dx + button.size.width - menuWidth;
+    final maxLeft = overlay.size.width - menuWidth - 12;
+    final left = desiredLeft.clamp(12.0, maxLeft).toDouble();
+    final top = buttonTopLeft.dy + button.size.height + 6;
+
+    final selectedId = await showMenu<String>(
+      context: context,
+      color: _cardColor,
+      elevation: 14,
+      constraints: BoxConstraints(minWidth: menuWidth, maxWidth: menuWidth),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: _borderColor),
+      ),
+      position: RelativeRect.fromLTRB(
+        left,
+        top,
+        overlay.size.width - left - menuWidth,
+        0,
+      ),
+      items: [
+        PopupMenuItem<String>(
+          enabled: false,
+          height: 54,
+          child: Row(
+            children: [
+              Icon(Icons.notifications_active_outlined, color: _primaryColor),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  "Appointment Notifications",
+                  style: TextStyle(
+                    color: _primaryColor,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (notifications.isEmpty)
+          PopupMenuItem<String>(
+            enabled: false,
+            height: 76,
+            child: Row(
+              children: [
+                Icon(Icons.notifications_none_rounded, color: _mutedTextColor),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    "No current notifications",
+                    style: TextStyle(color: _mutedTextColor),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          ...notifications.map((appointment) {
+            final status = appointment["status"]?.toString() ?? "Pending";
+            final queue = appointment["queue"]?.toString() ?? "-";
+            final date = appointment["date"]?.toString() ?? "-";
+            final time = formatNotificationTime(
+              appointmentDecisionTime(appointment),
+            );
+            return PopupMenuItem<String>(
+              value: _appointmentNotificationKey(appointment),
+              height: 92,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: appointmentStatusColor(
+                        status,
+                      ).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      status == "Approved"
+                          ? Icons.check_circle_outline_rounded
+                          : Icons.cancel_outlined,
+                      color: appointmentStatusColor(status),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          appointmentStatusTitle(status),
+                          style: TextStyle(
+                            color: _primaryColor,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          "Queue $queue • $date",
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: _primaryColor, fontSize: 12),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          time,
+                          style: TextStyle(
+                            color: _mutedTextColor,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.chevron_right_rounded, color: _mutedTextColor),
+                ],
+              ),
+            );
+          }),
+        if (notifications.isNotEmpty)
+          const PopupMenuItem<String>(
+            value: "__view_all__",
+            height: 48,
+            child: Center(
+              child: Text(
+                "VIEW ALL APPOINTMENTS",
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
+          ),
+      ],
+    );
+
+    if (selectedId != null && mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const BookingStatusPage()),
+      );
+    }
+  }
+
+  Future<void> _saveReadAppointmentNotifications() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setStringList(
+        _notificationPreferenceKey,
+        _readAppointmentNotifications.toList(),
+      );
+    } catch (_) {
+      // The badge is still cleared for the current session.
+    }
+  }
+
   void showAppointmentStatusChanged(Map<String, dynamic> appointment) {
     final status = appointment["status"]?.toString() ?? "Pending";
     final queue = appointment["queue"]?.toString() ?? "-";
     final color = appointmentStatusColor(status);
+    final eventTime = formatNotificationTime(
+      appointmentDecisionTime(appointment),
+    );
 
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -240,7 +443,9 @@ class _CustomerHomeState extends State<CustomerHome> {
         SnackBar(
           backgroundColor: color,
           duration: const Duration(seconds: 6),
-          content: Text("Queue $queue: ${appointmentStatusTitle(status)}"),
+          content: Text(
+            "Queue $queue: ${appointmentStatusTitle(status)} • $eventTime",
+          ),
           action: SnackBarAction(
             label: "VIEW",
             textColor: Colors.white,
@@ -248,163 +453,6 @@ class _CustomerHomeState extends State<CustomerHome> {
           ),
         ),
       );
-  }
-
-  Widget buildAppointmentNotificationCard() {
-    if (_appointmentNotificationsLoading) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: _cardColor,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: _borderColor),
-        ),
-        child: const Row(
-          children: [
-            SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-            SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                "Checking appointment notifications...",
-                style: TextStyle(
-                  color: _mutedTextColor,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    if (_appointmentNotificationsError != null) {
-      return Material(
-        color: _cardColor,
-        borderRadius: BorderRadius.circular(20),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(20),
-          onTap: openAppointmentStatus,
-          child: Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.red.withValues(alpha: 0.35)),
-            ),
-            child: const Row(
-              children: [
-                Icon(Icons.error_outline_rounded, color: Colors.red),
-                SizedBox(width: 11),
-                Expanded(
-                  child: Text(
-                    "Appointment notifications are temporarily unavailable. Tap to check your status.",
-                    style: TextStyle(
-                      color: _mutedTextColor,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                Icon(Icons.chevron_right_rounded, color: _mutedTextColor),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-
-    final appointment = latestAppointmentNotification;
-    if (appointment == null) return const SizedBox.shrink();
-
-    final String status = appointment["status"]?.toString() ?? "Pending";
-    final String queue = appointment["queue"]?.toString() ?? "-";
-    final String date = appointment["date"]?.toString() ?? "-";
-    final Color color = appointmentStatusColor(status);
-
-    return Material(
-      color: _cardColor,
-      borderRadius: BorderRadius.circular(22),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(22),
-        onTap: openAppointmentStatus,
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(17),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: color.withValues(alpha: 0.48)),
-            boxShadow: [
-              BoxShadow(color: color.withValues(alpha: 0.07), blurRadius: 14),
-            ],
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(15),
-                ),
-                child: Icon(appointmentStatusIcon(status), color: color),
-              ),
-              const SizedBox(width: 13),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      appointmentStatusTitle(status),
-                      style: TextStyle(
-                        color: color,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      "Queue $queue • $date",
-                      style: const TextStyle(
-                        color: _primaryColor,
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      appointmentStatusMessage(status),
-                      style: const TextStyle(
-                        color: _mutedTextColor,
-                        fontSize: 12.5,
-                        height: 1.35,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      finalizedAppointmentCount > 1
-                          ? "VIEW ALL $finalizedAppointmentCount UPDATES"
-                          : "CHECK APPOINTMENT STATUS",
-                      style: TextStyle(
-                        color: color,
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 5),
-              const Icon(Icons.chevron_right_rounded, color: _mutedTextColor),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 
   Future<void> logout() async {
@@ -472,340 +520,399 @@ class _CustomerHomeState extends State<CustomerHome> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: _backgroundColor,
-      appBar: AppBar(
-        backgroundColor: _backgroundColor,
-        elevation: 0,
-        foregroundColor: _primaryColor,
-        title: const Text(
-          "Customer Home",
-          style: TextStyle(
-            color: _primaryColor,
-            fontWeight: FontWeight.w700,
-            letterSpacing: 1.2,
-          ),
-        ),
-        actions: [
-          IconButton(
-            tooltip: "Appointment notifications",
-            onPressed: openAppointmentStatus,
-            icon: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                const Icon(Icons.notifications_outlined),
-                if (finalizedAppointmentCount > 0)
-                  Positioned(
-                    top: -5,
-                    right: -7,
-                    child: Container(
-                      constraints: const BoxConstraints(minWidth: 17),
-                      height: 17,
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: Colors.red,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: _backgroundColor, width: 1.5),
-                      ),
-                      child: Text(
-                        finalizedAppointmentCount > 9
-                            ? "9+"
-                            : "$finalizedAppointmentCount",
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 8.5,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ),
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: appThemeModeNotifier,
+      builder: (context, themeMode, _) {
+        return ValueListenableBuilder<String>(
+          valueListenable: customerAppLanguageNotifier,
+          builder: (context, language, _) {
+            final filipino = language == 'Filipino';
+            return Scaffold(
+              backgroundColor: _backgroundColor,
+              appBar: AppBar(
+                backgroundColor: _backgroundColor,
+                elevation: 0,
+                foregroundColor: _primaryColor,
+                title: Text(
+                  filipino ? "Tahanan ng Customer" : "Customer Home",
+                  style: TextStyle(
+                    color: _primaryColor,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.2,
                   ),
-              ],
-            ),
-          ),
-          IconButton(
-            tooltip: "Customer settings",
-            onPressed: isLoggingOut
-                ? null
-                : () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => const CustomerSettings(),
-                      ),
-                    );
-                  },
-            icon: const Icon(Icons.settings_outlined),
-          ),
-          IconButton(
-            tooltip: "Log out",
-            onPressed: isLoggingOut ? null : logout,
-            icon: isLoggingOut
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.logout_rounded),
-          ),
-          const SizedBox(width: 6),
-        ],
-      ),
-      body: SafeArea(
-        child: AppRefreshIndicator(
-          onRefresh: refreshCustomerHome,
-          child: SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: appPagePadding(context),
-            child: AppResponsiveContent(
-              maxWidth: 1120,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  ValueListenableBuilder<String>(
-                    valueListenable: loggedInCustomerNameNotifier,
-                    builder: (context, name, _) {
-                      return Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: _cardColor,
-                          borderRadius: BorderRadius.circular(26),
-                          border: Border.all(color: _borderColor),
-                          boxShadow: [
-                            BoxShadow(
-                              color: _primaryColor.withOpacity(0.08),
-                              blurRadius: 18,
-                            ),
-                          ],
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              height: 58,
-                              width: 58,
-                              decoration: BoxDecoration(
-                                color: _primaryColor,
-                                borderRadius: BorderRadius.circular(18),
-                              ),
-                              child: const Icon(
-                                Icons.directions_car_rounded,
-                                color: Colors.white,
-                                size: 32,
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              name.isEmpty
-                                  ? "NPJN Emission Testing Center"
-                                  : "Welcome, $name",
-                              style: const TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w800,
-                                color: _primaryColor,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            const Text(
-                              "Book your emission test appointment, check your appointment confirmation, and track your queue number.",
-                              style: TextStyle(
-                                fontSize: 14.5,
-                                height: 1.5,
-                                color: _mutedTextColor,
-                              ),
-                            ),
-                          ],
+                ),
+                actions: [
+                  ValueListenableBuilder<ThemeMode>(
+                    valueListenable: appThemeModeNotifier,
+                    builder: (context, mode, _) {
+                      final isDark = mode == ThemeMode.dark;
+                      return IconButton(
+                        key: const Key('customer-theme-mode-toggle'),
+                        tooltip: isDark
+                            ? "Switch to light mode"
+                            : "Switch to dark mode",
+                        onPressed: () => setAppDarkMode(!isDark),
+                        icon: Icon(
+                          isDark
+                              ? Icons.light_mode_rounded
+                              : Icons.dark_mode_rounded,
                         ),
                       );
                     },
                   ),
-
-                  if (_appointmentNotificationsLoading ||
-                      _appointmentNotificationsError != null ||
-                      latestAppointmentNotification != null) ...[
-                    const SizedBox(height: 16),
-                    buildAppointmentNotificationCard(),
-                  ],
-
-                  const SizedBox(height: 24),
-
-                  const Text(
-                    "What would you like to do?",
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: _primaryColor,
-                      letterSpacing: 0.8,
+                  IconButton(
+                    key: _notificationButtonKey,
+                    tooltip: "Appointment notifications",
+                    onPressed: showAppointmentNotificationPopover,
+                    icon: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        const Icon(Icons.notifications_outlined),
+                        if (unreadAppointmentCount > 0)
+                          Positioned(
+                            top: -5,
+                            right: -7,
+                            child: Container(
+                              constraints: const BoxConstraints(minWidth: 17),
+                              height: 17,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                              ),
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: Colors.red,
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: _backgroundColor,
+                                  width: 1.5,
+                                ),
+                              ),
+                              child: Text(
+                                unreadAppointmentCount > 9
+                                    ? "9+"
+                                    : "$unreadAppointmentCount",
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 8.5,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
-
-                  const SizedBox(height: 14),
-
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      const spacing = 16.0;
-                      final columns = constraints.maxWidth >= 900
-                          ? 3
-                          : constraints.maxWidth >= 620
-                          ? 2
-                          : 1;
-                      final cardWidth =
-                          (constraints.maxWidth - (spacing * (columns - 1))) /
-                          columns;
-
-                      return Wrap(
-                        spacing: spacing,
-                        runSpacing: spacing,
+                  IconButton(
+                    tooltip: "Customer settings",
+                    onPressed: isLoggingOut
+                        ? null
+                        : () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const CustomerSettings(),
+                              ),
+                            );
+                          },
+                    icon: const Icon(Icons.settings_outlined),
+                  ),
+                  IconButton(
+                    tooltip: "Log out",
+                    onPressed: isLoggingOut ? null : logout,
+                    icon: isLoggingOut
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.logout_rounded),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+              ),
+              body: SafeArea(
+                child: AppRefreshIndicator(
+                  onRefresh: refreshCustomerHome,
+                  child: SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: appPagePadding(context),
+                    child: AppResponsiveContent(
+                      maxWidth: 1120,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          SizedBox(
-                            width: cardWidth,
-                            child: _ActionCard(
-                              icon: Icons.calendar_month_rounded,
-                              title: "Book Appointment",
-                              subtitle:
-                                  "Schedule your emission test before visiting the center.",
-                              isFilled: true,
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => const BookAppointment(),
-                                  ),
-                                );
-                              },
+                          ValueListenableBuilder<String>(
+                            valueListenable: loggedInCustomerNameNotifier,
+                            builder: (context, name, _) {
+                              return Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(20),
+                                decoration: BoxDecoration(
+                                  color: _cardColor,
+                                  borderRadius: BorderRadius.circular(26),
+                                  border: Border.all(color: _borderColor),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: _primaryColor.withOpacity(0.08),
+                                      blurRadius: 18,
+                                    ),
+                                  ],
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Container(
+                                      height: 58,
+                                      width: 58,
+                                      decoration: BoxDecoration(
+                                        color: _primaryColor,
+                                        borderRadius: BorderRadius.circular(18),
+                                      ),
+                                      child: const Icon(
+                                        Icons.directions_car_rounded,
+                                        color: Colors.white,
+                                        size: 32,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    Text(
+                                      name.isEmpty
+                                          ? "NPJN Emission Testing Center"
+                                          : (filipino
+                                                ? "Maligayang pagdating, $name"
+                                                : "Welcome, $name"),
+                                      style: TextStyle(
+                                        fontSize: 22,
+                                        fontWeight: FontWeight.w800,
+                                        color: _primaryColor,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      filipino
+                                          ? "Mag-book ng emission test, tingnan ang kumpirmasyon, at subaybayan ang iyong queue number."
+                                          : "Book your emission test appointment, check your appointment confirmation, and track your queue number.",
+                                      style: TextStyle(
+                                        fontSize: 14.5,
+                                        height: 1.5,
+                                        color: _mutedTextColor,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+
+                          const SizedBox(height: 24),
+
+                          Text(
+                            filipino
+                                ? "Ano ang nais mong gawin?"
+                                : "What would you like to do?",
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                              color: _primaryColor,
+                              letterSpacing: 0.8,
                             ),
                           ),
-                          SizedBox(
-                            width: cardWidth,
-                            child: _ActionCard(
-                              icon: Icons.notifications_active_rounded,
-                              title: "My Appointment Status",
-                              subtitle:
-                                  "Check if your appointment is pending, approved, or rejected.",
-                              isFilled: false,
-                              onTap: openAppointmentStatus,
+
+                          const SizedBox(height: 14),
+
+                          LayoutBuilder(
+                            builder: (context, constraints) {
+                              const spacing = 16.0;
+                              final columns = constraints.maxWidth >= 900
+                                  ? 3
+                                  : constraints.maxWidth >= 620
+                                  ? 2
+                                  : 1;
+                              final cardWidth =
+                                  (constraints.maxWidth -
+                                      (spacing * (columns - 1))) /
+                                  columns;
+
+                              return Wrap(
+                                spacing: spacing,
+                                runSpacing: spacing,
+                                children: [
+                                  SizedBox(
+                                    width: cardWidth,
+                                    child: _ActionCard(
+                                      icon: Icons.calendar_month_rounded,
+                                      title: filipino
+                                          ? "Mag-book ng Appointment"
+                                          : "Book Appointment",
+                                      subtitle: filipino
+                                          ? "Itakda ang emission test bago pumunta sa center."
+                                          : "Schedule your emission test before visiting the center.",
+                                      isFilled: true,
+                                      onTap: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) =>
+                                                const BookAppointment(),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: cardWidth,
+                                    child: _ActionCard(
+                                      icon: Icons.notifications_active_rounded,
+                                      title: filipino
+                                          ? "Status ng Appointment"
+                                          : "My Appointment Status",
+                                      subtitle: filipino
+                                          ? "Tingnan kung pending, approved, o rejected ang appointment."
+                                          : "Check if your appointment is pending, approved, or rejected.",
+                                      isFilled: false,
+                                      onTap: openAppointmentStatus,
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: cardWidth,
+                                    child: _ActionCard(
+                                      icon: Icons.search_rounded,
+                                      title: filipino
+                                          ? "Subaybayan ang Queue"
+                                          : "Track My Queue",
+                                      subtitle: filipino
+                                          ? "Tingnan ang posisyon at tinatayang oras ng paghihintay."
+                                          : "Check your queue position and estimated waiting time.",
+                                      isFilled: false,
+                                      onTap: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) => const TrackPage(),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+
+                          const SizedBox(height: 24),
+
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(18),
+                            decoration: BoxDecoration(
+                              color: _cardColor,
+                              borderRadius: BorderRadius.circular(24),
+                              border: Border.all(color: _borderColor),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: _primaryColor.withOpacity(0.05),
+                                  blurRadius: 14,
+                                ),
+                              ],
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  filipino
+                                      ? "Mga Serbisyo"
+                                      : "Services Offered",
+                                  style: TextStyle(
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w800,
+                                    color: _primaryColor,
+                                    letterSpacing: 0.6,
+                                  ),
+                                ),
+                                const SizedBox(height: 14),
+                                _InfoRow(
+                                  icon: Icons.directions_car_rounded,
+                                  text: filipino
+                                      ? "Emission Test para sa Gasoline Vehicle"
+                                      : "Gasoline Vehicle Emission Test",
+                                ),
+                                const SizedBox(height: 10),
+                                _InfoRow(
+                                  icon: Icons.local_shipping_rounded,
+                                  text: filipino
+                                      ? "Emission Test para sa Diesel Vehicle"
+                                      : "Diesel Vehicle Emission Test",
+                                ),
+                                const SizedBox(height: 10),
+                                _InfoRow(
+                                  icon: Icons.confirmation_number_rounded,
+                                  text: filipino
+                                      ? "Tulong sa Queue at Appointment"
+                                      : "Queue and Appointment Assistance",
+                                ),
+                              ],
                             ),
                           ),
-                          SizedBox(
-                            width: cardWidth,
-                            child: _ActionCard(
-                              icon: Icons.search_rounded,
-                              title: "Track My Queue",
-                              subtitle:
-                                  "Check your queue position and estimated waiting time.",
-                              isFilled: false,
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => const TrackPage(),
+
+                          const SizedBox(height: 18),
+
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(18),
+                            decoration: BoxDecoration(
+                              color: _primaryColor.withOpacity(0.04),
+                              borderRadius: BorderRadius.circular(24),
+                              border: Border.all(
+                                color: _primaryColor.withOpacity(0.12),
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  filipino
+                                      ? "Impormasyon ng Center"
+                                      : "Center Information",
+                                  style: TextStyle(
+                                    fontSize: 17,
+                                    fontWeight: FontWeight.w800,
+                                    color: _primaryColor,
+                                    letterSpacing: 0.6,
                                   ),
-                                );
-                              },
+                                ),
+                                const SizedBox(height: 14),
+                                const _InfoRow(
+                                  icon: Icons.location_on_rounded,
+                                  text: "Ligao City, Albay",
+                                ),
+                                const SizedBox(height: 10),
+                                _InfoRow(
+                                  icon: Icons.access_time_rounded,
+                                  text: filipino
+                                      ? "Lunes hanggang Sabado"
+                                      : "Monday to Saturday",
+                                ),
+                                const SizedBox(height: 10),
+                                _InfoRow(
+                                  icon: Icons.groups_rounded,
+                                  text: filipino
+                                      ? "Arawang queue limit: 80 customer"
+                                      : "Daily queue limit: 80 customers",
+                                ),
+                              ],
                             ),
                           ),
                         ],
-                      );
-                    },
-                  ),
-
-                  const SizedBox(height: 24),
-
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      color: _cardColor,
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(color: _borderColor),
-                      boxShadow: [
-                        BoxShadow(
-                          color: _primaryColor.withOpacity(0.05),
-                          blurRadius: 14,
-                        ),
-                      ],
-                    ),
-                    child: const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          "Services Offered",
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                            color: _primaryColor,
-                            letterSpacing: 0.6,
-                          ),
-                        ),
-                        SizedBox(height: 14),
-                        _InfoRow(
-                          icon: Icons.directions_car_rounded,
-                          text: "Gasoline Vehicle Emission Test",
-                        ),
-                        SizedBox(height: 10),
-                        _InfoRow(
-                          icon: Icons.local_shipping_rounded,
-                          text: "Diesel Vehicle Emission Test",
-                        ),
-                        SizedBox(height: 10),
-                        _InfoRow(
-                          icon: Icons.confirmation_number_rounded,
-                          text: "Queue and Appointment Assistance",
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 18),
-
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      color: _primaryColor.withOpacity(0.04),
-                      borderRadius: BorderRadius.circular(24),
-                      border: Border.all(
-                        color: _primaryColor.withOpacity(0.12),
                       ),
                     ),
-                    child: const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          "Center Information",
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                            color: _primaryColor,
-                            letterSpacing: 0.6,
-                          ),
-                        ),
-                        SizedBox(height: 14),
-                        _InfoRow(
-                          icon: Icons.location_on_rounded,
-                          text: "Ligao City, Albay",
-                        ),
-                        SizedBox(height: 10),
-                        _InfoRow(
-                          icon: Icons.access_time_rounded,
-                          text: "Monday to Saturday",
-                        ),
-                        SizedBox(height: 10),
-                        _InfoRow(
-                          icon: Icons.groups_rounded,
-                          text: "Daily queue limit: 80 customers",
-                        ),
-                      ],
-                    ),
                   ),
-                ],
+                ),
               ),
-            ),
-          ),
-        ),
-      ),
+            );
+          },
+        );
+      },
     );
   }
 }
@@ -922,7 +1029,7 @@ class _InfoRow extends StatelessWidget {
         Expanded(
           child: Text(
             text,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 14.5,
               color: _mutedTextColor,
               height: 1.3,

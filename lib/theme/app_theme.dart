@@ -1,4 +1,35 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+const String _themePreferenceKey = 'app_dark_mode_enabled';
+
+/// The selected appearance is shared by the admin and customer interfaces.
+/// It is stored only on the current device and does not change Firestore data.
+final ValueNotifier<ThemeMode> appThemeModeNotifier = ValueNotifier(
+  ThemeMode.light,
+);
+
+Future<void> initializeAppTheme() async {
+  try {
+    final preferences = await SharedPreferences.getInstance();
+    final isDark = preferences.getBool(_themePreferenceKey) ?? false;
+    appThemeModeNotifier.value = isDark ? ThemeMode.dark : ThemeMode.light;
+  } catch (_) {
+    appThemeModeNotifier.value = ThemeMode.light;
+  }
+}
+
+Future<void> setAppDarkMode(bool enabled) async {
+  appThemeModeNotifier.value = enabled ? ThemeMode.dark : ThemeMode.light;
+  try {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool(_themePreferenceKey, enabled);
+  } catch (_) {
+    // The mode still changes for this session if device storage is unavailable.
+  }
+}
+
+bool get isAppDarkMode => appThemeModeNotifier.value == ThemeMode.dark;
 
 /// Shared visual tokens for the application.
 ///
@@ -15,6 +46,22 @@ abstract final class AppColors {
   static const Color success = Color(0xFF1E9E6A);
   static const Color warning = Color(0xFFF59E0B);
   static const Color danger = Color(0xFFE53935);
+
+  static const Color darkBackground = Color(0xFF0B1722);
+  static const Color darkPrimary = Color(0xFF4B9CC5);
+  static const Color darkSurface = Color(0xFF142635);
+  static const Color darkBorder = Color(0xFF3A5668);
+  static const Color darkMutedText = Color(0xFFCAD8E1);
+  static const Color darkSoftPrimary = Color(0xFF203849);
+
+  static Color get activeBackground =>
+      isAppDarkMode ? darkBackground : background;
+  static Color get activePrimary => isAppDarkMode ? darkPrimary : primary;
+  static Color get activeSurface => isAppDarkMode ? darkSurface : surface;
+  static Color get activeBorder => isAppDarkMode ? darkBorder : border;
+  static Color get activeMutedText => isAppDarkMode ? darkMutedText : mutedText;
+  static Color get activeSoftPrimary =>
+      isAppDarkMode ? darkSoftPrimary : softPrimary;
 }
 
 abstract final class AppSpacing {
@@ -179,6 +226,137 @@ abstract final class AppTheme {
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         backgroundColor: AppColors.primary,
+        contentTextStyle: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w600,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.control),
+        ),
+      ),
+    );
+  }
+
+  static ThemeData get dark {
+    final colorScheme =
+        ColorScheme.fromSeed(
+          seedColor: AppColors.darkPrimary,
+          brightness: Brightness.dark,
+        ).copyWith(
+          primary: AppColors.darkPrimary,
+          onPrimary: Colors.white,
+          secondary: AppColors.success,
+          onSecondary: Colors.white,
+          surface: AppColors.darkSurface,
+          onSurface: const Color(0xFFF4F8FB),
+          error: const Color(0xFFFF6B67),
+          onError: Colors.white,
+          outline: AppColors.darkBorder,
+        );
+
+    return ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.dark,
+      colorScheme: colorScheme,
+      textTheme: ThemeData.dark().textTheme.apply(
+        bodyColor: const Color(0xFFF4F8FB),
+        displayColor: const Color(0xFFF4F8FB),
+      ),
+      scaffoldBackgroundColor: AppColors.darkBackground,
+      canvasColor: AppColors.darkSurface,
+      dividerColor: AppColors.darkBorder,
+      appBarTheme: const AppBarTheme(
+        backgroundColor: AppColors.darkBackground,
+        foregroundColor: Color(0xFFE8F2F7),
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        centerTitle: false,
+        titleTextStyle: TextStyle(
+          color: Color(0xFFE8F2F7),
+          fontSize: 20,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.3,
+        ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: AppColors.darkSoftPrimary,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.lg,
+          vertical: AppSpacing.lg,
+        ),
+        labelStyle: const TextStyle(color: AppColors.darkMutedText),
+        hintStyle: const TextStyle(color: AppColors.darkMutedText),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppRadii.control),
+          borderSide: const BorderSide(color: AppColors.darkBorder),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppRadii.control),
+          borderSide: const BorderSide(color: AppColors.darkBorder),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppRadii.control),
+          borderSide: const BorderSide(
+            color: AppColors.darkPrimary,
+            width: 1.5,
+          ),
+        ),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          minimumSize: const Size(0, 48),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.xl,
+            vertical: AppSpacing.md,
+          ),
+          backgroundColor: AppColors.darkPrimary,
+          foregroundColor: Colors.white,
+          disabledBackgroundColor: AppColors.darkPrimary.withValues(alpha: 0.4),
+          disabledForegroundColor: Colors.white60,
+          elevation: 2,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.control),
+          ),
+          textStyle: const TextStyle(
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.4,
+          ),
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(0, 48),
+          backgroundColor: AppColors.darkPrimary,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.control),
+          ),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(0, 48),
+          foregroundColor: const Color(0xFFE8F2F7),
+          side: const BorderSide(color: AppColors.darkBorder),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.control),
+          ),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: AppColors.darkPrimary,
+          textStyle: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+      ),
+      progressIndicatorTheme: const ProgressIndicatorThemeData(
+        color: AppColors.darkPrimary,
+      ),
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: const Color(0xFF20394B),
         contentTextStyle: const TextStyle(
           color: Colors.white,
           fontWeight: FontWeight.w600,

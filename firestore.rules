@@ -13,13 +13,8 @@ service cloud.firestore {
     function isAdmin() {
       return isSignedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "admin";
-    }
-
-    function isCustomer() {
-      return isSignedIn()
-        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "customer";
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+          in ["admin", "Admin", "ADMIN"];
     }
 
     match /users/{userId} {
@@ -27,14 +22,17 @@ service cloud.firestore {
 
       allow create: if isOwner(userId)
         && request.resource.data.uid == request.auth.uid
-        && request.resource.data.role in ["customer", "admin"];
+        && request.resource.data.role in ["customer", "Customer", "user", "User"];
 
-      allow update: if isOwner(userId) || isAdmin();
+      allow update: if isAdmin()
+        || (isOwner(userId)
+          && request.resource.data.role == resource.data.role);
       allow delete: if isAdmin();
     }
 
     match /appointments/{appointmentId} {
       allow create: if isSignedIn()
+        && request.resource.data.customerId == request.auth.uid
         && request.resource.data.status == "Pending";
 
       allow read: if isSignedIn();
@@ -42,7 +40,7 @@ service cloud.firestore {
       allow delete: if isAdmin();
 
       match /documents/{documentType} {
-        allow create: if isCustomer()
+        allow create: if isSignedIn()
           && request.resource.data.customerId == request.auth.uid
           && request.resource.data.documentType in ["ID", "OR", "CR"]
           && request.resource.data.size <= 10 * 1024 * 1024
@@ -56,7 +54,7 @@ service cloud.firestore {
           || (isSignedIn() && resource.data.customerId == request.auth.uid);
 
         match /chunks/{chunkId} {
-          allow create: if isCustomer()
+          allow create: if isSignedIn()
             && request.resource.data.customerId == request.auth.uid
             && request.resource.data.index is int
             && request.resource.data.data is bytes

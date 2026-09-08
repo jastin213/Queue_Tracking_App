@@ -20,8 +20,9 @@ void main() {
       final decoded = img.decodeImage(result.bytes);
       expect(result.wasOptimized, isTrue);
       expect(decoded, isNotNull);
-      expect(decoded!.width, 2048);
-      expect(decoded.height, 819);
+      expect(decoded!.width, 1600);
+      expect(decoded.height, 640);
+      expect(result.fileName, 'vehicle-document.jpg');
       expect(result.bytes.length, lessThan(originalBytes.length));
     },
   );
@@ -35,6 +36,7 @@ void main() {
     );
 
     expect(result.wasOptimized, isFalse);
+    expect(result.fileName, 'document.pdf');
     expect(result.bytes, orderedEquals(originalBytes));
   });
 }

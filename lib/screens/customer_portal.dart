@@ -5,12 +5,12 @@ import '../widgets/app_responsive_content.dart';
 import 'track_page.dart';
 import 'customer_login.dart';
 
-const Color _backgroundColor = AppColors.background;
-const Color _primaryColor = AppColors.primary;
-const Color _cardColor = AppColors.surface;
-const Color _borderColor = AppColors.border;
-const Color _mutedTextColor = AppColors.mutedText;
-const Color _softPrimaryColor = AppColors.softPrimary;
+Color get _backgroundColor => AppColors.activeBackground;
+Color get _primaryColor => AppColors.activePrimary;
+Color get _cardColor => AppColors.activeSurface;
+Color get _borderColor => AppColors.activeBorder;
+Color get _mutedTextColor => AppColors.activeMutedText;
+Color get _softPrimaryColor => AppColors.activeSoftPrimary;
 
 class CustomerPortal extends StatelessWidget {
   const CustomerPortal({super.key});
@@ -43,13 +43,13 @@ class CustomerPortal extends StatelessWidget {
                         onPressed: () {
                           Navigator.pop(context);
                         },
-                        icon: const Icon(
+                        icon: Icon(
                           Icons.arrow_back_rounded,
                           color: _primaryColor,
                         ),
                       ),
                       const SizedBox(width: 4),
-                      const Text(
+                      Text(
                         "Customer Portal",
                         style: TextStyle(
                           fontSize: 20,
@@ -86,7 +86,7 @@ class CustomerPortal extends StatelessWidget {
 
                   const SizedBox(height: 22),
 
-                  const Text(
+                  Text(
                     "Welcome",
                     textAlign: TextAlign.center,
                     style: TextStyle(
@@ -98,7 +98,7 @@ class CustomerPortal extends StatelessWidget {
 
                   const SizedBox(height: 8),
 
-                  const Text(
+                  Text(
                     "Choose an option below.",
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 14.5, color: _mutedTextColor),
@@ -158,7 +158,7 @@ class CustomerPortal extends StatelessWidget {
 
                   const SizedBox(height: 28),
 
-                  const Text(
+                  Text(
                     "NPJN Emission Testing Center",
                     textAlign: TextAlign.center,
                     style: TextStyle(

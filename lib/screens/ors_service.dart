@@ -14,6 +14,13 @@ class TravelEstimateResult {
   });
 }
 
+class OrsLocationCoordinates {
+  final double lat;
+  final double lon;
+
+  const OrsLocationCoordinates({required this.lat, required this.lon});
+}
+
 class OrsService {
   // Paste your FULL ORS API key here.
   // Example format usually starts with eyJ...
@@ -35,6 +42,99 @@ class OrsService {
     "Pio Duran": 55,
     "Polangui": 25,
   };
+
+  static final Map<String, OrsLocationCoordinates> _barangayCache = {};
+
+  // Verified local override for the barangay specifically requested by the
+  // project. Other barangays are resolved by the ORS public geocoder.
+  static const Map<String, OrsLocationCoordinates> _knownBarangayLocations = {
+    "matacon|polangui": OrsLocationCoordinates(
+      lat: 13.3284,
+      lon: 123.4356,
+    ),
+  };
+
+  static bool get _hasUsableApiKey {
+    return apiKey.trim().isNotEmpty &&
+        apiKey != "PASTE_YOUR_REAL_ORS_API_KEY_HERE" &&
+        apiKey.trim().startsWith("eyJ");
+  }
+
+  static String _locationKey(String barangay, String municipality) {
+    return "${barangay.trim().toLowerCase()}|${municipality.trim().toLowerCase()}";
+  }
+
+  /// Resolves a specific barangay to coordinates for more accurate routing.
+  /// Returning null is intentional: callers retain the municipality fallback
+  /// so an ORS/geocoder outage never blocks queue tracking.
+  static Future<OrsLocationCoordinates?> getBarangayCoordinates({
+    required String barangay,
+    required String municipality,
+  }) async {
+    final normalizedBarangay = barangay.trim();
+    final normalizedMunicipality = municipality.trim();
+
+    if (normalizedBarangay.isEmpty || normalizedMunicipality.isEmpty) {
+      return null;
+    }
+
+    final key = _locationKey(normalizedBarangay, normalizedMunicipality);
+    final knownLocation = _knownBarangayLocations[key];
+    if (knownLocation != null) return knownLocation;
+
+    final cachedLocation = _barangayCache[key];
+    if (cachedLocation != null) return cachedLocation;
+
+    if (!_hasUsableApiKey) return null;
+
+    final query = [
+      normalizedBarangay,
+      normalizedMunicipality,
+      "Albay",
+      "Philippines",
+    ].join(", ");
+
+    final url = Uri.https(
+      "api.openrouteservice.org",
+      "/geocode/search",
+      {
+        "api_key": apiKey.trim(),
+        "text": query,
+        "boundary.country": "PH",
+        "focus.point.lat": testingCenterLat.toString(),
+        "focus.point.lon": testingCenterLon.toString(),
+        "size": "1",
+      },
+    );
+
+    try {
+      final response = await http
+          .get(url, headers: const {"Accept": "application/json"})
+          .timeout(const Duration(seconds: 8));
+
+      if (response.statusCode != 200) {
+        debugPrint("ORS GEOCODER ERROR STATUS: ${response.statusCode}");
+        return null;
+      }
+
+      final data = jsonDecode(response.body);
+      final dynamic coordinates =
+          data["features"]?[0]?["geometry"]?["coordinates"];
+
+      if (coordinates is! List || coordinates.length < 2) return null;
+
+      final lon = (coordinates[0] as num?)?.toDouble();
+      final lat = (coordinates[1] as num?)?.toDouble();
+      if (lat == null || lon == null) return null;
+
+      final location = OrsLocationCoordinates(lat: lat, lon: lon);
+      _barangayCache[key] = location;
+      return location;
+    } catch (e) {
+      debugPrint("ORS GEOCODER NETWORK/PARSING ERROR: $e");
+      return null;
+    }
+  }
 
   static Future<TravelEstimateResult> getTravelTimeWithFallback({
     required String municipality,
@@ -67,9 +167,7 @@ class OrsService {
     required double originLon,
     required double originLat,
   }) async {
-    if (apiKey == "PASTE_YOUR_REAL_ORS_API_KEY_HERE" ||
-        apiKey.trim().isEmpty ||
-        !apiKey.trim().startsWith("eyJ")) {
+    if (!_hasUsableApiKey) {
       debugPrint("ORS ERROR: API key is missing, incomplete, or placeholder.");
       return null;
     }

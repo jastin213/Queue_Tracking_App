@@ -11,22 +11,24 @@ import 'package:printing/printing.dart';
 
 import '../theme/app_theme.dart';
 import '../services/document_image_optimizer.dart';
+import '../services/document_upload_consent.dart';
 import '../services/firestore_query_fields.dart';
 import '../services/platform_storage_upload.dart';
 import '../widgets/app_refresh_indicator.dart';
 import '../widgets/app_responsive_content.dart';
+import 'barangay_data.dart';
 import 'location_data.dart';
 import 'admin_page.dart';
 import 'customer_register.dart';
 
 // ================= COLOR THEME =================
 
-const Color _backgroundColor = AppColors.background;
-const Color _primaryColor = AppColors.primary;
-const Color _cardColor = AppColors.surface;
-const Color _borderColor = AppColors.border;
-const Color _mutedTextColor = AppColors.mutedText;
-const Color _softPrimaryColor = AppColors.softPrimary;
+Color get _backgroundColor => AppColors.activeBackground;
+Color get _primaryColor => AppColors.activePrimary;
+Color get _cardColor => AppColors.activeSurface;
+Color get _borderColor => AppColors.activeBorder;
+Color get _mutedTextColor => AppColors.activeMutedText;
+Color get _softPrimaryColor => AppColors.activeSoftPrimary;
 const int _maxDocumentBytes = 10 * 1024 * 1024;
 const int _firestoreChunkBytes = 650 * 1024;
 
@@ -89,6 +91,7 @@ class _BookAppointmentState extends State<BookAppointment> {
   String selectedVehicle = "Gas";
   String selectedQueueCode = "G001";
   String selectedMunicipality = "Ligao";
+  String? selectedBarangay;
 
   String? idFileName;
   String? orFileName;
@@ -103,6 +106,7 @@ class _BookAppointmentState extends State<BookAppointment> {
   Uint8List? crFileBytes;
 
   bool isSubmitting = false;
+  bool documentConsentConfirmed = false;
   double uploadProgress = 0;
   String? plateNumberError;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
@@ -160,11 +164,11 @@ class _BookAppointmentState extends State<BookAppointment> {
       builder: (_) => AlertDialog(
         backgroundColor: _cardColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-        title: const Text(
+        title: Text(
           "Appointment Policy",
           style: TextStyle(fontWeight: FontWeight.bold, color: _primaryColor),
         ),
-        content: const SingleChildScrollView(
+        content: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -172,22 +176,22 @@ class _BookAppointmentState extends State<BookAppointment> {
                 "Before booking an appointment, please confirm the following:",
                 style: TextStyle(color: _mutedTextColor),
               ),
-              SizedBox(height: 14),
+              const SizedBox(height: 14),
               Text(
                 "1. Provide your full name.",
                 style: TextStyle(color: _primaryColor),
               ),
-              SizedBox(height: 6),
+              const SizedBox(height: 6),
               Text(
                 "2. Upload a valid ID, OR, and CR.",
                 style: TextStyle(color: _primaryColor),
               ),
-              SizedBox(height: 6),
+              const SizedBox(height: 6),
               Text(
                 "3. Be present when your queue is called.",
                 style: TextStyle(color: _primaryColor),
               ),
-              SizedBox(height: 6),
+              const SizedBox(height: 6),
               Text(
                 "4. Missed turns will be moved to the bottom of the queue.",
                 style: TextStyle(color: _primaryColor),
@@ -448,7 +452,7 @@ class _BookAppointmentState extends State<BookAppointment> {
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
+            colorScheme: Theme.of(context).colorScheme.copyWith(
               primary: _primaryColor,
               onPrimary: Colors.white,
               surface: _cardColor,
@@ -473,7 +477,16 @@ class _BookAppointmentState extends State<BookAppointment> {
 
   // ================= DOCUMENT PICKING =================
 
+  Future<bool> confirmDocumentUploadConsent() async {
+    if (documentConsentConfirmed) return true;
+    final accepted = await ensureDocumentUploadConsent(context);
+    if (accepted && mounted) documentConsentConfirmed = true;
+    return accepted;
+  }
+
   Future<void> pickDocument(String type) async {
+    if (!await confirmDocumentUploadConsent()) return;
+
     try {
       FilePickerResult? result = await FilePicker.platform.pickFiles(
         allowMultiple: false,
@@ -502,6 +515,7 @@ class _BookAppointmentState extends State<BookAppointment> {
       );
       if (!mounted) return;
       final Uint8List selectedBytes = optimizedImage.bytes;
+      final String selectedFileName = optimizedImage.fileName;
 
       if (selectedBytes.length > _maxDocumentBytes) {
         if (!mounted) return;
@@ -520,15 +534,15 @@ class _BookAppointmentState extends State<BookAppointment> {
 
       setState(() {
         if (type == "ID") {
-          idFileName = file.name;
+          idFileName = selectedFileName;
           idFilePath = safePath;
           idFileBytes = selectedBytes;
         } else if (type == "OR") {
-          orFileName = file.name;
+          orFileName = selectedFileName;
           orFilePath = safePath;
           orFileBytes = selectedBytes;
         } else if (type == "CR") {
-          crFileName = file.name;
+          crFileName = selectedFileName;
           crFilePath = safePath;
           crFileBytes = selectedBytes;
         }
@@ -556,16 +570,29 @@ class _BookAppointmentState extends State<BookAppointment> {
   }
 
   Future<void> captureDocument(String type) async {
+    if (!await confirmDocumentUploadConsent()) return;
+
     try {
       final XFile? photo = await picker.pickImage(
         source: ImageSource.camera,
-        imageQuality: 80,
+        imageQuality: 74,
+        maxWidth: 1600,
+        maxHeight: 1600,
       );
 
       if (photo == null) return;
 
-      final Uint8List bytes = await photo.readAsBytes();
-      final String? safePath = kIsWeb ? null : photo.path;
+      final Uint8List originalBytes = await photo.readAsBytes();
+      final optimizedImage = await optimizeDocumentImage(
+        bytes: originalBytes,
+        fileName: photo.name,
+      );
+      if (!mounted) return;
+      final Uint8List bytes = optimizedImage.bytes;
+      final String selectedFileName = optimizedImage.fileName;
+      final String? safePath = kIsWeb || optimizedImage.wasOptimized
+          ? null
+          : photo.path;
 
       if (bytes.length > _maxDocumentBytes) {
         if (!mounted) return;
@@ -580,15 +607,15 @@ class _BookAppointmentState extends State<BookAppointment> {
 
       setState(() {
         if (type == "ID") {
-          idFileName = photo.name;
+          idFileName = selectedFileName;
           idFilePath = safePath;
           idFileBytes = bytes;
         } else if (type == "OR") {
-          orFileName = photo.name;
+          orFileName = selectedFileName;
           orFilePath = safePath;
           orFileBytes = bytes;
         } else if (type == "CR") {
-          crFileName = photo.name;
+          crFileName = selectedFileName;
           crFilePath = safePath;
           crFileBytes = bytes;
         }
@@ -602,6 +629,59 @@ class _BookAppointmentState extends State<BookAppointment> {
         ),
       );
     }
+  }
+
+  Future<void> scanValidId() async {
+    if (!await confirmDocumentUploadConsent()) return;
+    if (!mounted) return;
+
+    final continueToCamera =
+        await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Scan Valid ID'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  height: 150,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: _primaryColor, width: 2),
+                    borderRadius: BorderRadius.circular(16),
+                    color: _softPrimaryColor,
+                  ),
+                  child: Icon(
+                    Icons.document_scanner_outlined,
+                    color: _primaryColor,
+                    size: 64,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Place the full ID inside the camera frame. Use good light, '
+                  'avoid glare, and make sure the name, photo, and ID details '
+                  'are readable.',
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('CANCEL'),
+              ),
+              FilledButton.icon(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                icon: const Icon(Icons.camera_alt_outlined),
+                label: const Text('OPEN SCANNER'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+
+    if (continueToCamera && mounted) await captureDocument('ID');
   }
 
   String documentContentType(String fileName) {
@@ -648,9 +728,9 @@ class _BookAppointmentState extends State<BookAppointment> {
               children: [
                 Container(
                   padding: const EdgeInsets.fromLTRB(18, 10, 8, 10),
-                  decoration: const BoxDecoration(
+                  decoration: BoxDecoration(
                     color: _primaryColor,
-                    borderRadius: BorderRadius.vertical(
+                    borderRadius: const BorderRadius.vertical(
                       top: Radius.circular(20),
                     ),
                   ),
@@ -769,15 +849,15 @@ class _BookAppointmentState extends State<BookAppointment> {
                 borderRadius: BorderRadius.circular(14),
               ),
               child: isPdf
-                  ? const Column(
+                  ? Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(
+                        const Icon(
                           Icons.picture_as_pdf_rounded,
                           size: 38,
                           color: Colors.red,
                         ),
-                        SizedBox(height: 6),
+                        const SizedBox(height: 6),
                         Text(
                           "PDF selected — tap to view",
                           style: TextStyle(
@@ -797,7 +877,7 @@ class _BookAppointmentState extends State<BookAppointment> {
                           cacheHeight: 400,
                           filterQuality: FilterQuality.medium,
                           errorBuilder: (context, error, stackTrace) {
-                            return const Center(
+                            return Center(
                               child: Text(
                                 "Image preview unavailable",
                                 style: TextStyle(color: _mutedTextColor),
@@ -993,6 +1073,7 @@ class _BookAppointmentState extends State<BookAppointment> {
     final String plateNumber = normalizePhilippinePlateNumber(
       plateController.text,
     );
+    final String barangay = selectedBarangay?.trim() ?? "";
 
     if (currentUser == null || customerId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1002,6 +1083,9 @@ class _BookAppointmentState extends State<BookAppointment> {
       );
       return;
     }
+
+    if (!await confirmDocumentUploadConsent()) return;
+    if (!mounted) return;
 
     final String? currentPlateError = validatePhilippinePlateNumber(
       plateNumber,
@@ -1020,6 +1104,7 @@ class _BookAppointmentState extends State<BookAppointment> {
 
     if (selectedDate == null ||
         customerName.isEmpty ||
+        barangay.isEmpty ||
         idFileBytes == null ||
         orFileBytes == null ||
         crFileBytes == null) {
@@ -1093,9 +1178,6 @@ class _BookAppointmentState extends State<BookAppointment> {
       final DocumentReference<Map<String, dynamic>> appointmentRef =
           FirebaseFirestore.instance.collection("appointments").doc();
 
-      String idFileUrl = '';
-      String orFileUrl = '';
-      String crFileUrl = '';
       String idStoragePath = '';
       String orStoragePath = '';
       String crStoragePath = '';
@@ -1120,7 +1202,6 @@ class _BookAppointmentState extends State<BookAppointment> {
             if (mounted) setState(() => uploadProgress = progress / 3);
           },
         );
-        idFileUrl = idUpload.url;
         idStoragePath = idUpload.path;
         uploadedDocumentRefs.add(FirebaseStorage.instance.ref(idUpload.path));
 
@@ -1135,7 +1216,6 @@ class _BookAppointmentState extends State<BookAppointment> {
             if (mounted) setState(() => uploadProgress = (1 + progress) / 3);
           },
         );
-        orFileUrl = orUpload.url;
         orStoragePath = orUpload.path;
         uploadedDocumentRefs.add(FirebaseStorage.instance.ref(orUpload.path));
 
@@ -1150,7 +1230,6 @@ class _BookAppointmentState extends State<BookAppointment> {
             if (mounted) setState(() => uploadProgress = (2 + progress) / 3);
           },
         );
-        crFileUrl = crUpload.url;
         crStoragePath = crUpload.path;
         uploadedDocumentRefs.add(FirebaseStorage.instance.ref(crUpload.path));
       } catch (_) {
@@ -1200,6 +1279,7 @@ class _BookAppointmentState extends State<BookAppointment> {
         "customerEmail": customerEmail,
         "fullName": customerName,
         "municipality": selectedMunicipality,
+        "barangay": barangay,
         "plate": plateNumber,
         "vehicle": selectedVehicle,
         "queue": selectedQueueCode,
@@ -1214,9 +1294,11 @@ class _BookAppointmentState extends State<BookAppointment> {
         "idFile": idFileName,
         "orFile": orFileName,
         "crFile": crFileName,
-        "idFileUrl": idFileUrl,
-        "orFileUrl": orFileUrl,
-        "crFileUrl": crFileUrl,
+        // Do not store reusable download tokens in Firestore. Authorized admin
+        // viewers resolve protected Storage paths only when a file is opened.
+        "idFileUrl": "",
+        "orFileUrl": "",
+        "crFileUrl": "",
         "idStoragePath": idStoragePath,
         "orStoragePath": orStoragePath,
         "crStoragePath": crStoragePath,
@@ -1229,7 +1311,8 @@ class _BookAppointmentState extends State<BookAppointment> {
         "retentionDeleteAfter": Timestamp.fromDate(
           DateTime.now().add(const Duration(days: 365)),
         ),
-        "totalDocumentBytes": idFileBytes!.lengthInBytes +
+        "totalDocumentBytes":
+            idFileBytes!.lengthInBytes +
             orFileBytes!.lengthInBytes +
             crFileBytes!.lengthInBytes,
 
@@ -1337,7 +1420,7 @@ class _BookAppointmentState extends State<BookAppointment> {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.bold,
                     color: _primaryColor,
@@ -1347,7 +1430,7 @@ class _BookAppointmentState extends State<BookAppointment> {
                   const SizedBox(height: 3),
                   Text(
                     subtitle,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
                       color: _mutedTextColor,
                       height: 1.3,
@@ -1387,10 +1470,7 @@ class _BookAppointmentState extends State<BookAppointment> {
       padding: const EdgeInsets.only(bottom: 8),
       child: Text(
         text,
-        style: const TextStyle(
-          fontWeight: FontWeight.bold,
-          color: _primaryColor,
-        ),
+        style: TextStyle(fontWeight: FontWeight.bold, color: _primaryColor),
       ),
     );
   }
@@ -1398,21 +1478,21 @@ class _BookAppointmentState extends State<BookAppointment> {
   InputDecoration formDecoration(String hint) {
     return InputDecoration(
       hintText: hint,
-      hintStyle: const TextStyle(color: _mutedTextColor),
+      hintStyle: TextStyle(color: _mutedTextColor),
       filled: true,
       fillColor: _backgroundColor,
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: _borderColor),
+        borderSide: BorderSide(color: _borderColor),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: _primaryColor, width: 1.5),
+        borderSide: BorderSide(color: _primaryColor, width: 1.5),
       ),
       disabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: _borderColor),
+        borderSide: BorderSide(color: _borderColor),
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
     );
@@ -1441,10 +1521,10 @@ class _BookAppointmentState extends State<BookAppointment> {
               color: _softPrimaryColor,
               borderRadius: BorderRadius.circular(14),
             ),
-            child: const Icon(Icons.policy_outlined, color: _primaryColor),
+            child: Icon(Icons.policy_outlined, color: _primaryColor),
           ),
           const SizedBox(width: 12),
-          const Expanded(
+          Expanded(
             child: Text(
               "Please review the booking policy before submitting your appointment.",
               style: TextStyle(
@@ -1456,7 +1536,7 @@ class _BookAppointmentState extends State<BookAppointment> {
           ),
           TextButton(
             onPressed: showBookingPolicy,
-            child: const Text(
+            child: Text(
               "Review",
               style: TextStyle(
                 color: _primaryColor,
@@ -1475,20 +1555,17 @@ class _BookAppointmentState extends State<BookAppointment> {
       height: 54,
       child: OutlinedButton.icon(
         onPressed: isSubmitting ? null : pickDate,
-        icon: const Icon(Icons.calendar_month_outlined, color: _primaryColor),
+        icon: Icon(Icons.calendar_month_outlined, color: _primaryColor),
         label: Text(
           selectedDate == null ? "Choose Appointment Date" : formattedDate,
-          style: const TextStyle(
-            fontWeight: FontWeight.bold,
-            color: _primaryColor,
-          ),
+          style: TextStyle(fontWeight: FontWeight.bold, color: _primaryColor),
         ),
         style: OutlinedButton.styleFrom(
           alignment: Alignment.center,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
           ),
-          side: const BorderSide(color: _borderColor),
+          side: BorderSide(color: _borderColor),
           backgroundColor: _backgroundColor,
         ),
       ),
@@ -1506,13 +1583,13 @@ class _BookAppointmentState extends State<BookAppointment> {
       ),
       child: Row(
         children: [
-          const Icon(Icons.info_outline, size: 22, color: _primaryColor),
+          Icon(Icons.info_outline, size: 22, color: _primaryColor),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               message,
               textAlign: TextAlign.left,
-              style: const TextStyle(color: _primaryColor, height: 1.3),
+              style: TextStyle(color: _primaryColor, height: 1.3),
             ),
           ),
         ],
@@ -1571,11 +1648,7 @@ class _BookAppointmentState extends State<BookAppointment> {
               ),
             ),
           ),
-          const Icon(
-            Icons.swipe_down_alt_rounded,
-            color: _mutedTextColor,
-            size: 19,
-          ),
+          Icon(Icons.swipe_down_alt_rounded, color: _mutedTextColor, size: 19),
         ],
       ),
     );
@@ -1609,7 +1682,7 @@ class _BookAppointmentState extends State<BookAppointment> {
                   selectedQueueCode.isEmpty
                       ? "No available queue code for this date."
                       : "Selected queue code: $selectedQueueCode",
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.bold,
                     color: _primaryColor,
                   ),
@@ -1682,6 +1755,7 @@ class _BookAppointmentState extends State<BookAppointment> {
     required Uint8List? fileBytes,
     required VoidCallback onPick,
     required VoidCallback onCamera,
+    String cameraLabel = "Take Photo",
   }) {
     final bool hasFile = fileName != null && fileBytes != null;
 
@@ -1721,7 +1795,7 @@ class _BookAppointmentState extends State<BookAppointment> {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontWeight: FontWeight.bold,
                         color: _primaryColor,
                       ),
@@ -1731,10 +1805,7 @@ class _BookAppointmentState extends State<BookAppointment> {
                       fileName ?? "No file uploaded",
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: _mutedTextColor,
-                      ),
+                      style: TextStyle(fontSize: 13, color: _mutedTextColor),
                     ),
                   ],
                 ),
@@ -1760,7 +1831,7 @@ class _BookAppointmentState extends State<BookAppointment> {
                   label: Text(hasFile ? "Choose Another" : "Choose File"),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: _primaryColor,
-                    side: const BorderSide(color: _primaryColor),
+                    side: BorderSide(color: _primaryColor),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -1778,11 +1849,11 @@ class _BookAppointmentState extends State<BookAppointment> {
                   label: Text(
                     hasFile
                         ? (kIsWeb ? "Choose New Photo" : "Retake Photo")
-                        : (kIsWeb ? "Camera / Photo" : "Take Photo"),
+                        : cameraLabel,
                   ),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: _primaryColor,
-                    side: const BorderSide(color: _primaryColor),
+                    side: BorderSide(color: _primaryColor),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -1811,7 +1882,7 @@ class _BookAppointmentState extends State<BookAppointment> {
           surface: _cardColor,
           onSurface: _primaryColor,
         ),
-        appBarTheme: const AppBarTheme(
+        appBarTheme: AppBarTheme(
           backgroundColor: _backgroundColor,
           foregroundColor: _primaryColor,
           elevation: 0,
@@ -1847,7 +1918,7 @@ class _BookAppointmentState extends State<BookAppointment> {
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
             decoration: BoxDecoration(
               color: _cardColor,
-              border: const Border(top: BorderSide(color: _borderColor)),
+              border: Border(top: BorderSide(color: _borderColor)),
               boxShadow: [
                 BoxShadow(
                   color: _primaryColor.withOpacity(0.08),
@@ -1917,11 +1988,11 @@ class _BookAppointmentState extends State<BookAppointment> {
 
                       fieldLabel("Customer Location"),
                       DropdownButtonFormField<String>(
-                        value: selectedMunicipality,
+                        initialValue: selectedMunicipality,
                         decoration: formDecoration("Select Location"),
                         dropdownColor: _cardColor,
                         iconEnabledColor: _primaryColor,
-                        style: const TextStyle(color: _primaryColor),
+                        style: TextStyle(color: _primaryColor),
                         items: albayThirdDistrictLocations.map((loc) {
                           return DropdownMenuItem(
                             value: loc.name,
@@ -1934,6 +2005,43 @@ class _BookAppointmentState extends State<BookAppointment> {
                                 if (v == null) return;
                                 setState(() {
                                   selectedMunicipality = v;
+                                  selectedBarangay = null;
+                                });
+                              },
+                      ),
+
+                      const SizedBox(height: 18),
+
+                      fieldLabel("Barangay"),
+                      DropdownButtonFormField<String>(
+                        key: ValueKey("barangay-$selectedMunicipality"),
+                        initialValue: selectedBarangay,
+                        isExpanded: true,
+                        decoration: formDecoration("Select barangay").copyWith(
+                          prefixIcon: Icon(
+                            Icons.location_on_outlined,
+                            color: _primaryColor,
+                          ),
+                        ),
+                        dropdownColor: _cardColor,
+                        iconEnabledColor: _primaryColor,
+                        style: TextStyle(color: _primaryColor),
+                        items: getBarangaysForMunicipality(selectedMunicipality)
+                            .map(
+                              (barangay) => DropdownMenuItem<String>(
+                                value: barangay,
+                                child: Text(
+                                  barangay,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: isSubmitting
+                            ? null
+                            : (value) {
+                                setState(() {
+                                  selectedBarangay = value;
                                 });
                               },
                       ),
@@ -1942,11 +2050,11 @@ class _BookAppointmentState extends State<BookAppointment> {
 
                       fieldLabel("Vehicle Type"),
                       DropdownButtonFormField<String>(
-                        value: selectedVehicle,
+                        initialValue: selectedVehicle,
                         decoration: formDecoration("Select Vehicle Type"),
                         dropdownColor: _cardColor,
                         iconEnabledColor: _primaryColor,
-                        style: const TextStyle(color: _primaryColor),
+                        style: TextStyle(color: _primaryColor),
                         items: const [
                           DropdownMenuItem(value: "Gas", child: Text("Gas")),
                           DropdownMenuItem(
@@ -2000,10 +2108,10 @@ class _BookAppointmentState extends State<BookAppointment> {
                         controller: fullNameController,
                         readOnly:
                             loggedInCustomerName.isNotEmpty || isSubmitting,
-                        style: const TextStyle(color: _primaryColor),
+                        style: TextStyle(color: _primaryColor),
                         decoration: formDecoration("Enter full name").copyWith(
                           suffixIcon: loggedInCustomerName.isNotEmpty
-                              ? const Icon(
+                              ? Icon(
                                   Icons.lock_outline_rounded,
                                   color: _primaryColor,
                                 )
@@ -2012,7 +2120,7 @@ class _BookAppointmentState extends State<BookAppointment> {
                       ),
                       if (loggedInCustomerName.isNotEmpty) ...[
                         const SizedBox(height: 8),
-                        const Text(
+                        Text(
                           "This name is locked to your logged-in account so your appointment status will appear correctly.",
                           style: TextStyle(
                             color: _mutedTextColor,
@@ -2055,7 +2163,7 @@ class _BookAppointmentState extends State<BookAppointment> {
                             });
                           }
                         },
-                        style: const TextStyle(color: _primaryColor),
+                        style: TextStyle(color: _primaryColor),
                         decoration: formDecoration("Example: ABC1234").copyWith(
                           errorText: plateNumberError,
                           errorMaxLines: 2,
@@ -2082,7 +2190,8 @@ class _BookAppointmentState extends State<BookAppointment> {
                         fileName: idFileName,
                         fileBytes: idFileBytes,
                         onPick: () => pickDocument("ID"),
-                        onCamera: () => captureDocument("ID"),
+                        onCamera: scanValidId,
+                        cameraLabel: "Scan ID",
                       ),
                       const SizedBox(height: 14),
 

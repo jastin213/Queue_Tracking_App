@@ -9,6 +9,7 @@ import 'package:queue_tracking_app/screens/customer_home.dart';
 import 'package:queue_tracking_app/screens/customer_settings.dart';
 import 'package:queue_tracking_app/screens/display_page.dart';
 import 'package:queue_tracking_app/screens/track_page.dart';
+import 'package:queue_tracking_app/theme/app_theme.dart';
 import 'package:queue_tracking_app/widgets/analytics_line_chart.dart';
 import 'package:queue_tracking_app/widgets/app_refresh_indicator.dart';
 
@@ -19,6 +20,16 @@ void main() {
     );
 
     expect(uri.toString(), 'https://npjn-queue-system-jkr.web.app/#/display');
+  });
+
+  test('public display limits the visible upcoming queue numbers', () {
+    final waitingQueue = List.generate(
+      12,
+      (index) => <String, dynamic>{'queue': 'G${index + 1}'},
+    );
+
+    expect(visibleWaitingQueues(waitingQueue), hasLength(4));
+    expect(visibleWaitingQueues(waitingQueue).last['queue'], 'G4');
   });
 
   test('normalizes customer names for report search', () {
@@ -56,6 +67,18 @@ void main() {
 
   test('customer voice queue alerts are enabled by default', () {
     expect(customerVoiceAlertsEnabledNotifier.value, isTrue);
+  });
+
+  test('shared appearance mode switches the active app palette', () {
+    addTearDown(() => appThemeModeNotifier.value = ThemeMode.light);
+
+    appThemeModeNotifier.value = ThemeMode.dark;
+    expect(AppColors.activeBackground, AppColors.darkBackground);
+    expect(AppColors.activeSurface, AppColors.darkSurface);
+
+    appThemeModeNotifier.value = ThemeMode.light;
+    expect(AppColors.activeBackground, AppColors.background);
+    expect(AppColors.activeSurface, AppColors.surface);
   });
 
   testWidgets('shows one shared account login', (WidgetTester tester) async {
@@ -177,6 +200,8 @@ void main() {
     await tester.pumpWidget(const MaterialApp(home: AdminSettings()));
 
     expect(find.text('Admin Settings'), findsOneWidget);
+    expect(find.text('Voice Settings'), findsOneWidget);
+    expect(find.text('Appearance'), findsNothing);
     expect(find.text('Final Defense Demo Data'), findsNothing);
     expect(find.byType(AppRefreshIndicator), findsNothing);
 
@@ -192,6 +217,7 @@ void main() {
     await tester.pumpWidget(const MaterialApp(home: CustomerHome()));
 
     expect(find.byTooltip('Appointment notifications'), findsOneWidget);
+    expect(find.byKey(const Key('customer-theme-mode-toggle')), findsOneWidget);
     expect(find.byTooltip('Customer settings'), findsOneWidget);
     expect(find.byTooltip('Log out'), findsOneWidget);
 
@@ -201,5 +227,29 @@ void main() {
     expect(find.text('Log out?'), findsOneWidget);
     expect(find.text('LOG OUT'), findsOneWidget);
     expect(find.text('CANCEL'), findsOneWidget);
+  });
+
+  test('appointment tracking accepts only the customer queue for today', () {
+    final appointments = <Map<String, dynamic>>[
+      {'queue': 'G010', 'date': '9/8/2026'},
+      {'queue': 'G002', 'date': '9/7/2026'},
+    ];
+
+    expect(
+      validateAppointmentQueueOwnership(
+        input: 'g010',
+        appointments: appointments,
+        now: DateTime(2026, 9, 8),
+      ),
+      isNull,
+    );
+    expect(
+      validateAppointmentQueueOwnership(
+        input: 'G011',
+        appointments: appointments,
+        now: DateTime(2026, 9, 8),
+      ),
+      contains('G010'),
+    );
   });
 }

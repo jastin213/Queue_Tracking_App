@@ -83,7 +83,7 @@ class _AppRefreshIndicatorState extends State<AppRefreshIndicator> {
       behavior: ScrollConfiguration.of(context).copyWith(overscroll: false),
       child: RefreshIndicator(
         onRefresh: _refresh,
-        color: AppColors.primary,
+        color: AppColors.activePrimary,
         backgroundColor: Colors.white,
         displacement: 30,
         edgeOffset: 0,

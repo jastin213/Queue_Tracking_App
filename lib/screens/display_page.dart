@@ -8,13 +8,13 @@ import 'admin_settings.dart';
 // THEME COLORS
 // ============================================================================
 
-const Color _backgroundColor = AppColors.background;
-const Color _primaryColor = AppColors.primary;
-const Color _cardColor = AppColors.surface;
-const Color _borderColor = AppColors.border;
-const Color _mutedTextColor = AppColors.mutedText;
-const Color _softPrimaryColor = AppColors.softPrimary;
-const Color _dangerColor = AppColors.danger;
+Color get _backgroundColor => AppColors.activeBackground;
+Color get _primaryColor => AppColors.activePrimary;
+Color get _cardColor => AppColors.activeSurface;
+Color get _borderColor => AppColors.activeBorder;
+Color get _mutedTextColor => AppColors.activeMutedText;
+Color get _softPrimaryColor => AppColors.activeSoftPrimary;
+Color _dangerColor = AppColors.danger;
 
 const String displayPageRoute = '/display';
 
@@ -24,6 +24,13 @@ Uri displayPageUri(Uri currentUri) {
 
 // Used only for display estimate.
 const int _estimatedMinutesPerCustomer = 9;
+const int displayWaitingQueueLimit = 4;
+
+List<Map<String, dynamic>> visibleWaitingQueues(
+  Iterable<Map<String, dynamic>> waitingQueue,
+) {
+  return waitingQueue.take(displayWaitingQueueLimit).toList(growable: false);
+}
 
 // ============================================================================
 // DISPLAY PAGE
@@ -258,7 +265,7 @@ class DisplayPage extends StatelessWidget {
                 Text(
                   "Queue Display • $today",
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: _mutedTextColor,
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
@@ -281,10 +288,10 @@ class DisplayPage extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(28),
       decoration: cardDecoration(),
-      child: const Column(
+      child: Column(
         children: [
           CircularProgressIndicator(color: _primaryColor),
-          SizedBox(height: 14),
+          const SizedBox(height: 14),
           Text(
             "Loading queue display...",
             style: TextStyle(
@@ -304,13 +311,9 @@ class DisplayPage extends StatelessWidget {
       decoration: cardDecoration(),
       child: Column(
         children: [
-          const Icon(
-            Icons.error_outline_rounded,
-            color: _dangerColor,
-            size: 46,
-          ),
+          Icon(Icons.error_outline_rounded, color: _dangerColor, size: 46),
           const SizedBox(height: 12),
-          const Text(
+          Text(
             "Unable to load queue display",
             textAlign: TextAlign.center,
             style: TextStyle(
@@ -323,7 +326,7 @@ class DisplayPage extends StatelessWidget {
           Text(
             error,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: _mutedTextColor, height: 1.4),
+            style: TextStyle(color: _mutedTextColor, height: 1.4),
           ),
         ],
       ),
@@ -352,7 +355,7 @@ class DisplayPage extends StatelessWidget {
       ),
       child: Column(
         children: [
-          const Text(
+          Text(
             "NOW SERVING",
             textAlign: TextAlign.center,
             style: TextStyle(
@@ -405,7 +408,7 @@ class DisplayPage extends StatelessWidget {
                     : nowServing["name"] ?? "",
                 textAlign: TextAlign.center,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   color: _primaryColor,
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
@@ -426,7 +429,7 @@ class DisplayPage extends StatelessWidget {
                 child: Text(
                   nowServing["type"] ?? "",
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: _mutedTextColor,
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
@@ -450,6 +453,9 @@ class DisplayPage extends StatelessWidget {
     required bool isWide,
     required bool isShort,
   }) {
+    final visibleQueue = visibleWaitingQueues(waitingQueue);
+    final hiddenQueueCount = waitingQueue.length - visibleQueue.length;
+
     return Container(
       width: double.infinity,
       padding: EdgeInsets.all(isShort ? 16 : 22),
@@ -458,9 +464,9 @@ class DisplayPage extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           sectionHeader(
-            icon: Icons.groups_rounded,
-            title: "NEXT IN LINE",
-            trailing: today,
+            icon: Icons.format_list_numbered_rounded,
+            title: "UP NEXT",
+            trailing: "${waitingQueue.length} waiting • $today",
           ),
 
           const SizedBox(height: 16),
@@ -471,19 +477,43 @@ class DisplayPage extends StatelessWidget {
             GridView.builder(
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
-              itemCount: waitingQueue.take(8).length,
+              itemCount: visibleQueue.length,
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: isWide ? 4 : 2,
-                crossAxisSpacing: 14,
-                mainAxisSpacing: 14,
-                childAspectRatio: isWide ? 2.9 : 2.2,
+                crossAxisSpacing: isWide ? 18 : 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: isWide ? 2.45 : 2.1,
               ),
               itemBuilder: (context, index) {
-                final customer = waitingQueue[index];
+                final customer = visibleQueue[index];
 
                 return queueTile(customer: customer, index: index);
               },
             ),
+          if (hiddenQueueCount > 0) ...[
+            const SizedBox(height: 14),
+            Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: _softPrimaryColor,
+                  borderRadius: BorderRadius.circular(30),
+                  border: Border.all(color: _borderColor),
+                ),
+                child: Text(
+                  "+$hiddenQueueCount more waiting",
+                  style: TextStyle(
+                    color: _mutedTextColor,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -507,11 +537,11 @@ class DisplayPage extends StatelessWidget {
             fit: BoxFit.scaleDown,
             child: Text(
               customer["queue"] ?? "-",
-              style: const TextStyle(
+              style: TextStyle(
                 color: _primaryColor,
-                fontSize: 34,
+                fontSize: 42,
                 fontWeight: FontWeight.w900,
-                letterSpacing: 1,
+                letterSpacing: 1.5,
               ),
             ),
           ),
@@ -528,7 +558,7 @@ class DisplayPage extends StatelessWidget {
                 child: Text(
                   customer["type"] ?? "",
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: _mutedTextColor,
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
@@ -550,7 +580,7 @@ class DisplayPage extends StatelessWidget {
                 child: Text(
                   estimateWaitingTime(index),
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: _mutedTextColor,
                     fontSize: 11.5,
                     fontWeight: FontWeight.w700,
@@ -586,17 +616,13 @@ class DisplayPage extends StatelessWidget {
           ),
           child: Row(
             children: [
-              const Icon(
-                Icons.campaign_rounded,
-                color: _primaryColor,
-                size: 24,
-              ),
+              Icon(Icons.campaign_rounded, color: _primaryColor, size: 24),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   message,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: _primaryColor,
                     fontSize: 15,
                     fontWeight: FontWeight.w800,
@@ -628,7 +654,7 @@ class DisplayPage extends StatelessWidget {
           child: Text(
             title,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
+            style: TextStyle(
               color: _primaryColor,
               fontSize: 19,
               fontWeight: FontWeight.w900,
@@ -639,7 +665,7 @@ class DisplayPage extends StatelessWidget {
         if (trailing != null)
           Text(
             trailing,
-            style: const TextStyle(
+            style: TextStyle(
               color: _mutedTextColor,
               fontSize: 13,
               fontWeight: FontWeight.w700,
@@ -658,10 +684,10 @@ class DisplayPage extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: _borderColor),
       ),
-      child: const Column(
+      child: Column(
         children: [
           Icon(Icons.inbox_rounded, color: _primaryColor, size: 44),
-          SizedBox(height: 10),
+          const SizedBox(height: 10),
           Text(
             "No waiting queue for today",
             textAlign: TextAlign.center,

@@ -1,13 +1,15 @@
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
+import '../services/appointment_lifecycle.dart';
 import '../theme/app_theme.dart';
+import '../services/customer_preferences.dart';
 import '../widgets/app_refresh_indicator.dart';
 import '../widgets/app_responsive_content.dart';
-import 'customer_settings.dart';
 import 'ors_service.dart';
 import 'location_data.dart';
 
@@ -26,6 +28,35 @@ String formatQueueDuration(int minutes) {
 
   return "$hourText $remainingMinutes "
       "${remainingMinutes == 1 ? "min" : "mins"}";
+}
+
+String? validateAppointmentQueueOwnership({
+  required String input,
+  required Iterable<Map<String, dynamic>> appointments,
+  DateTime? now,
+}) {
+  final current = now ?? DateTime.now();
+  final ownedCodes = appointments
+      .where((appointment) {
+        final date = parseAppointmentDate(
+          appointment["dateTimestamp"] ?? appointment["date"],
+        );
+        return date != null &&
+            date.year == current.year &&
+            date.month == current.month &&
+            date.day == current.day;
+      })
+      .map((appointment) {
+        return appointment["queue"]?.toString().trim().toUpperCase() ?? "";
+      })
+      .where((code) => code.isNotEmpty)
+      .toSet();
+
+  if (ownedCodes.contains(input.trim().toUpperCase())) return null;
+  if (ownedCodes.isEmpty) {
+    return "No appointment queue number is assigned to your account for today.";
+  }
+  return "Please use your assigned queue number: ${ownedCodes.join(', ')}.";
 }
 
 class TrackPage extends StatefulWidget {
@@ -57,6 +88,7 @@ class _TrackPageState extends State<TrackPage> {
   String calculationText = "";
 
   bool isLoadingEta = false;
+  bool isCheckingQueue = false;
   bool isNearTurnDialogOpen = false;
 
   final int averageServiceTime = 9;
@@ -186,6 +218,43 @@ class _TrackPageState extends State<TrackPage> {
 
   // ================= CHECK QUEUE =================
 
+  Future<String?> _appointmentQueueOwnershipError(String input) async {
+    User? user;
+    try {
+      user = FirebaseAuth.instance.currentUser;
+    } catch (_) {
+      // Firebase is unavailable only in isolated widget tests. Treat this as
+      // walk-in tracking, which intentionally remains public.
+      return null;
+    }
+
+    // Walk-in customers can track the queue code printed at the center without
+    // signing in. Signed-in appointment customers must use their own code.
+    if (user == null) return null;
+
+    try {
+      final appointments = FirebaseFirestore.instance.collection(
+        "appointments",
+      );
+      var snapshot = await appointments
+          .where("customerId", isEqualTo: user.uid)
+          .get(const GetOptions(source: Source.server));
+
+      if (snapshot.docs.isEmpty && (user.email?.trim().isNotEmpty ?? false)) {
+        snapshot = await appointments
+            .where("customerEmail", isEqualTo: user.email!.trim())
+            .get(const GetOptions(source: Source.server));
+      }
+
+      return validateAppointmentQueueOwnership(
+        input: input,
+        appointments: snapshot.docs.map((document) => document.data()),
+      );
+    } catch (_) {
+      return "We could not verify your assigned queue number. Check your internet connection and try again.";
+    }
+  }
+
   Future<void> checkQueue() async {
     final String input = queueController.text.trim().toUpperCase();
     final regex = RegExp(r'^[GD]\d+$');
@@ -209,7 +278,31 @@ class _TrackPageState extends State<TrackPage> {
       return;
     }
 
+    setState(() => isCheckingQueue = true);
+
+    final ownershipError = await _appointmentQueueOwnershipError(input);
+    if (!mounted) return;
+    if (ownershipError != null) {
+      setState(() {
+        isCheckingQueue = false;
+        trackedQueueNumber = "";
+        statusText = "This is not your queue number";
+        queueNumberText = input;
+        positionText = ownershipError;
+        queuePosition = null;
+        estimatedQueueTime = null;
+        travelMinutes = null;
+        leaveInMinutes = null;
+        municipalityText = "";
+        orsStatusText = "";
+        leaveAdviceText = "";
+        calculationText = "";
+      });
+      return;
+    }
+
     setState(() {
+      isCheckingQueue = false;
       trackedQueueNumber = input;
       statusText = "";
       queueNumberText = input;
@@ -235,6 +328,7 @@ class _TrackPageState extends State<TrackPage> {
       if (!mounted) return;
 
       setState(() {
+        isCheckingQueue = false;
         statusText = "Unable to check queue";
         queueNumberText = input;
         positionText = e.toString();
@@ -324,6 +418,7 @@ class _TrackPageState extends State<TrackPage> {
           queueItem["municipality"].toString().trim().isNotEmpty) {
         await calculateSmartEta(
           municipality: queueItem["municipality"],
+          barangay: queueItem["barangay"]?.toString() ?? "",
           estimatedQueueTime: estimatedTime,
         );
       }
@@ -523,24 +618,34 @@ class _TrackPageState extends State<TrackPage> {
 
   Future<void> calculateSmartEta({
     required String municipality,
+    String barangay = "",
     required int estimatedQueueTime,
   }) async {
+    final normalizedBarangay = barangay.trim();
+    final locationLabel = normalizedBarangay.isEmpty
+        ? municipality
+        : "$normalizedBarangay, $municipality";
+
     setState(() {
       isLoadingEta = true;
       travelMinutes = null;
       leaveInMinutes = null;
-      municipalityText = municipality;
+      municipalityText = locationLabel;
       orsStatusText = "";
       leaveAdviceText = "";
       calculationText = "";
     });
 
     final location = getMunicipalityLocation(municipality);
+    final barangayLocation = await OrsService.getBarangayCoordinates(
+      barangay: normalizedBarangay,
+      municipality: municipality,
+    );
 
     final result = await OrsService.getTravelTimeWithFallback(
       municipality: municipality,
-      originLon: location.lon,
-      originLat: location.lat,
+      originLon: barangayLocation?.lon ?? location.lon,
+      originLat: barangayLocation?.lat ?? location.lat,
     );
 
     int computedLeaveIn = estimatedQueueTime - (result.minutes + bufferMinutes);
@@ -552,7 +657,9 @@ class _TrackPageState extends State<TrackPage> {
 
       travelMinutes = result.minutes;
       leaveInMinutes = computedLeaveIn;
-      orsStatusText = result.message;
+      orsStatusText = result.fromLiveOrs && barangayLocation != null
+          ? "Live ORS travel time used from the selected barangay."
+          : result.message;
 
       if (computedLeaveIn <= 0) {
         leaveAdviceText =
@@ -579,10 +686,15 @@ class _TrackPageState extends State<TrackPage> {
   Future<void> speakNearTurnAlert() async {
     try {
       await flutterTts.stop();
-      await flutterTts.setLanguage("en-US");
+      final filipino = customerVoiceLanguageNotifier.value == "Filipino";
+      await flutterTts.setLanguage(filipino ? "fil-PH" : "en-US");
       await flutterTts.setSpeechRate(0.45);
       await flutterTts.setPitch(1.0);
-      await flutterTts.speak("Please prepare. Your turn is near.");
+      await flutterTts.speak(
+        filipino
+            ? "Maghanda na po. Malapit na ang inyong turno."
+            : "Please prepare. Your turn is near.",
+      );
     } catch (_) {
       // Keep the visual queue alert working if voice playback is unavailable.
     }
@@ -651,11 +763,11 @@ class _TrackPageState extends State<TrackPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
+      backgroundColor: AppColors.activeBackground,
       appBar: AppBar(
         title: const Text("Track Queue"),
-        backgroundColor: AppColors.background,
-        foregroundColor: AppColors.primary,
+        backgroundColor: AppColors.activeBackground,
+        foregroundColor: AppColors.activePrimary,
       ),
       body: SafeArea(
         child: AppResponsiveContent(
@@ -739,12 +851,12 @@ class _TrackPageState extends State<TrackPage> {
       decoration: cardDecoration(),
       child: Column(
         children: [
-          const Text(
+          Text(
             "NOW SERVING",
             style: TextStyle(
               fontWeight: FontWeight.bold,
               fontSize: 15,
-              color: Colors.black54,
+              color: AppColors.activeMutedText,
               letterSpacing: 1,
             ),
           ),
@@ -787,7 +899,7 @@ class _TrackPageState extends State<TrackPage> {
               labelText: "Queue Number",
               hintText: "Example: G001 or D001",
               filled: true,
-              fillColor: Colors.grey.shade50,
+              fillColor: AppColors.activeSoftPrimary,
               prefixIcon: const Icon(Icons.confirmation_number),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
@@ -799,9 +911,15 @@ class _TrackPageState extends State<TrackPage> {
             width: double.infinity,
             height: 50,
             child: ElevatedButton.icon(
-              onPressed: isLoadingEta ? null : checkQueue,
-              icon: const Icon(Icons.search),
-              label: const Text("CHECK STATUS"),
+              onPressed: isLoadingEta || isCheckingQueue ? null : checkQueue,
+              icon: isCheckingQueue
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.search),
+              label: Text(isCheckingQueue ? "VERIFYING QUEUE" : "CHECK STATUS"),
             ),
           ),
         ],
@@ -930,12 +1048,12 @@ class _TrackPageState extends State<TrackPage> {
         children: [
           Icon(getAdviceIcon(), color: color, size: 38),
           const SizedBox(height: 10),
-          const Text(
+          Text(
             "SMART LEAVE ADVICE",
             style: TextStyle(
               fontWeight: FontWeight.bold,
               fontSize: 15,
-              color: Colors.black54,
+              color: AppColors.activeMutedText,
               letterSpacing: 1,
             ),
           ),
@@ -997,8 +1115,8 @@ class _TrackPageState extends State<TrackPage> {
           const SizedBox(height: 8),
           Text(
             calculationText,
-            style: const TextStyle(
-              color: Colors.black54,
+            style: TextStyle(
+              color: AppColors.activeMutedText,
               fontSize: 13,
               height: 1.4,
             ),
@@ -1013,7 +1131,7 @@ class _TrackPageState extends State<TrackPage> {
   Widget sectionHeader({required IconData icon, required String title}) {
     return Row(
       children: [
-        Icon(icon, color: Colors.black54),
+        Icon(icon, color: AppColors.activeMutedText),
         const SizedBox(width: 10),
         Text(
           title,
@@ -1029,9 +1147,9 @@ class _TrackPageState extends State<TrackPage> {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.grey.shade50,
+        color: AppColors.activeSoftPrimary,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.grey.shade300),
+        border: Border.all(color: AppColors.activeBorder),
       ),
       child: Row(
         children: [
@@ -1039,9 +1157,9 @@ class _TrackPageState extends State<TrackPage> {
             width: 110,
             child: Text(
               label,
-              style: const TextStyle(
+              style: TextStyle(
                 fontWeight: FontWeight.bold,
-                color: Colors.black54,
+                color: AppColors.activeMutedText,
               ),
             ),
           ),
@@ -1067,9 +1185,9 @@ class _TrackPageState extends State<TrackPage> {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.grey.shade50,
+        color: AppColors.activeSoftPrimary,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade300),
+        border: Border.all(color: AppColors.activeBorder),
       ),
       child: Row(
         children: [
@@ -1089,7 +1207,10 @@ class _TrackPageState extends State<TrackPage> {
                 const SizedBox(height: 3),
                 Text(
                   subtitle,
-                  style: const TextStyle(color: Colors.black54, fontSize: 12),
+                  style: TextStyle(
+                    color: AppColors.activeMutedText,
+                    fontSize: 12,
+                  ),
                 ),
               ],
             ),
@@ -1118,7 +1239,7 @@ class _TrackPageState extends State<TrackPage> {
       padding: const EdgeInsets.only(bottom: 9),
       child: Row(
         children: [
-          Icon(icon, size: 18, color: Colors.black54),
+          Icon(icon, size: 18, color: AppColors.activeMutedText),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
@@ -1132,7 +1253,7 @@ class _TrackPageState extends State<TrackPage> {
             value,
             style: TextStyle(
               fontWeight: bold ? FontWeight.w900 : FontWeight.bold,
-              color: bold ? getAdviceColor() : Colors.black87,
+              color: bold ? getAdviceColor() : AppColors.activePrimary,
             ),
           ),
         ],
@@ -1151,14 +1272,14 @@ class _TrackPageState extends State<TrackPage> {
       ),
       child: Row(
         children: [
-          const Icon(Icons.info_outline, color: Colors.black54, size: 20),
+          Icon(Icons.info_outline, color: AppColors.activeMutedText, size: 20),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               value,
               textAlign: TextAlign.left,
-              style: const TextStyle(
-                color: Colors.black54,
+              style: TextStyle(
+                color: AppColors.activeMutedText,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -1170,9 +1291,9 @@ class _TrackPageState extends State<TrackPage> {
 
   BoxDecoration cardDecoration() {
     return BoxDecoration(
-      color: Colors.white.withOpacity(0.96),
+      color: AppColors.activeSurface,
       borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: Colors.black.withOpacity(0.04)),
+      border: Border.all(color: AppColors.activeBorder),
       boxShadow: [
         BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 10),
       ],

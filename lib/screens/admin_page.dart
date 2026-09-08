@@ -1,11 +1,16 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../services/appointment_lifecycle.dart';
 import '../services/browser_tab_opener.dart';
+import '../services/notification_time.dart';
 import '../theme/app_theme.dart';
 import '../services/firestore_query_fields.dart';
 import '../widgets/app_responsive_content.dart';
@@ -18,12 +23,12 @@ import 'admin_settings.dart';
 
 // ================= COLOR THEME =================
 
-const Color _backgroundColor = AppColors.background;
-const Color _primaryColor = AppColors.primary;
-const Color _cardColor = AppColors.surface;
-const Color _borderColor = AppColors.border;
-const Color _mutedTextColor = AppColors.mutedText;
-const Color _softPrimaryColor = AppColors.softPrimary;
+Color get _backgroundColor => AppColors.activeBackground;
+Color get _primaryColor => AppColors.activePrimary;
+Color get _cardColor => AppColors.activeSurface;
+Color get _borderColor => AppColors.activeBorder;
+Color get _mutedTextColor => AppColors.activeMutedText;
+Color get _softPrimaryColor => AppColors.activeSoftPrimary;
 
 // ================= GLOBAL VARIABLES =================
 
@@ -119,6 +124,543 @@ class _AdminPageState extends State<AdminPage> {
   String _lastScheduledQueueSignature = "";
   bool _isGeneratingQueue = false;
   bool _isRefreshingQueue = false;
+  bool _isCallingCustomer = false;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+  _pendingAppointmentSubscription;
+  List<Map<String, dynamic>> _pendingAppointments = [];
+  final Set<String> _readPendingAppointmentNotifications = <String>{};
+  bool _receivedInitialPendingAppointments = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeAppointmentNotifications();
+  }
+
+  String get _adminNotificationPreferenceKey {
+    String accountId = '';
+    try {
+      accountId = FirebaseAuth.instance.currentUser?.uid ?? '';
+    } catch (_) {
+      // Session-only notification state is used when Firebase is unavailable.
+    }
+    return 'read_admin_appointment_notifications_${accountId.isEmpty ? 'admin' : accountId}';
+  }
+
+  String _adminAppointmentNotificationKey(Map<String, dynamic> appointment) {
+    final appointmentId = appointment['appointmentId']?.toString().trim() ?? '';
+    if (appointmentId.isNotEmpty) return appointmentId;
+    return '${appointment['queue']}:${appointment['date']}:${appointment['plate']}';
+  }
+
+  Future<void> _initializeAppointmentNotifications() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      _readPendingAppointmentNotifications.addAll(
+        preferences.getStringList(_adminNotificationPreferenceKey) ?? const [],
+      );
+    } catch (_) {
+      // Notifications still work for this session if local storage is blocked.
+    }
+
+    if (mounted) _listenToPendingAppointments();
+  }
+
+  Future<void> _saveReadAdminAppointmentNotifications() async {
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setStringList(
+        _adminNotificationPreferenceKey,
+        _readPendingAppointmentNotifications.toList(),
+      );
+    } catch (_) {
+      // The badge remains cleared for the current session.
+    }
+  }
+
+  @override
+  void dispose() {
+    _pendingAppointmentSubscription?.cancel();
+    flutterTts.stop();
+    super.dispose();
+  }
+
+  void _listenToPendingAppointments() {
+    _pendingAppointmentSubscription = FirebaseFirestore.instance
+        .collection("appointments")
+        .where("status", isEqualTo: "Pending")
+        .snapshots()
+        .listen(
+          (snapshot) {
+            unawaited(
+              expirePastPendingAppointmentDocuments(snapshot.docs).catchError((
+                _,
+              ) {
+                return 0;
+              }),
+            );
+
+            final appointments = snapshot.docs
+                .where((doc) {
+                  return !isPastPendingAppointment(doc.data());
+                })
+                .map((doc) {
+                  final data = doc.data();
+                  return {
+                    ...data,
+                    "appointmentId": data["appointmentId"] ?? doc.id,
+                  };
+                })
+                .toList();
+
+            appointments.sort((a, b) {
+              final aCreated = a["createdAt"];
+              final bCreated = b["createdAt"];
+              if (aCreated is Timestamp && bCreated is Timestamp) {
+                return bCreated.compareTo(aCreated);
+              }
+              return 0;
+            });
+
+            Map<String, dynamic>? newestAppointment;
+            if (_receivedInitialPendingAppointments) {
+              for (final change in snapshot.docChanges) {
+                if (change.type != DocumentChangeType.added) continue;
+                final data = change.doc.data();
+                if (data != null && !isPastPendingAppointment(data)) {
+                  newestAppointment = {
+                    ...data,
+                    "appointmentId": data["appointmentId"] ?? change.doc.id,
+                  };
+                  break;
+                }
+              }
+            }
+
+            _receivedInitialPendingAppointments = true;
+            if (!mounted) return;
+            final activeNotificationKeys = appointments
+                .map(_adminAppointmentNotificationKey)
+                .toSet();
+            final readCountBeforeCleanup =
+                _readPendingAppointmentNotifications.length;
+            _readPendingAppointmentNotifications.retainWhere(
+              activeNotificationKeys.contains,
+            );
+            setState(() {
+              _pendingAppointments = appointments;
+            });
+            if (readCountBeforeCleanup !=
+                _readPendingAppointmentNotifications.length) {
+              unawaited(_saveReadAdminAppointmentNotifications());
+            }
+
+            if (newestAppointment != null) {
+              final appointment = newestAppointment;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) _showNewAppointmentNotification(appointment);
+              });
+            }
+          },
+          onError: (Object error) {
+            debugPrint("Admin appointment notification stream error: $error");
+          },
+        );
+  }
+
+  void _openAppointmentDashboard() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AdminDashboard()),
+    ).then((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  void _openAppointmentDetails(Map<String, dynamic> appointment) {
+    final appointmentId = appointment['appointmentId']?.toString().trim() ?? '';
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AdminDashboard(
+          initialAppointmentId: appointmentId.isEmpty ? null : appointmentId,
+        ),
+      ),
+    ).then((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  void _showNewAppointmentNotification(Map<String, dynamic> appointment) {
+    final name =
+        (appointment["fullName"] ?? appointment["customerName"] ?? "Customer")
+            .toString();
+    final queue = appointment["queue"]?.toString() ?? "-";
+    final eventTime = formatNotificationTime(
+      appointment['createdAt'] ?? appointment['updatedAt'],
+    );
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 8),
+          content: Text(
+            "New appointment from $name • Queue $queue • $eventTime",
+          ),
+          action: SnackBarAction(
+            label: "CHECK",
+            textColor: Colors.white,
+            onPressed: () => _openAppointmentDetails(appointment),
+          ),
+        ),
+      );
+  }
+
+  Widget _buildAppointmentNotificationButton() {
+    final count = _pendingAppointments.where((appointment) {
+      return !_readPendingAppointmentNotifications.contains(
+        _adminAppointmentNotificationKey(appointment),
+      );
+    }).length;
+    return IconButton(
+      key: const Key("admin-appointment-notifications"),
+      tooltip: count == 0
+          ? "No new appointment notifications"
+          : "$count new appointment notification${count == 1 ? '' : 's'}",
+      onPressed: _showAppointmentNotifications,
+      icon: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          const Icon(Icons.notifications_outlined),
+          if (count > 0)
+            Positioned(
+              top: -6,
+              right: -7,
+              child: Container(
+                constraints: const BoxConstraints(minWidth: 18),
+                height: 18,
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: Colors.red,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: _backgroundColor, width: 1.5),
+                ),
+                child: Text(
+                  count > 99 ? "99+" : "$count",
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _markCurrentAdminNotificationsAsRead() {
+    final notificationKeys = _pendingAppointments
+        .map(_adminAppointmentNotificationKey)
+        .toSet();
+    if (notificationKeys.isEmpty ||
+        notificationKeys.every(_readPendingAppointmentNotifications.contains)) {
+      return;
+    }
+
+    setState(() {
+      _readPendingAppointmentNotifications.addAll(notificationKeys);
+    });
+    unawaited(_saveReadAdminAppointmentNotifications());
+  }
+
+  void _showAppointmentNotifications() {
+    _markCurrentAdminNotificationsAsRead();
+    final notifications = List<Map<String, dynamic>>.from(_pendingAppointments);
+
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) {
+        return Align(
+          alignment: Alignment.bottomCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 580),
+            child: FractionallySizedBox(
+              heightFactor: 0.78,
+              widthFactor: 1,
+              child: Material(
+                color: _cardColor,
+                elevation: 12,
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(24),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: Column(
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.fromLTRB(20, 16, 10, 14),
+                      decoration: BoxDecoration(
+                        color: _softPrimaryColor,
+                        border: Border(bottom: BorderSide(color: _borderColor)),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 42,
+                            height: 42,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: _primaryColor.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(13),
+                            ),
+                            child: Icon(
+                              Icons.notifications_active_outlined,
+                              color: _primaryColor,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "Appointment Notifications",
+                                  style: TextStyle(
+                                    color: _primaryColor,
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  notifications.isEmpty
+                                      ? "No current notifications"
+                                      : "${notifications.length} pending appointment${notifications.length == 1 ? '' : 's'} • marked as read",
+                                  style: TextStyle(
+                                    color: _mutedTextColor,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: "Close",
+                            onPressed: () => Navigator.pop(sheetContext),
+                            icon: const Icon(Icons.close_rounded),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: notifications.isEmpty
+                          ? Center(
+                              child: Padding(
+                                padding: const EdgeInsets.all(24),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.notifications_none_rounded,
+                                      color: _mutedTextColor,
+                                      size: 48,
+                                    ),
+                                    const SizedBox(height: 12),
+                                    Text(
+                                      "No current appointment notifications",
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        color: _primaryColor,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            )
+                          : ListView.separated(
+                              padding: const EdgeInsets.all(14),
+                              itemCount: notifications.length,
+                              separatorBuilder: (_, _) =>
+                                  const SizedBox(height: 10),
+                              itemBuilder: (_, index) {
+                                final appointment = notifications[index];
+                                return _buildAdminNotificationCard(
+                                  appointment,
+                                  onTap: () {
+                                    Navigator.pop(sheetContext);
+                                    WidgetsBinding.instance
+                                        .addPostFrameCallback((_) {
+                                          if (mounted) {
+                                            _openAppointmentDetails(
+                                              appointment,
+                                            );
+                                          }
+                                        });
+                                  },
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildAdminNotificationCard(
+    Map<String, dynamic> appointment, {
+    required VoidCallback onTap,
+  }) {
+    final name =
+        (appointment['fullName'] ?? appointment['customerName'] ?? 'Customer')
+            .toString();
+    final queue = appointment['queue']?.toString() ?? '-';
+    final plate = appointment['plate']?.toString() ?? '-';
+    final date = appointment['date']?.toString() ?? '-';
+    final vehicle = appointment['vehicle']?.toString() ?? '-';
+    final barangay = appointment['barangay']?.toString().trim() ?? '';
+    final municipality = appointment['municipality']?.toString().trim() ?? '';
+    final location = [
+      barangay,
+      municipality,
+    ].where((value) => value.isNotEmpty).join(', ');
+    final notificationTime = formatNotificationTime(
+      appointment['createdAt'] ?? appointment['updatedAt'],
+    );
+
+    return Material(
+      color: _softPrimaryColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(17),
+        side: BorderSide(color: _borderColor),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: AppColors.warning.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.event_note_rounded,
+                  color: AppColors.warning,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "New appointment from $name",
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: _primaryColor,
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      "Queue $queue • Plate $plate • $vehicle",
+                      style: TextStyle(
+                        color: _primaryColor,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12.5,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      location.isEmpty
+                          ? "Appointment date: $date"
+                          : "$date • $location",
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: _mutedTextColor,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.schedule_rounded,
+                          size: 14,
+                          color: _mutedTextColor,
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          notificationTime,
+                          style: TextStyle(
+                            color: _mutedTextColor,
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      "VIEW APPOINTMENT DETAILS",
+                      style: TextStyle(
+                        color: _primaryColor,
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right_rounded, color: _mutedTextColor),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildThemeModeButton() {
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: appThemeModeNotifier,
+      builder: (context, mode, _) {
+        final isDark = mode == ThemeMode.dark;
+        return IconButton(
+          key: const Key('admin-theme-mode-toggle'),
+          tooltip: isDark ? 'Switch to light mode' : 'Switch to dark mode',
+          onPressed: () => setAppDarkMode(!isDark),
+          icon: Icon(
+            isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+          ),
+        );
+      },
+    );
+  }
 
   bool get isFilipino => appLanguageNotifier.value == "Filipino";
 
@@ -147,14 +689,14 @@ class _AdminPageState extends State<AdminPage> {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(22),
           ),
-          title: const Row(
+          title: Row(
             children: [
               Icon(Icons.tv_rounded, color: _primaryColor),
-              SizedBox(width: 10),
-              Expanded(child: Text('Open Display Page')),
+              const SizedBox(width: 10),
+              const Expanded(child: Text('Open Display Page')),
             ],
           ),
-          content: const Text(
+          content: Text(
             'Open the customer-facing queue display in a separate tab so the '
             'Admin Control Panel stays private and available for multitasking.',
             style: TextStyle(
@@ -518,7 +1060,7 @@ class _AdminPageState extends State<AdminPage> {
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
+            colorScheme: ColorScheme.light(
               primary: _primaryColor,
               onPrimary: Colors.white,
               surface: _cardColor,
@@ -658,10 +1200,7 @@ class _AdminPageState extends State<AdminPage> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
         title: Text(
           text("Generate $type Queue", "Gumawa ng $type Queue"),
-          style: const TextStyle(
-            color: _primaryColor,
-            fontWeight: FontWeight.w800,
-          ),
+          style: TextStyle(color: _primaryColor, fontWeight: FontWeight.w800),
         ),
         content: SingleChildScrollView(
           child: Column(
@@ -670,14 +1209,14 @@ class _AdminPageState extends State<AdminPage> {
               TextField(
                 controller: nameController,
                 textCapitalization: TextCapitalization.words,
-                style: const TextStyle(
+                style: TextStyle(
                   color: _primaryColor,
                   fontWeight: FontWeight.w600,
                 ),
                 decoration: InputDecoration(
                   labelText: text("Customer Name", "Pangalan ng Customer"),
-                  labelStyle: const TextStyle(color: _mutedTextColor),
-                  prefixIcon: const Icon(
+                  labelStyle: TextStyle(color: _mutedTextColor),
+                  prefixIcon: Icon(
                     Icons.person_outline_rounded,
                     color: _primaryColor,
                   ),
@@ -685,14 +1224,11 @@ class _AdminPageState extends State<AdminPage> {
                   fillColor: _backgroundColor,
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(16),
-                    borderSide: const BorderSide(color: _borderColor),
+                    borderSide: BorderSide(color: _borderColor),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(16),
-                    borderSide: const BorderSide(
-                      color: _primaryColor,
-                      width: 1.5,
-                    ),
+                    borderSide: BorderSide(color: _primaryColor, width: 1.5),
                   ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(16),
@@ -709,7 +1245,7 @@ class _AdminPageState extends State<AdminPage> {
                   const _UpperCaseTextFormatter(),
                   LengthLimitingTextInputFormatter(7),
                 ],
-                style: const TextStyle(
+                style: TextStyle(
                   color: _primaryColor,
                   fontWeight: FontWeight.w600,
                   letterSpacing: 1.2,
@@ -722,23 +1258,17 @@ class _AdminPageState extends State<AdminPage> {
                     "Maglagay ng eksaktong 6–7 letra at numero",
                   ),
                   counterText: "",
-                  labelStyle: const TextStyle(color: _mutedTextColor),
-                  prefixIcon: const Icon(
-                    Icons.pin_rounded,
-                    color: _primaryColor,
-                  ),
+                  labelStyle: TextStyle(color: _mutedTextColor),
+                  prefixIcon: Icon(Icons.pin_rounded, color: _primaryColor),
                   filled: true,
                   fillColor: _backgroundColor,
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(16),
-                    borderSide: const BorderSide(color: _borderColor),
+                    borderSide: BorderSide(color: _borderColor),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(16),
-                    borderSide: const BorderSide(
-                      color: _primaryColor,
-                      width: 1.5,
-                    ),
+                    borderSide: BorderSide(color: _primaryColor, width: 1.5),
                   ),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(16),
@@ -753,7 +1283,7 @@ class _AdminPageState extends State<AdminPage> {
           OutlinedButton(
             style: OutlinedButton.styleFrom(
               foregroundColor: _primaryColor,
-              side: const BorderSide(color: _primaryColor),
+              side: BorderSide(color: _primaryColor),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
               ),
@@ -941,7 +1471,7 @@ class _AdminPageState extends State<AdminPage> {
               ),
               title: Text(
                 text("Edit Queue - $queue", "I-edit ang Queue - $queue"),
-                style: const TextStyle(
+                style: TextStyle(
                   color: _primaryColor,
                   fontWeight: FontWeight.w800,
                 ),
@@ -954,7 +1484,7 @@ class _AdminPageState extends State<AdminPage> {
                       controller: nameController,
                       enabled: !isSaving,
                       textCapitalization: TextCapitalization.words,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: _primaryColor,
                         fontWeight: FontWeight.w600,
                       ),
@@ -963,7 +1493,7 @@ class _AdminPageState extends State<AdminPage> {
                           "Customer Name",
                           "Pangalan ng Customer",
                         ),
-                        prefixIcon: const Icon(
+                        prefixIcon: Icon(
                           Icons.person_outline_rounded,
                           color: _primaryColor,
                         ),
@@ -987,7 +1517,7 @@ class _AdminPageState extends State<AdminPage> {
                         const _UpperCaseTextFormatter(),
                         LengthLimitingTextInputFormatter(7),
                       ],
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: _primaryColor,
                         fontWeight: FontWeight.w600,
                         letterSpacing: 1.2,
@@ -1000,7 +1530,7 @@ class _AdminPageState extends State<AdminPage> {
                           "Maglagay ng eksaktong 6–7 letra at numero",
                         ),
                         counterText: "",
-                        prefixIcon: const Icon(
+                        prefixIcon: Icon(
                           Icons.pin_rounded,
                           color: _primaryColor,
                         ),
@@ -1025,7 +1555,7 @@ class _AdminPageState extends State<AdminPage> {
                           "Queue number, date, and vehicle type stay unchanged.",
                           "Hindi mababago ang queue number, petsa, at uri ng sasakyan.",
                         ),
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: _mutedTextColor,
                           fontSize: 12.5,
                           height: 1.35,
@@ -1188,17 +1718,14 @@ class _AdminPageState extends State<AdminPage> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
         title: Text(
           text("Delete Walk-In Queue?", "Burahin ang Walk-In Queue?"),
-          style: const TextStyle(
-            color: _primaryColor,
-            fontWeight: FontWeight.w800,
-          ),
+          style: TextStyle(color: _primaryColor, fontWeight: FontWeight.w800),
         ),
         content: Text(
           text(
             "Permanently delete $queue for $name ($plate)? This cannot be undone.",
             "Permanenteng burahin ang $queue para kay $name ($plate)? Hindi na ito maibabalik.",
           ),
-          style: const TextStyle(color: _mutedTextColor, height: 1.4),
+          style: TextStyle(color: _mutedTextColor, height: 1.4),
         ),
         actionsPadding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
         actions: [
@@ -1241,7 +1768,7 @@ class _AdminPageState extends State<AdminPage> {
       final updatedIssued = Map<String, List<String>>.from(
         issuedQueueCodesNotifier.value,
       );
-      updatedIssued[date] = List<String>.from(updatedIssued[date] ?? const [])
+      updatedIssued[date] = List<String>.from(updatedIssued[date] ?? [])
         ..remove(queue);
       issuedQueueCodesNotifier.value = updatedIssued;
 
@@ -1275,7 +1802,46 @@ class _AdminPageState extends State<AdminPage> {
   // ================= CALL CUSTOMER =================
 
   Future<void> callCustomer(Map<String, dynamic> customer) async {
+    if (_isCallingCustomer) return;
+
+    if (getDisplayedNowServing() != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            text(
+              "Finish the current customer before calling the next queue.",
+              "Tapusin muna ang kasalukuyang customer bago tumawag ng susunod.",
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+
+    final String date =
+        customer["date"]?.toString() ?? selectedQueueDateNotifier.value;
+    setState(() => _isCallingCustomer = true);
+
     try {
+      final activeQueue = await queueItemsRef(date)
+          .where("status", isEqualTo: "Now Serving")
+          .limit(1)
+          .get(const GetOptions(source: Source.server));
+      if (activeQueue.docs.isNotEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              text(
+                "A customer is already being served. Finish or skip that customer first.",
+                "May customer na kasalukuyang sini-serve. Tapusin o i-skip muna siya.",
+              ),
+            ),
+          ),
+        );
+        return;
+      }
+
       await updateQueueItemStatus(
         customer: customer,
         status: "Now Serving",
@@ -1302,9 +1868,12 @@ class _AdminPageState extends State<AdminPage> {
 
       setState(() {});
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("Failed to call customer: $e")));
+    } finally {
+      if (mounted) setState(() => _isCallingCustomer = false);
     }
   }
 
@@ -1598,24 +2167,21 @@ class _AdminPageState extends State<AdminPage> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
         title: Text(
           text("Reset System", "I-reset ang System"),
-          style: const TextStyle(
-            color: _primaryColor,
-            fontWeight: FontWeight.w800,
-          ),
+          style: TextStyle(color: _primaryColor, fontWeight: FontWeight.w800),
         ),
         content: Text(
           text(
             "This will clear the active queues for the selected date.",
             "Mabubura ang active queues para sa napiling petsa.",
           ),
-          style: const TextStyle(color: _mutedTextColor, height: 1.4),
+          style: TextStyle(color: _mutedTextColor, height: 1.4),
         ),
         actionsPadding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
         actions: [
           OutlinedButton(
             style: OutlinedButton.styleFrom(
               foregroundColor: _primaryColor,
-              side: const BorderSide(color: _primaryColor),
+              side: BorderSide(color: _primaryColor),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14),
               ),
@@ -1712,7 +2278,7 @@ class _AdminPageState extends State<AdminPage> {
   Widget buildRefreshControl(BuildContext context) {
     final bool showLabel = MediaQuery.sizeOf(context).width >= 700;
     final Widget icon = _isRefreshingQueue
-        ? const SizedBox.square(
+        ? SizedBox.square(
             dimension: 18,
             child: CircularProgressIndicator(
               strokeWidth: 2,
@@ -1739,7 +2305,7 @@ class _AdminPageState extends State<AdminPage> {
         label: Text(text("Refresh", "I-refresh")),
         style: OutlinedButton.styleFrom(
           foregroundColor: _primaryColor,
-          side: const BorderSide(color: _borderColor),
+          side: BorderSide(color: _borderColor),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
@@ -1762,10 +2328,21 @@ class _AdminPageState extends State<AdminPage> {
               scheduleQueueSyncAfterBuild(selectedDate, snapshot.data!);
             }
 
-            List<Map<String, dynamic>> selectedDateQueue =
-                getQueueForSelectedDate();
-            Map<String, dynamic>? displayedNowServing =
-                getDisplayedNowServing();
+            final onlineItems = snapshot.data;
+            final List<Map<String, dynamic>> selectedDateQueue =
+                onlineItems == null
+                ? getQueueForSelectedDate()
+                : onlineItems.where((item) {
+                    final status = item["status"]?.toString() ?? "Waiting";
+                    return status == "Waiting" || status == "Skipped";
+                  }).toList();
+            final onlineNowServing = onlineItems
+                ?.where((item) => item["status"]?.toString() == "Now Serving")
+                .toList();
+            final Map<String, dynamic>? displayedNowServing =
+                onlineNowServing == null
+                ? getDisplayedNowServing()
+                : (onlineNowServing.isEmpty ? null : onlineNowServing.last);
 
             return Theme(
               data: Theme.of(context).copyWith(
@@ -1776,7 +2353,7 @@ class _AdminPageState extends State<AdminPage> {
                   surface: _cardColor,
                   onSurface: _primaryColor,
                 ),
-                appBarTheme: const AppBarTheme(
+                appBarTheme: AppBarTheme(
                   backgroundColor: _backgroundColor,
                   foregroundColor: _primaryColor,
                   elevation: 0,
@@ -1812,6 +2389,8 @@ class _AdminPageState extends State<AdminPage> {
                     text("Admin Control Panel", "Admin Control Panel"),
                   ),
                   actions: [
+                    _buildThemeModeButton(),
+                    _buildAppointmentNotificationButton(),
                     buildRefreshControl(context),
                     const SizedBox(width: 12),
                   ],
@@ -1909,7 +2488,7 @@ class _AdminPageState extends State<AdminPage> {
         padding: EdgeInsets.zero,
         children: [
           DrawerHeader(
-            decoration: const BoxDecoration(color: _primaryColor),
+            decoration: BoxDecoration(color: _primaryColor),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.end,
@@ -1951,12 +2530,7 @@ class _AdminPageState extends State<AdminPage> {
             title: text("Appointment Dashboard", "Appointment Dashboard"),
             onTap: () {
               Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const AdminDashboard()),
-              ).then((_) {
-                setState(() {});
-              });
+              _openAppointmentDashboard();
             },
           ),
           drawerTile(
@@ -1983,7 +2557,7 @@ class _AdminPageState extends State<AdminPage> {
               });
             },
           ),
-          const Divider(color: _borderColor, height: 24),
+          Divider(color: _borderColor, height: 24),
           drawerTile(
             icon: Icons.logout_rounded,
             title: text("Logout", "Logout"),
@@ -2044,7 +2618,7 @@ class _AdminPageState extends State<AdminPage> {
                 "Petsa ng Queue: ${selectedQueueDateNotifier.value}",
               ),
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
                 fontWeight: FontWeight.w800,
                 color: _primaryColor,
                 fontSize: 15,
@@ -2198,7 +2772,10 @@ class _AdminPageState extends State<AdminPage> {
         const SizedBox(height: 18),
         SizedBox(
           height: waitingListHeight,
-          child: buildWaitingQueueCard(selectedDateQueue),
+          child: buildWaitingQueueCard(
+            selectedDateQueue,
+            canCallCustomer: displayedNowServing == null && !_isCallingCustomer,
+          ),
         ),
       ],
     );
@@ -2246,7 +2823,7 @@ class _AdminPageState extends State<AdminPage> {
                       : displayedNowServing['name'],
                   textAlign: TextAlign.center,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 17,
                     fontWeight: FontWeight.w700,
                     color: _primaryColor,
@@ -2274,7 +2851,10 @@ class _AdminPageState extends State<AdminPage> {
 
   // ================= WAITING QUEUE CARD =================
 
-  Widget buildWaitingQueueCard(List<Map<String, dynamic>> selectedDateQueue) {
+  Widget buildWaitingQueueCard(
+    List<Map<String, dynamic>> selectedDateQueue, {
+    required bool canCallCustomer,
+  }) {
     return cardContainer(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2301,7 +2881,7 @@ class _AdminPageState extends State<AdminPage> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(
+                          Icon(
                             Icons.inbox_rounded,
                             color: _primaryColor,
                             size: 42,
@@ -2313,7 +2893,7 @@ class _AdminPageState extends State<AdminPage> {
                               "Walang queue sa petsang ito",
                             ),
                             textAlign: TextAlign.center,
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: _primaryColor,
                               fontWeight: FontWeight.w800,
                             ),
@@ -2350,10 +2930,21 @@ class _AdminPageState extends State<AdminPage> {
                                     children: [
                                       miniButton(
                                         Icons.volume_up_rounded,
-                                        Colors.blue,
-                                        () {
-                                          callCustomer(customer);
-                                        },
+                                        canCallCustomer
+                                            ? Colors.blue
+                                            : Colors.grey,
+                                        canCallCustomer
+                                            ? () => callCustomer(customer)
+                                            : null,
+                                        tooltip: canCallCustomer
+                                            ? text(
+                                                "Call this customer",
+                                                "Tawagin ang customer na ito",
+                                              )
+                                            : text(
+                                                "Finish the current customer first",
+                                                "Tapusin muna ang kasalukuyang customer",
+                                              ),
                                       ),
                                       if (canManageWalkIn) ...[
                                         const SizedBox(width: 8),
@@ -2403,10 +2994,19 @@ class _AdminPageState extends State<AdminPage> {
                                 Expanded(child: buildQueueInfo(customer)),
                                 miniButton(
                                   Icons.volume_up_rounded,
-                                  Colors.blue,
-                                  () {
-                                    callCustomer(customer);
-                                  },
+                                  canCallCustomer ? Colors.blue : Colors.grey,
+                                  canCallCustomer
+                                      ? () => callCustomer(customer)
+                                      : null,
+                                  tooltip: canCallCustomer
+                                      ? text(
+                                          "Call this customer",
+                                          "Tawagin ang customer na ito",
+                                        )
+                                      : text(
+                                          "Finish the current customer first",
+                                          "Tapusin muna ang kasalukuyang customer",
+                                        ),
                                 ),
                                 if (canManageWalkIn) ...[
                                   const SizedBox(width: 8),
@@ -2484,7 +3084,7 @@ class _AdminPageState extends State<AdminPage> {
               Text(
                 customer['queue'] ?? "-",
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w900,
                   color: _primaryColor,
@@ -2494,7 +3094,7 @@ class _AdminPageState extends State<AdminPage> {
               Text(
                 customer['name'] ?? "-",
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   color: _mutedTextColor,
                   fontWeight: FontWeight.w600,
                 ),
@@ -2503,7 +3103,7 @@ class _AdminPageState extends State<AdminPage> {
               Text(
                 "${customer['plate'] ?? '-'} • ${customer['type'] ?? '-'}",
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   color: _mutedTextColor,
                   fontSize: 12.5,
                   fontWeight: FontWeight.w600,
@@ -2523,7 +3123,7 @@ class _AdminPageState extends State<AdminPage> {
                 child: Text(
                   customer['source'] ?? "",
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     color: _mutedTextColor,
                     fontWeight: FontWeight.w700,
@@ -2585,7 +3185,7 @@ class _AdminPageState extends State<AdminPage> {
             title,
             textAlign: centered ? TextAlign.center : TextAlign.start,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
+            style: TextStyle(
               fontWeight: FontWeight.w900,
               fontSize: 16,
               color: _primaryColor,
@@ -2634,7 +3234,7 @@ class _AdminPageState extends State<AdminPage> {
           Text(
             title,
             textAlign: TextAlign.center,
-            style: const TextStyle(
+            style: TextStyle(
               fontWeight: FontWeight.w800,
               color: _primaryColor,
               fontSize: 13,
@@ -2645,7 +3245,7 @@ class _AdminPageState extends State<AdminPage> {
             fit: BoxFit.scaleDown,
             child: Text(
               value,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 28,
                 fontWeight: FontWeight.w900,
                 color: _primaryColor,
@@ -2662,7 +3262,7 @@ class _AdminPageState extends State<AdminPage> {
   Widget miniButton(
     IconData icon,
     Color color,
-    VoidCallback onPressed, {
+    VoidCallback? onPressed, {
     String? tooltip,
   }) {
     return Tooltip(
@@ -2682,6 +3282,8 @@ class _AdminPageState extends State<AdminPage> {
           style: ElevatedButton.styleFrom(
             backgroundColor: color,
             foregroundColor: Colors.white,
+            disabledBackgroundColor: Colors.grey.shade400,
+            disabledForegroundColor: Colors.white70,
             padding: EdgeInsets.zero,
             elevation: 2,
             shape: RoundedRectangleBorder(

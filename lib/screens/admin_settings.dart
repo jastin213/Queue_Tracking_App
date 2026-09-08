@@ -6,12 +6,12 @@ import '../theme/app_theme.dart';
 // THEME COLORS
 // ============================================================================
 
-const Color _backgroundColor = AppColors.background;
-const Color _primaryColor = AppColors.primary;
-const Color _cardColor = AppColors.surface;
-const Color _borderColor = AppColors.border;
-const Color _mutedTextColor = AppColors.mutedText;
-const Color _softPrimaryColor = AppColors.softPrimary;
+Color get _backgroundColor => AppColors.activeBackground;
+Color get _primaryColor => AppColors.activePrimary;
+Color get _cardColor => AppColors.activeSurface;
+Color get _borderColor => AppColors.activeBorder;
+Color get _mutedTextColor => AppColors.activeMutedText;
+Color get _softPrimaryColor => AppColors.activeSoftPrimary;
 
 // ============================================================================
 // ADMIN SETTINGS GLOBAL NOTIFIERS
@@ -118,17 +118,17 @@ class _AdminSettingsState extends State<AdminSettings> {
   InputDecoration inputDecoration(String hint) {
     return InputDecoration(
       hintText: hint,
-      hintStyle: const TextStyle(color: _mutedTextColor),
+      hintStyle: TextStyle(color: _mutedTextColor),
       filled: true,
       fillColor: _backgroundColor,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: _borderColor, width: 1.2),
+        borderSide: BorderSide(color: _borderColor, width: 1.2),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: _primaryColor, width: 1.5),
+        borderSide: BorderSide(color: _primaryColor, width: 1.5),
       ),
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
     );
@@ -163,7 +163,7 @@ class _AdminSettingsState extends State<AdminSettings> {
           surface: _cardColor,
           onSurface: _primaryColor,
         ),
-        appBarTheme: const AppBarTheme(
+        appBarTheme: AppBarTheme(
           backgroundColor: _backgroundColor,
           foregroundColor: _primaryColor,
           elevation: 0,
@@ -234,10 +234,6 @@ class _AdminSettingsState extends State<AdminSettings> {
     );
   }
 
-  // ==========================================================================
-  // SECTION: VOICE SETTINGS
-  // ==========================================================================
-
   Widget buildVoiceSettings() {
     return settingsCard(
       icon: Icons.record_voice_over_rounded,
@@ -250,11 +246,11 @@ class _AdminSettingsState extends State<AdminSettings> {
             valueListenable: voiceLanguageNotifier,
             builder: (context, value, _) {
               return DropdownButtonFormField<String>(
-                value: value,
+                initialValue: value,
                 dropdownColor: _cardColor,
                 decoration: inputDecoration("Select voice language"),
                 iconEnabledColor: _primaryColor,
-                style: const TextStyle(
+                style: TextStyle(
                   color: _primaryColor,
                   fontWeight: FontWeight.w700,
                 ),
@@ -275,11 +271,11 @@ class _AdminSettingsState extends State<AdminSettings> {
             valueListenable: voiceSpeedNotifier,
             builder: (context, value, _) {
               return DropdownButtonFormField<String>(
-                value: value,
+                initialValue: value,
                 dropdownColor: _cardColor,
                 decoration: inputDecoration("Select voice speed"),
                 iconEnabledColor: _primaryColor,
-                style: const TextStyle(
+                style: TextStyle(
                   color: _primaryColor,
                   fontWeight: FontWeight.w700,
                 ),
@@ -324,14 +320,11 @@ class _AdminSettingsState extends State<AdminSettings> {
         valueListenable: appLanguageNotifier,
         builder: (context, value, _) {
           return DropdownButtonFormField<String>(
-            value: value,
+            initialValue: value,
             dropdownColor: _cardColor,
             decoration: inputDecoration("Select app language"),
             iconEnabledColor: _primaryColor,
-            style: const TextStyle(
-              color: _primaryColor,
-              fontWeight: FontWeight.w700,
-            ),
+            style: TextStyle(color: _primaryColor, fontWeight: FontWeight.w700),
             items: const [
               DropdownMenuItem(value: "English", child: Text("English")),
               DropdownMenuItem(value: "Filipino", child: Text("Filipino")),
@@ -366,7 +359,7 @@ class _AdminSettingsState extends State<AdminSettings> {
               builder: (context, value, _) {
                 return Switch(
                   value: value,
-                  activeColor: _primaryColor,
+                  activeThumbColor: _primaryColor,
                   onChanged: (newValue) {
                     requireResetConfirmationNotifier.value = newValue;
                     setState(() {});
@@ -375,7 +368,7 @@ class _AdminSettingsState extends State<AdminSettings> {
               },
             ),
           ),
-          const Divider(color: _borderColor),
+          Divider(color: _borderColor),
           settingLabel("Daily Queue Limit"),
           ValueListenableBuilder<int>(
             valueListenable: dailyQueueLimitNotifier,
@@ -407,7 +400,7 @@ class _AdminSettingsState extends State<AdminSettings> {
                     ),
                     child: Text(
                       "$value",
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: _primaryColor,
                         fontWeight: FontWeight.w900,
                       ),
@@ -442,7 +435,7 @@ class _AdminSettingsState extends State<AdminSettings> {
               builder: (context, value, _) {
                 return Switch(
                   value: value,
-                  activeColor: _primaryColor,
+                  activeThumbColor: _primaryColor,
                   onChanged: (newValue) {
                     showCustomerNameNotifier.value = newValue;
                     setState(() {});
@@ -451,7 +444,7 @@ class _AdminSettingsState extends State<AdminSettings> {
               },
             ),
           ),
-          const Divider(color: _borderColor),
+          Divider(color: _borderColor),
           settingTile(
             icon: Icons.directions_car_rounded,
             title: "Show Vehicle Type",
@@ -461,7 +454,7 @@ class _AdminSettingsState extends State<AdminSettings> {
               builder: (context, value, _) {
                 return Switch(
                   value: value,
-                  activeColor: _primaryColor,
+                  activeThumbColor: _primaryColor,
                   onChanged: (newValue) {
                     showVehicleTypeNotifier.value = newValue;
                     setState(() {});
@@ -470,7 +463,7 @@ class _AdminSettingsState extends State<AdminSettings> {
               },
             ),
           ),
-          const Divider(color: _borderColor),
+          Divider(color: _borderColor),
           settingTile(
             icon: Icons.timer_outlined,
             title: "Show Estimated Waiting Time",
@@ -480,7 +473,7 @@ class _AdminSettingsState extends State<AdminSettings> {
               builder: (context, value, _) {
                 return Switch(
                   value: value,
-                  activeColor: _primaryColor,
+                  activeThumbColor: _primaryColor,
                   onChanged: (newValue) {
                     showEstimatedWaitingTimeNotifier.value = newValue;
                     setState(() {});
@@ -494,10 +487,7 @@ class _AdminSettingsState extends State<AdminSettings> {
           TextField(
             controller: announcementController,
             maxLines: 3,
-            style: const TextStyle(
-              color: _primaryColor,
-              fontWeight: FontWeight.w600,
-            ),
+            style: TextStyle(color: _primaryColor, fontWeight: FontWeight.w600),
             decoration: inputDecoration("Enter display announcement"),
           ),
           const SizedBox(height: 12),
@@ -534,7 +524,7 @@ class _AdminSettingsState extends State<AdminSettings> {
           builder: (context, value, _) {
             return Switch(
               value: value,
-              activeColor: _primaryColor,
+              activeThumbColor: _primaryColor,
               onChanged: (newValue) {
                 autoApproveAppointmentsNotifier.value = newValue;
                 setState(() {});
@@ -605,7 +595,7 @@ class _AdminSettingsState extends State<AdminSettings> {
                     Text(
                       title,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: _primaryColor,
                         fontWeight: FontWeight.w900,
                         fontSize: 17,
@@ -614,7 +604,7 @@ class _AdminSettingsState extends State<AdminSettings> {
                     const SizedBox(height: 4),
                     Text(
                       subtitle,
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: _mutedTextColor,
                         fontSize: 13,
                         height: 1.3,
@@ -659,7 +649,7 @@ class _AdminSettingsState extends State<AdminSettings> {
               Text(
                 title,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   color: _primaryColor,
                   fontWeight: FontWeight.w800,
                   fontSize: 14.5,
@@ -668,7 +658,7 @@ class _AdminSettingsState extends State<AdminSettings> {
               const SizedBox(height: 3),
               Text(
                 subtitle,
-                style: const TextStyle(
+                style: TextStyle(
                   color: _mutedTextColor,
                   fontSize: 12.5,
                   height: 1.3,
@@ -690,7 +680,7 @@ class _AdminSettingsState extends State<AdminSettings> {
         padding: const EdgeInsets.only(bottom: 8),
         child: Text(
           text,
-          style: const TextStyle(
+          style: TextStyle(
             color: _primaryColor,
             fontWeight: FontWeight.w800,
             fontSize: 14,
@@ -727,7 +717,7 @@ class ReminderText extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Icon(
+        Icon(
           Icons.check_circle_outline_rounded,
           color: _primaryColor,
           size: 18,
@@ -736,7 +726,7 @@ class ReminderText extends StatelessWidget {
         Expanded(
           child: Text(
             text,
-            style: const TextStyle(
+            style: TextStyle(
               color: _mutedTextColor,
               fontSize: 13.5,
               height: 1.3,

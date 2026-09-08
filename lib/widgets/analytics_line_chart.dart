@@ -27,18 +27,18 @@ class AnalyticsLineChart extends StatelessWidget {
         width: double.infinity,
         padding: const EdgeInsets.fromLTRB(12, 16, 12, 10),
         decoration: BoxDecoration(
-          color: AppColors.background,
+          color: AppColors.activeBackground,
           borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: AppColors.border),
+          border: Border.all(color: AppColors.activeBorder),
         ),
         child: Column(
           children: [
-            const Wrap(
+            Wrap(
               alignment: WrapAlignment.center,
               spacing: 18,
               runSpacing: 8,
               children: [
-                _ChartLegend(color: AppColors.primary, label: "Served"),
+                _ChartLegend(color: AppColors.activePrimary, label: "Served"),
                 _ChartLegend(color: AppColors.success, label: "Appointments"),
                 _ChartLegend(color: AppColors.danger, label: "Failed"),
               ],
@@ -109,11 +109,11 @@ class _AnalyticsLineChartPainter extends CustomPainter {
   final List<int> appointmentValues;
   final List<int> failedValues;
 
-  static const Color _servedColor = AppColors.primary;
+  static Color get _servedColor => AppColors.activePrimary;
   static const Color _appointmentColor = AppColors.success;
   static const Color _failedColor = AppColors.danger;
-  static const Color _gridColor = AppColors.border;
-  static const Color _labelColor = AppColors.mutedText;
+  static Color get _gridColor => AppColors.activeBorder;
+  static Color get _labelColor => AppColors.activeMutedText;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -275,7 +275,7 @@ class _AnalyticsLineChartPainter extends CustomPainter {
     final painter = TextPainter(
       text: TextSpan(
         text: text,
-        style: const TextStyle(
+        style: TextStyle(
           color: _labelColor,
           fontSize: 10,
           fontWeight: FontWeight.w700,

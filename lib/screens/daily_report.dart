@@ -16,12 +16,12 @@ import '../widgets/app_refresh_indicator.dart';
 
 // ================= COLOR THEME =================
 
-const Color _backgroundColor = AppColors.background;
-const Color _primaryColor = AppColors.primary;
-const Color _cardColor = AppColors.surface;
-const Color _borderColor = AppColors.border;
-const Color _mutedTextColor = AppColors.mutedText;
-const Color _softPrimaryColor = AppColors.softPrimary;
+Color get _backgroundColor => AppColors.activeBackground;
+Color get _primaryColor => AppColors.activePrimary;
+Color get _cardColor => AppColors.activeSurface;
+Color get _borderColor => AppColors.activeBorder;
+Color get _mutedTextColor => AppColors.activeMutedText;
+Color get _softPrimaryColor => AppColors.activeSoftPrimary;
 
 enum _ReportSection {
   servedCustomers,
@@ -179,7 +179,7 @@ class _DailyReportState extends State<DailyReport> {
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
+            colorScheme: ColorScheme.light(
               primary: _primaryColor,
               onPrimary: Colors.white,
               surface: _cardColor,
@@ -1030,7 +1030,7 @@ class _DailyReportState extends State<DailyReport> {
           surface: _cardColor,
           onSurface: _primaryColor,
         ),
-        appBarTheme: const AppBarTheme(
+        appBarTheme: AppBarTheme(
           backgroundColor: _backgroundColor,
           foregroundColor: _primaryColor,
           elevation: 0,
@@ -1076,12 +1076,12 @@ class _DailyReportState extends State<DailyReport> {
 
                           if (isLoading)
                             cardContainer(
-                              child: const Column(
+                              child: Column(
                                 children: [
                                   CircularProgressIndicator(
                                     color: _primaryColor,
                                   ),
-                                  SizedBox(height: 14),
+                                  const SizedBox(height: 14),
                                   Text(
                                     "Loading report records...",
                                     style: TextStyle(
@@ -1109,8 +1109,8 @@ class _DailyReportState extends State<DailyReport> {
                               appointments: _analyticsAppointments,
                             ),
                             if (_analyticsLoading)
-                              const Padding(
-                                padding: EdgeInsets.only(top: 8),
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
                                 child: LinearProgressIndicator(
                                   minHeight: 2,
                                   color: _primaryColor,
@@ -1157,7 +1157,7 @@ class _DailyReportState extends State<DailyReport> {
             child: Text(
               "Report Date: $selectedDate",
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
                 color: _primaryColor,
                 fontWeight: FontWeight.w800,
                 fontSize: 15,
@@ -1201,7 +1201,7 @@ class _DailyReportState extends State<DailyReport> {
             title: "Printable & Downloadable PDF Reports",
           ),
           const SizedBox(height: 10),
-          const Text(
+          Text(
             "Print a report or download a soft-copy PDF to save, email, or send to LTO. PDF exports include only Passed and Failed records.",
             style: TextStyle(
               color: _mutedTextColor,
@@ -1294,7 +1294,7 @@ class _DailyReportState extends State<DailyReport> {
                     children: [
                       Text(
                         title,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: _primaryColor,
                           fontSize: 14,
                           fontWeight: FontWeight.w900,
@@ -1303,7 +1303,7 @@ class _DailyReportState extends State<DailyReport> {
                       const SizedBox(height: 2),
                       Text(
                         subtitle,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: _mutedTextColor,
                           fontSize: 11.5,
                           fontWeight: FontWeight.w600,
@@ -1376,7 +1376,7 @@ class _DailyReportState extends State<DailyReport> {
           Text(
             error,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: _mutedTextColor, height: 1.4),
+            style: TextStyle(color: _mutedTextColor, height: 1.4),
           ),
         ],
       ),
@@ -1470,7 +1470,7 @@ class _DailyReportState extends State<DailyReport> {
                       const SizedBox(height: 3),
                       Text(
                         statusMessage,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: _mutedTextColor,
                           fontSize: 13,
                           height: 1.3,
@@ -1536,10 +1536,7 @@ class _DailyReportState extends State<DailyReport> {
               ],
             ),
           const SizedBox(height: 16),
-          sectionHeader(
-            icon: Icons.show_chart_rounded,
-            title: "Analytics Line Graph",
-          ),
+          sectionHeader(icon: Icons.show_chart_rounded, title: "Analytics"),
           const SizedBox(height: 12),
           monthly.isEmpty
               ? emptyBox("No analytics data yet.")
@@ -1605,7 +1602,7 @@ class _DailyReportState extends State<DailyReport> {
                 child: Text(
                   monthLabelFromKey(entry.key),
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w800,
                     color: _primaryColor,
@@ -1641,7 +1638,7 @@ class _DailyReportState extends State<DailyReport> {
                 child: Text(
                   "$total",
                   textAlign: TextAlign.right,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: _primaryColor,
                     fontWeight: FontWeight.w900,
                   ),
@@ -1700,7 +1697,7 @@ class _DailyReportState extends State<DailyReport> {
           Text(
             title,
             textAlign: TextAlign.center,
-            style: const TextStyle(
+            style: TextStyle(
               color: _primaryColor,
               fontWeight: FontWeight.w800,
               fontSize: 12,
@@ -1711,7 +1708,7 @@ class _DailyReportState extends State<DailyReport> {
             fit: BoxFit.scaleDown,
             child: Text(
               value,
-              style: const TextStyle(
+              style: TextStyle(
                 color: _primaryColor,
                 fontSize: 25,
                 fontWeight: FontWeight.w900,
@@ -1723,7 +1720,7 @@ class _DailyReportState extends State<DailyReport> {
             subtitle,
             textAlign: TextAlign.center,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
+            style: TextStyle(
               color: _mutedTextColor,
               fontSize: 11,
               fontWeight: FontWeight.w600,
@@ -1762,7 +1759,7 @@ class _DailyReportState extends State<DailyReport> {
 
   Set<String> legacyNameSearchPrefixes(String value) {
     final String trimmed = value.trim();
-    if (trimmed.isEmpty) return const {};
+    if (trimmed.isEmpty) return {};
 
     final String titleCase = trimmed
         .split(RegExp(r'\s+'))
@@ -2132,7 +2129,7 @@ class _DailyReportState extends State<DailyReport> {
               ),
               title: Text(
                 "Edit Customer - $queue",
-                style: const TextStyle(
+                style: TextStyle(
                   color: _primaryColor,
                   fontWeight: FontWeight.w900,
                 ),
@@ -2220,7 +2217,7 @@ class _DailyReportState extends State<DailyReport> {
                             borderRadius: BorderRadius.circular(14),
                             border: Border.all(color: _borderColor),
                           ),
-                          child: const Text(
+                          child: Text(
                             "Queue number, date, result, customer type, and "
                             "vehicle type stay unchanged.",
                             style: TextStyle(
@@ -2379,7 +2376,7 @@ class _DailyReportState extends State<DailyReport> {
       builder: (dialogContext) => AlertDialog(
         backgroundColor: _cardColor,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-        title: const Text(
+        title: Text(
           "Delete Customer Record?",
           style: TextStyle(color: _primaryColor, fontWeight: FontWeight.w900),
         ),
@@ -2388,7 +2385,7 @@ class _DailyReportState extends State<DailyReport> {
           "appointment records, including uploaded appointment documents, "
           "will also be removed. The customer's login account will not be "
           "deleted. This action cannot be undone.",
-          style: const TextStyle(color: _mutedTextColor, height: 1.45),
+          style: TextStyle(color: _mutedTextColor, height: 1.45),
         ),
         actionsPadding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
         actions: [
@@ -2432,11 +2429,7 @@ class _DailyReportState extends State<DailyReport> {
     Map<String, dynamic> appointment,
   ) async {
     final storagePaths = <String>{
-      for (final field in const [
-        "idStoragePath",
-        "orStoragePath",
-        "crStoragePath",
-      ])
+      for (final field in ["idStoragePath", "orStoragePath", "crStoragePath"])
         if ((appointment[field]?.toString().trim() ?? "").isNotEmpty)
           appointment[field].toString().trim(),
     };
@@ -2537,15 +2530,15 @@ class _DailyReportState extends State<DailyReport> {
               ),
         filled: true,
         fillColor: _softPrimaryColor,
-        labelStyle: const TextStyle(color: _mutedTextColor),
-        hintStyle: const TextStyle(color: _mutedTextColor),
+        labelStyle: TextStyle(color: _mutedTextColor),
+        hintStyle: TextStyle(color: _mutedTextColor),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: _borderColor),
+          borderSide: BorderSide(color: _borderColor),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(16),
-          borderSide: const BorderSide(color: _primaryColor, width: 1.5),
+          borderSide: BorderSide(color: _primaryColor, width: 1.5),
         ),
       ),
     );
@@ -2608,16 +2601,12 @@ class _DailyReportState extends State<DailyReport> {
         children: [
           Row(
             children: [
-              const Icon(
-                Icons.manage_search_rounded,
-                color: _primaryColor,
-                size: 23,
-              ),
+              Icon(Icons.manage_search_rounded, color: _primaryColor, size: 23),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   "Search Results — All Dates",
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: _primaryColor,
                     fontSize: 15,
                     fontWeight: FontWeight.w900,
@@ -2635,7 +2624,7 @@ class _DailyReportState extends State<DailyReport> {
                 ),
                 child: Text(
                   "${results.length}",
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: _primaryColor,
                     fontWeight: FontWeight.w900,
                   ),
@@ -2645,8 +2634,8 @@ class _DailyReportState extends State<DailyReport> {
           ),
           const SizedBox(height: 12),
           if (_searchLoading)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 18),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 18),
               child: Center(
                 child: CircularProgressIndicator(color: _primaryColor),
               ),
@@ -2675,6 +2664,7 @@ class _DailyReportState extends State<DailyReport> {
         .trim();
     final String municipality =
         record["municipality"]?.toString().trim() ?? "-";
+    final String barangay = record["barangay"]?.toString().trim() ?? "-";
     final String email =
         record["customerEmail"]?.toString().trim() ?? "Not available";
     final String date = record["date"]?.toString().trim() ?? selectedDate;
@@ -2725,7 +2715,7 @@ class _DailyReportState extends State<DailyReport> {
                   name,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: _primaryColor,
                     fontSize: 15.5,
                     fontWeight: FontWeight.w900,
@@ -2770,6 +2760,7 @@ class _DailyReportState extends State<DailyReport> {
                     municipality,
                     itemWidth,
                   ),
+                  reportSearchDetailItem("Barangay", barangay, itemWidth),
                   reportSearchDetailItem("Email", email, itemWidth),
                   reportSearchDetailItem("Report Date", date, itemWidth),
                   reportSearchDetailItem(
@@ -2782,7 +2773,7 @@ class _DailyReportState extends State<DailyReport> {
             },
           ),
           const SizedBox(height: 12),
-          const Divider(color: _borderColor, height: 1),
+          Divider(color: _borderColor, height: 1),
           const SizedBox(height: 10),
           Align(
             alignment: Alignment.centerRight,
@@ -2842,7 +2833,7 @@ class _DailyReportState extends State<DailyReport> {
           children: [
             Text(
               label,
-              style: const TextStyle(
+              style: TextStyle(
                 color: _mutedTextColor,
                 fontSize: 10.5,
                 fontWeight: FontWeight.w700,
@@ -2853,7 +2844,7 @@ class _DailyReportState extends State<DailyReport> {
               value.isEmpty ? "-" : value,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
                 color: _primaryColor,
                 fontSize: 12.5,
                 fontWeight: FontWeight.w800,
@@ -2911,7 +2902,7 @@ class _DailyReportState extends State<DailyReport> {
                 children: [
                   Text(
                     "Summary for $date",
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: _primaryColor,
                       fontSize: 16,
                       fontWeight: FontWeight.w900,
@@ -3016,7 +3007,7 @@ class _DailyReportState extends State<DailyReport> {
             const SizedBox(width: 7),
             Text(
               title,
-              style: const TextStyle(
+              style: TextStyle(
                 color: _primaryColor,
                 fontSize: 13,
                 fontWeight: FontWeight.w800,
@@ -3087,7 +3078,7 @@ class _DailyReportState extends State<DailyReport> {
                               children: [
                                 Text(
                                   items[index].label,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     color: _mutedTextColor,
                                     fontSize: 11.5,
                                     fontWeight: FontWeight.w700,
@@ -3101,7 +3092,7 @@ class _DailyReportState extends State<DailyReport> {
                                       ? 0.5
                                       : 0,
                                   duration: const Duration(milliseconds: 180),
-                                  child: const Icon(
+                                  child: Icon(
                                     Icons.keyboard_arrow_down_rounded,
                                     color: _mutedTextColor,
                                     size: 16,
@@ -3208,7 +3199,7 @@ class _DailyReportState extends State<DailyReport> {
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: _primaryColor,
                     fontSize: 15,
                     fontWeight: FontWeight.w900,
@@ -3236,7 +3227,7 @@ class _DailyReportState extends State<DailyReport> {
               ),
             ],
           ),
-          const Divider(height: 18, color: _borderColor),
+          Divider(height: 18, color: _borderColor),
           if (records.isEmpty)
             emptyBox(emptyText)
           else
@@ -3303,7 +3294,7 @@ class _DailyReportState extends State<DailyReport> {
                 Text(
                   "$queue - $name",
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: _primaryColor,
                     fontWeight: FontWeight.w900,
                     fontSize: 14.5,
@@ -3313,7 +3304,7 @@ class _DailyReportState extends State<DailyReport> {
                 Text(
                   "$vehicle • $source${time == null ? "" : " • $time"}",
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: _mutedTextColor,
                     fontWeight: FontWeight.w600,
                     fontSize: 12.5,
@@ -3371,7 +3362,7 @@ class _DailyReportState extends State<DailyReport> {
           child: Text(
             title,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
+            style: TextStyle(
               color: _primaryColor,
               fontSize: 16,
               fontWeight: FontWeight.w900,
@@ -3394,7 +3385,7 @@ class _DailyReportState extends State<DailyReport> {
       child: Text(
         message,
         textAlign: TextAlign.center,
-        style: const TextStyle(
+        style: TextStyle(
           color: _mutedTextColor,
           fontWeight: FontWeight.w600,
           height: 1.3,

@@ -5,12 +5,12 @@ import 'package:flutter/material.dart';
 import '../theme/app_theme.dart';
 import 'admin_page.dart';
 
-const Color _backgroundColor = AppColors.background;
-const Color _primaryColor = AppColors.primary;
-const Color _cardColor = AppColors.surface;
-const Color _borderColor = AppColors.border;
-const Color _mutedTextColor = AppColors.mutedText;
-const Color _softPrimaryColor = AppColors.softPrimary;
+Color get _backgroundColor => AppColors.activeBackground;
+Color get _primaryColor => AppColors.activePrimary;
+Color get _cardColor => AppColors.activeSurface;
+Color get _borderColor => AppColors.activeBorder;
+Color get _mutedTextColor => AppColors.activeMutedText;
+Color get _softPrimaryColor => AppColors.activeSoftPrimary;
 
 class AdminLogin extends StatefulWidget {
   const AdminLogin({super.key});
@@ -159,7 +159,7 @@ class _AdminLoginState extends State<AdminLogin> {
   }) {
     return InputDecoration(
       labelText: label,
-      labelStyle: const TextStyle(
+      labelStyle: TextStyle(
         color: _mutedTextColor,
         fontWeight: FontWeight.w600,
       ),
@@ -170,11 +170,11 @@ class _AdminLoginState extends State<AdminLogin> {
       contentPadding: const EdgeInsets.symmetric(vertical: 17, horizontal: 16),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: _borderColor, width: 1.2),
+        borderSide: BorderSide(color: _borderColor, width: 1.2),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(16),
-        borderSide: const BorderSide(color: _primaryColor, width: 1.6),
+        borderSide: BorderSide(color: _primaryColor, width: 1.6),
       ),
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
     );
@@ -207,13 +207,13 @@ class _AdminLoginState extends State<AdminLogin> {
                           : () {
                               Navigator.pop(context);
                             },
-                      icon: const Icon(
+                      icon: Icon(
                         Icons.arrow_back_rounded,
                         color: _primaryColor,
                       ),
                     ),
                     const SizedBox(width: 4),
-                    const Text(
+                    Text(
                       "Admin Login",
                       style: TextStyle(
                         fontSize: 20,
@@ -249,7 +249,7 @@ class _AdminLoginState extends State<AdminLogin> {
 
                 const SizedBox(height: 22),
 
-                const Text(
+                Text(
                   "Welcome Admin",
                   textAlign: TextAlign.center,
                   style: TextStyle(
@@ -261,7 +261,7 @@ class _AdminLoginState extends State<AdminLogin> {
 
                 const SizedBox(height: 8),
 
-                const Text(
+                Text(
                   "Enter your Firebase admin account.",
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 14.5, color: _mutedTextColor),
@@ -294,14 +294,14 @@ class _AdminLoginState extends State<AdminLogin> {
                           borderRadius: BorderRadius.circular(18),
                           border: Border.all(color: _borderColor),
                         ),
-                        child: const Row(
+                        child: Row(
                           children: [
                             Icon(
                               Icons.lock_outline_rounded,
                               color: _primaryColor,
                               size: 22,
                             ),
-                            SizedBox(width: 10),
+                            const SizedBox(width: 10),
                             Expanded(
                               child: Text(
                                 "Authorized admin access only.",
@@ -323,7 +323,7 @@ class _AdminLoginState extends State<AdminLogin> {
                         controller: _email,
                         enabled: !_isLoading,
                         keyboardType: TextInputType.emailAddress,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: _primaryColor,
                           fontWeight: FontWeight.w600,
                         ),
@@ -339,7 +339,7 @@ class _AdminLoginState extends State<AdminLogin> {
                         controller: _password,
                         enabled: !_isLoading,
                         obscureText: _obscurePassword,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: _primaryColor,
                           fontWeight: FontWeight.w600,
                         ),
@@ -405,7 +405,7 @@ class _AdminLoginState extends State<AdminLogin> {
 
                 const SizedBox(height: 28),
 
-                const Text(
+                Text(
                   "NPJN Emission Testing Center",
                   textAlign: TextAlign.center,
                   style: TextStyle(
