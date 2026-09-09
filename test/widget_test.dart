@@ -182,6 +182,8 @@ void main() {
             labels: ['Jan\n26', 'Feb\n26', 'Mar\n26'],
             servedValues: [12, 20, 16],
             appointmentValues: [8, 14, 18],
+            walkInValues: [4, 6, 5],
+            passedValues: [10, 17, 15],
             failedValues: [2, 3, 1],
           ),
         ),
@@ -190,6 +192,8 @@ void main() {
 
     expect(find.text('Served'), findsOneWidget);
     expect(find.text('Appointments'), findsOneWidget);
+    expect(find.text('Walk-ins'), findsOneWidget);
+    expect(find.text('Passed'), findsOneWidget);
     expect(find.text('Failed'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });

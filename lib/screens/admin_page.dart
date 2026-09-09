@@ -121,6 +121,7 @@ class AdminPage extends StatefulWidget {
 
 class _AdminPageState extends State<AdminPage> {
   final FlutterTts flutterTts = FlutterTts();
+  final GlobalKey _adminNotificationButtonKey = GlobalKey();
   String _lastScheduledQueueSignature = "";
   bool _isGeneratingQueue = false;
   bool _isRefreshingQueue = false;
@@ -323,326 +324,227 @@ class _AdminPageState extends State<AdminPage> {
         _adminAppointmentNotificationKey(appointment),
       );
     }).length;
-    return IconButton(
-      key: const Key("admin-appointment-notifications"),
-      tooltip: count == 0
-          ? "No new appointment notifications"
-          : "$count new appointment notification${count == 1 ? '' : 's'}",
-      onPressed: _showAppointmentNotifications,
-      icon: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          const Icon(Icons.notifications_outlined),
-          if (count > 0)
-            Positioned(
-              top: -6,
-              right: -7,
-              child: Container(
-                constraints: const BoxConstraints(minWidth: 18),
-                height: 18,
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: Colors.red,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: _backgroundColor, width: 1.5),
+    return SizedBox(
+      key: _adminNotificationButtonKey,
+      child: IconButton(
+        key: const Key("admin-appointment-notifications"),
+        tooltip: count == 0
+            ? "No new appointment notifications"
+            : "$count new appointment notification${count == 1 ? '' : 's'}",
+        onPressed: _showAppointmentNotifications,
+        icon: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            const Icon(Icons.notifications_outlined),
+            if (count > 0)
+              Positioned(
+                top: -6,
+                right: -7,
+                child: Container(
+                  constraints: const BoxConstraints(minWidth: 18),
+                  height: 18,
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: Colors.red,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: _backgroundColor, width: 1.5),
+                  ),
+                  child: Text(
+                    count > 9 ? "9+" : "$count",
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
                 ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showAppointmentNotifications() async {
+    final buttonContext = _adminNotificationButtonKey.currentContext;
+    final overlay =
+        Overlay.of(context).context.findRenderObject() as RenderBox?;
+    final button = buttonContext?.findRenderObject() as RenderBox?;
+    if (button == null || overlay == null) return;
+
+    final unreadNotifications = _pendingAppointments.where((appointment) {
+      return !_readPendingAppointmentNotifications.contains(
+        _adminAppointmentNotificationKey(appointment),
+      );
+    }).toList();
+    final notifications = unreadNotifications.take(8).toList();
+    final readKeys = unreadNotifications.map(_adminAppointmentNotificationKey);
+    if (unreadNotifications.isNotEmpty) {
+      setState(() => _readPendingAppointmentNotifications.addAll(readKeys));
+      unawaited(_saveReadAdminAppointmentNotifications());
+    }
+
+    final buttonTopLeft = button.localToGlobal(Offset.zero, ancestor: overlay);
+    final availableWidth = overlay.size.width - 24;
+    final menuWidth = availableWidth < 360 ? availableWidth : 360.0;
+    final desiredLeft = buttonTopLeft.dx + button.size.width - menuWidth;
+    final maxLeft = overlay.size.width - menuWidth - 12;
+    final left = desiredLeft.clamp(12.0, maxLeft).toDouble();
+    final top = buttonTopLeft.dy + button.size.height + 6;
+
+    final selectedId = await showMenu<String>(
+      context: context,
+      color: _cardColor,
+      elevation: 14,
+      constraints: BoxConstraints(minWidth: menuWidth, maxWidth: menuWidth),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: BorderSide(color: _borderColor),
+      ),
+      position: RelativeRect.fromLTRB(
+        left,
+        top,
+        overlay.size.width - left - menuWidth,
+        0,
+      ),
+      items: [
+        PopupMenuItem<String>(
+          enabled: false,
+          height: 54,
+          child: Row(
+            children: [
+              Icon(Icons.notifications_active_outlined, color: _primaryColor),
+              const SizedBox(width: 10),
+              Expanded(
                 child: Text(
-                  count > 99 ? "99+" : "$count",
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 9,
+                  "Appointment Notifications",
+                  style: TextStyle(
+                    color: _primaryColor,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
               ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  void _markCurrentAdminNotificationsAsRead() {
-    final notificationKeys = _pendingAppointments
-        .map(_adminAppointmentNotificationKey)
-        .toSet();
-    if (notificationKeys.isEmpty ||
-        notificationKeys.every(_readPendingAppointmentNotifications.contains)) {
-      return;
-    }
-
-    setState(() {
-      _readPendingAppointmentNotifications.addAll(notificationKeys);
-    });
-    unawaited(_saveReadAdminAppointmentNotifications());
-  }
-
-  void _showAppointmentNotifications() {
-    _markCurrentAdminNotificationsAsRead();
-    final notifications = List<Map<String, dynamic>>.from(_pendingAppointments);
-
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        return Align(
-          alignment: Alignment.bottomCenter,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 580),
-            child: FractionallySizedBox(
-              heightFactor: 0.78,
-              widthFactor: 1,
-              child: Material(
-                color: _cardColor,
-                elevation: 12,
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(24),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: Column(
-                  children: [
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.fromLTRB(20, 16, 10, 14),
-                      decoration: BoxDecoration(
-                        color: _softPrimaryColor,
-                        border: Border(bottom: BorderSide(color: _borderColor)),
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 42,
-                            height: 42,
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              color: _primaryColor.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(13),
-                            ),
-                            child: Icon(
-                              Icons.notifications_active_outlined,
-                              color: _primaryColor,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  "Appointment Notifications",
-                                  style: TextStyle(
-                                    color: _primaryColor,
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w900,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  notifications.isEmpty
-                                      ? "No current notifications"
-                                      : "${notifications.length} pending appointment${notifications.length == 1 ? '' : 's'} • marked as read",
-                                  style: TextStyle(
-                                    color: _mutedTextColor,
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: "Close",
-                            onPressed: () => Navigator.pop(sheetContext),
-                            icon: const Icon(Icons.close_rounded),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Expanded(
-                      child: notifications.isEmpty
-                          ? Center(
-                              child: Padding(
-                                padding: const EdgeInsets.all(24),
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.notifications_none_rounded,
-                                      color: _mutedTextColor,
-                                      size: 48,
-                                    ),
-                                    const SizedBox(height: 12),
-                                    Text(
-                                      "No current appointment notifications",
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        color: _primaryColor,
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            )
-                          : ListView.separated(
-                              padding: const EdgeInsets.all(14),
-                              itemCount: notifications.length,
-                              separatorBuilder: (_, _) =>
-                                  const SizedBox(height: 10),
-                              itemBuilder: (_, index) {
-                                final appointment = notifications[index];
-                                return _buildAdminNotificationCard(
-                                  appointment,
-                                  onTap: () {
-                                    Navigator.pop(sheetContext);
-                                    WidgetsBinding.instance
-                                        .addPostFrameCallback((_) {
-                                          if (mounted) {
-                                            _openAppointmentDetails(
-                                              appointment,
-                                            );
-                                          }
-                                        });
-                                  },
-                                );
-                              },
-                            ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+            ],
           ),
-        );
-      },
-    );
-  }
-
-  Widget _buildAdminNotificationCard(
-    Map<String, dynamic> appointment, {
-    required VoidCallback onTap,
-  }) {
-    final name =
-        (appointment['fullName'] ?? appointment['customerName'] ?? 'Customer')
-            .toString();
-    final queue = appointment['queue']?.toString() ?? '-';
-    final plate = appointment['plate']?.toString() ?? '-';
-    final date = appointment['date']?.toString() ?? '-';
-    final vehicle = appointment['vehicle']?.toString() ?? '-';
-    final barangay = appointment['barangay']?.toString().trim() ?? '';
-    final municipality = appointment['municipality']?.toString().trim() ?? '';
-    final location = [
-      barangay,
-      municipality,
-    ].where((value) => value.isNotEmpty).join(', ');
-    final notificationTime = formatNotificationTime(
-      appointment['createdAt'] ?? appointment['updatedAt'],
-    );
-
-    return Material(
-      color: _softPrimaryColor,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(17),
-        side: BorderSide(color: _borderColor),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: AppColors.warning.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(14),
+        ),
+        if (notifications.isEmpty)
+          PopupMenuItem<String>(
+            enabled: false,
+            height: 76,
+            child: Row(
+              children: [
+                Icon(Icons.notifications_none_rounded, color: _mutedTextColor),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    "No current notifications",
+                    style: TextStyle(color: _mutedTextColor),
+                  ),
                 ),
-                child: const Icon(
-                  Icons.event_note_rounded,
-                  color: AppColors.warning,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      "New appointment from $name",
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: _primaryColor,
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w900,
-                      ),
+              ],
+            ),
+          )
+        else
+          ...notifications.map((appointment) {
+            final name =
+                (appointment['fullName'] ??
+                        appointment['customerName'] ??
+                        'Customer')
+                    .toString();
+            final queue = appointment['queue']?.toString() ?? '-';
+            final plate = appointment['plate']?.toString() ?? '-';
+            final date = appointment['date']?.toString() ?? '-';
+            final time = formatNotificationTime(
+              appointment['createdAt'] ?? appointment['updatedAt'],
+            );
+
+            return PopupMenuItem<String>(
+              value: _adminAppointmentNotificationKey(appointment),
+              height: 100,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 38,
+                    height: 38,
+                    decoration: BoxDecoration(
+                      color: AppColors.warning.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      "Queue $queue • Plate $plate • $vehicle",
-                      style: TextStyle(
-                        color: _primaryColor,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 12.5,
-                      ),
+                    child: const Icon(
+                      Icons.event_note_rounded,
+                      color: AppColors.warning,
                     ),
-                    const SizedBox(height: 3),
-                    Text(
-                      location.isEmpty
-                          ? "Appointment date: $date"
-                          : "$date • $location",
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: _mutedTextColor,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(height: 5),
-                    Row(
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(
-                          Icons.schedule_rounded,
-                          size: 14,
-                          color: _mutedTextColor,
-                        ),
-                        const SizedBox(width: 5),
                         Text(
-                          notificationTime,
+                          "New appointment from $name",
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: _primaryColor,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          "Queue $queue • Plate $plate",
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: _primaryColor, fontSize: 12),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          "$date • $time",
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: _mutedTextColor,
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w700,
+                            fontSize: 11,
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      "VIEW APPOINTMENT DETAILS",
-                      style: TextStyle(
-                        color: _primaryColor,
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 0.3,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                  Icon(Icons.chevron_right_rounded, color: _mutedTextColor),
+                ],
               ),
-              Icon(Icons.chevron_right_rounded, color: _mutedTextColor),
-            ],
+            );
+          }),
+        if (notifications.isNotEmpty)
+          const PopupMenuItem<String>(
+            value: "__view_all__",
+            height: 48,
+            child: Center(
+              child: Text(
+                "VIEW ALL APPOINTMENTS",
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
           ),
-        ),
-      ),
+      ],
     );
+
+    if (selectedId == null || !mounted) return;
+    if (selectedId == "__view_all__") {
+      _openAppointmentDashboard();
+      return;
+    }
+
+    final selectedAppointment = notifications.firstWhere(
+      (appointment) =>
+          _adminAppointmentNotificationKey(appointment) == selectedId,
+      orElse: () => <String, dynamic>{},
+    );
+    if (selectedAppointment.isNotEmpty) {
+      _openAppointmentDetails(selectedAppointment);
+    }
   }
 
   Widget _buildThemeModeButton() {

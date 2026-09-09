@@ -889,6 +889,7 @@ class _DailyReportState extends State<DailyReport> {
           "pending": 0,
           "totalServed": 0,
           "appointmentActivity": 0,
+          "walkIns": 0,
         },
       );
     }
@@ -901,6 +902,10 @@ class _DailyReportState extends State<DailyReport> {
 
       final key = monthKeyFromDate(date);
       ensureMonth(key);
+
+      if (reportCustomerType(item) == "Walk-in") {
+        monthly[key]!["walkIns"] = monthly[key]!["walkIns"]! + 1;
+      }
 
       if (status == "Passed") {
         monthly[key]!["passed"] = monthly[key]!["passed"]! + 1;
@@ -995,6 +1000,22 @@ class _DailyReportState extends State<DailyReport> {
   }) {
     if (average <= 0) return false;
     return currentMonthTotal > average * 1.30;
+  }
+
+  List<MapEntry<String, Map<String, int>>> getSeasonalPeakMonths(
+    Map<String, Map<String, int>> monthly,
+  ) {
+    if (monthly.length < 2) return [];
+
+    final peaks = monthly.entries.where((entry) {
+      final total = entry.value["totalServed"] ?? 0;
+      final average = getAverageMonthlyServed(monthly, entry.key);
+      return total > 0 &&
+          isSeasonalPeak(currentMonthTotal: total, average: average);
+    }).toList();
+
+    peaks.sort((a, b) => b.key.compareTo(a.key));
+    return peaks;
   }
 
   int percentageAboveAverage({
@@ -1398,11 +1419,11 @@ class _DailyReportState extends State<DailyReport> {
     final currentKey = currentMonthKey();
     final currentMonthTotal = monthly[currentKey]?["totalServed"] ?? 0;
     final average = getAverageMonthlyServed(monthly, currentKey);
-
-    final peak = isSeasonalPeak(
-      currentMonthTotal: currentMonthTotal,
-      average: average,
-    );
+    final seasonalPeakMonths = getSeasonalPeakMonths(monthly);
+    final seasonalPeakKeys = seasonalPeakMonths
+        .map((entry) => entry.key)
+        .toSet();
+    final peak = seasonalPeakKeys.contains(currentKey);
 
     final aboveAverage = percentageAboveAverage(
       currentMonthTotal: currentMonthTotal,
@@ -1542,11 +1563,19 @@ class _DailyReportState extends State<DailyReport> {
               ? emptyBox("No analytics data yet.")
               : buildAnalyticsLineGraph(monthly),
           const SizedBox(height: 16),
-          sectionHeader(icon: Icons.bar_chart_rounded, title: "Monthly Trend"),
+          sectionHeader(
+            icon: Icons.bar_chart_rounded,
+            title: "Monthly Trend",
+            trailing: buildSeasonalPeakMonthsButton(
+              wide: wide,
+              monthly: monthly,
+              seasonalPeakMonths: seasonalPeakMonths,
+            ),
+          ),
           const SizedBox(height: 12),
           monthly.isEmpty
               ? emptyBox("No monthly trend data yet.")
-              : buildMonthlyTrend(monthly),
+              : buildMonthlyTrend(monthly, seasonalPeakKeys: seasonalPeakKeys),
         ],
       ),
     );
@@ -1570,13 +1599,248 @@ class _DailyReportState extends State<DailyReport> {
       appointmentValues: visibleEntries
           .map((entry) => entry.value["appointmentActivity"] ?? 0)
           .toList(),
+      walkInValues: visibleEntries
+          .map((entry) => entry.value["walkIns"] ?? 0)
+          .toList(),
+      passedValues: visibleEntries
+          .map((entry) => entry.value["passed"] ?? 0)
+          .toList(),
       failedValues: visibleEntries
           .map((entry) => entry.value["failed"] ?? 0)
           .toList(),
     );
   }
 
-  Widget buildMonthlyTrend(Map<String, Map<String, int>> monthly) {
+  Widget buildSeasonalPeakMonthsButton({
+    required bool wide,
+    required Map<String, Map<String, int>> monthly,
+    required List<MapEntry<String, Map<String, int>>> seasonalPeakMonths,
+  }) {
+    final count = seasonalPeakMonths.length;
+    void onPressed() {
+      showSeasonalPeakMonthsDialog(
+        monthly: monthly,
+        seasonalPeakMonths: seasonalPeakMonths,
+      );
+    }
+
+    if (!wide) {
+      return IconButton(
+        tooltip: "View detected seasonal peak months",
+        onPressed: onPressed,
+        icon: Badge(
+          isLabelVisible: count > 0,
+          label: Text(count > 9 ? "9+" : "$count"),
+          backgroundColor: AppColors.warning,
+          child: const Icon(Icons.calendar_month_rounded),
+        ),
+      );
+    }
+
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: count > 0 ? AppColors.warning : _mutedTextColor,
+        side: BorderSide(
+          color: count > 0
+              ? AppColors.warning.withValues(alpha: 0.65)
+              : _borderColor,
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      ),
+      icon: const Icon(Icons.calendar_month_rounded, size: 18),
+      label: Text(
+        "PEAK MONTHS ($count)",
+        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 11.5),
+      ),
+    );
+  }
+
+  Future<void> showSeasonalPeakMonthsDialog({
+    required Map<String, Map<String, int>> monthly,
+    required List<MapEntry<String, Map<String, int>>> seasonalPeakMonths,
+  }) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: _cardColor,
+          surfaceTintColor: Colors.transparent,
+          titlePadding: const EdgeInsets.fromLTRB(22, 20, 10, 8),
+          contentPadding: const EdgeInsets.fromLTRB(22, 8, 22, 12),
+          actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+          title: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: AppColors.warning.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.local_fire_department_rounded,
+                  color: AppColors.warning,
+                ),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Text(
+                  "Seasonal Peak Months",
+                  style: TextStyle(
+                    color: _primaryColor,
+                    fontWeight: FontWeight.w900,
+                    fontSize: 19,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: "Close",
+                onPressed: () => Navigator.pop(dialogContext),
+                icon: const Icon(Icons.close_rounded),
+              ),
+            ],
+          ),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520, maxHeight: 430),
+            child: seasonalPeakMonths.isEmpty
+                ? Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.insights_rounded,
+                          color: _mutedTextColor,
+                          size: 44,
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          "No seasonal peak month has been detected yet.",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: _primaryColor,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          "More completed monthly records may be needed before a reliable peak can be identified.",
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: _mutedTextColor,
+                            height: 1.35,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        "A month is highlighted when its served volume is more than 30% above the average of the other recorded months.",
+                        style: TextStyle(
+                          color: _mutedTextColor,
+                          fontSize: 12.5,
+                          height: 1.35,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Flexible(
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: seasonalPeakMonths.length,
+                          separatorBuilder: (_, _) => const SizedBox(height: 8),
+                          itemBuilder: (_, index) {
+                            final entry = seasonalPeakMonths[index];
+                            final total = entry.value["totalServed"] ?? 0;
+                            final average = getAverageMonthlyServed(
+                              monthly,
+                              entry.key,
+                            );
+                            final aboveAverage = percentageAboveAverage(
+                              currentMonthTotal: total,
+                              average: average,
+                            );
+
+                            return Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: AppColors.warning.withValues(
+                                  alpha: 0.09,
+                                ),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: AppColors.warning.withValues(
+                                    alpha: 0.38,
+                                  ),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.trending_up_rounded,
+                                    color: AppColors.warning,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          monthLabelFromKey(entry.key),
+                                          style: TextStyle(
+                                            color: _primaryColor,
+                                            fontWeight: FontWeight.w900,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          "$aboveAverage% above the usual average of ${average.toStringAsFixed(1)} served customers.",
+                                          style: TextStyle(
+                                            color: _mutedTextColor,
+                                            fontSize: 11.5,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Text(
+                                    "$total",
+                                    style: const TextStyle(
+                                      color: AppColors.warning,
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text("CLOSE"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget buildMonthlyTrend(
+    Map<String, Map<String, int>> monthly, {
+    required Set<String> seasonalPeakKeys,
+  }) {
     final entries = monthly.entries.toList();
 
     entries.sort((a, b) {
@@ -1592,59 +1856,111 @@ class _DailyReportState extends State<DailyReport> {
       children: entries.map((entry) {
         final total = entry.value["totalServed"] ?? 0;
         final percentage = maxValue == 0 ? 0.0 : total / maxValue;
+        final isPeakMonth = seasonalPeakKeys.contains(entry.key);
+        final progressColor = isPeakMonth ? AppColors.warning : _primaryColor;
 
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: Row(
-            children: [
-              SizedBox(
-                width: 88,
-                child: Text(
-                  monthLabelFromKey(entry.key),
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                    color: _primaryColor,
+        return Semantics(
+          label: isPeakMonth
+              ? "${monthLabelFromKey(entry.key)}, seasonal peak detected, $total served customers"
+              : "${monthLabelFromKey(entry.key)}, $total served customers",
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+            decoration: BoxDecoration(
+              color: isPeakMonth
+                  ? AppColors.warning.withValues(alpha: 0.10)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: isPeakMonth
+                    ? AppColors.warning.withValues(alpha: 0.48)
+                    : Colors.transparent,
+              ),
+            ),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 104,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        monthLabelFromKey(entry.key),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: isPeakMonth
+                              ? AppColors.warning
+                              : _primaryColor,
+                        ),
+                      ),
+                      if (isPeakMonth) ...[
+                        const SizedBox(height: 2),
+                        const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.local_fire_department_rounded,
+                              color: AppColors.warning,
+                              size: 12,
+                            ),
+                            SizedBox(width: 3),
+                            Text(
+                              "PEAK",
+                              style: TextStyle(
+                                color: AppColors.warning,
+                                fontSize: 9,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ],
                   ),
                 ),
-              ),
-              Expanded(
-                child: Stack(
-                  children: [
-                    Container(
-                      height: 16,
-                      decoration: BoxDecoration(
-                        color: _softPrimaryColor,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                    ),
-                    FractionallySizedBox(
-                      widthFactor: percentage,
-                      child: Container(
+                Expanded(
+                  child: Stack(
+                    children: [
+                      Container(
                         height: 16,
                         decoration: BoxDecoration(
-                          color: _primaryColor,
+                          color: isPeakMonth
+                              ? AppColors.warning.withValues(alpha: 0.18)
+                              : _softPrimaryColor,
                           borderRadius: BorderRadius.circular(20),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              SizedBox(
-                width: 36,
-                child: Text(
-                  "$total",
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                    color: _primaryColor,
-                    fontWeight: FontWeight.w900,
+                      FractionallySizedBox(
+                        widthFactor: percentage,
+                        child: Container(
+                          height: 16,
+                          decoration: BoxDecoration(
+                            color: progressColor,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(width: 10),
+                SizedBox(
+                  width: 36,
+                  child: Text(
+                    "$total",
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                      color: progressColor,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       }).toList(),
@@ -3353,7 +3669,11 @@ class _DailyReportState extends State<DailyReport> {
     );
   }
 
-  Widget sectionHeader({required IconData icon, required String title}) {
+  Widget sectionHeader({
+    required IconData icon,
+    required String title,
+    Widget? trailing,
+  }) {
     return Row(
       children: [
         Icon(icon, color: _primaryColor, size: 22),
@@ -3369,6 +3689,7 @@ class _DailyReportState extends State<DailyReport> {
             ),
           ),
         ),
+        if (trailing != null) ...[const SizedBox(width: 8), trailing],
       ],
     );
   }
