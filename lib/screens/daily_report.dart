@@ -33,7 +33,9 @@ enum _ReportSection {
 }
 
 class DailyReport extends StatefulWidget {
-  const DailyReport({super.key});
+  const DailyReport({super.key, this.analyticsOnly = false});
+
+  final bool analyticsOnly;
 
   @override
   State<DailyReport> createState() => _DailyReportState();
@@ -61,15 +63,17 @@ class _DailyReportState extends State<DailyReport> {
   bool _appointmentsLoading = true;
   bool _analyticsLoading = true;
   bool _searchLoading = false;
+  bool _isRefreshingPage = false;
   Object? _reportError;
   Object? _searchError;
   final Set<String> _busyReportRecords = <String>{};
+  AnalyticsChartType _analyticsChartType = AnalyticsChartType.line;
 
   @override
   void initState() {
     super.initState();
     selectedDate = todayDate();
-    _listenToSelectedDate();
+    if (!widget.analyticsOnly) _listenToSelectedDate();
     _loadAnalyticsWindow();
   }
 
@@ -196,7 +200,7 @@ class _DailyReportState extends State<DailyReport> {
         selectedDate = formatPickedDate(picked);
         expandedReportSection = null;
       });
-      _listenToSelectedDate();
+      if (!widget.analyticsOnly) _listenToSelectedDate();
       _loadAnalyticsWindow();
     }
   }
@@ -400,6 +404,11 @@ class _DailyReportState extends State<DailyReport> {
   }
 
   Future<void> refreshReport() async {
+    if (widget.analyticsOnly) {
+      await _loadAnalyticsWindow(forceServer: true);
+      return;
+    }
+
     try {
       final firestore = FirebaseFirestore.instance;
       final results = await Future.wait([
@@ -431,6 +440,80 @@ class _DailyReportState extends State<DailyReport> {
       setState(() => _reportError = error);
       rethrow;
     }
+  }
+
+  Future<void> refreshReportFromControl() async {
+    if (_isRefreshingPage) return;
+
+    setState(() => _isRefreshingPage = true);
+    try {
+      await refreshReport();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(milliseconds: 900),
+            content: Text(
+              widget.analyticsOnly
+                  ? "Analytics refreshed just now."
+                  : "Reports refreshed just now.",
+            ),
+          ),
+        );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: Colors.red,
+            content: Text("Unable to refresh. Please try again."),
+          ),
+        );
+    } finally {
+      if (mounted) setState(() => _isRefreshingPage = false);
+    }
+  }
+
+  Widget buildRefreshControl() {
+    final compact = MediaQuery.sizeOf(context).width < 520;
+    final icon = _isRefreshingPage
+        ? const SizedBox(
+            width: 17,
+            height: 17,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        : const Icon(Icons.refresh_rounded);
+
+    if (compact) {
+      return IconButton(
+        key: Key(
+          widget.analyticsOnly
+              ? "analytics-refresh-button"
+              : "reports-refresh-button",
+        ),
+        tooltip: widget.analyticsOnly ? "Refresh analytics" : "Refresh reports",
+        onPressed: _isRefreshingPage ? null : refreshReportFromControl,
+        icon: icon,
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: OutlinedButton.icon(
+        key: Key(
+          widget.analyticsOnly
+              ? "analytics-refresh-button"
+              : "reports-refresh-button",
+        ),
+        onPressed: _isRefreshingPage ? null : refreshReportFromControl,
+        icon: icon,
+        label: const Text("Refresh"),
+      ),
+    );
   }
 
   // ================= DATA FILTERS =================
@@ -534,6 +617,12 @@ class _DailyReportState extends State<DailyReport> {
     return safeText(record["type"] ?? record["vehicle"] ?? "-");
   }
 
+  String recordPlate(Map<String, dynamic> record) {
+    return safeText(
+      record["plate"] ?? record["plateNumber"] ?? record["plateNo"] ?? "-",
+    );
+  }
+
   String recordSource(Map<String, dynamic> record) {
     return safeText(record["source"] ?? "-");
   }
@@ -544,7 +633,7 @@ class _DailyReportState extends State<DailyReport> {
   ) {
     return records.map((record) {
       return [
-        safeText(record["queue"]),
+        recordPlate(record),
         recordName(record),
         recordVehicle(record),
         recordSource(record),
@@ -582,7 +671,7 @@ class _DailyReportState extends State<DailyReport> {
     }
 
     return pw.Table.fromTextArray(
-      headers: ["Queue", "Name", "Vehicle", "Source", "Time", "Result"],
+      headers: ["Plate Number", "Name", "Vehicle", "Source", "Time", "Result"],
       data: pdfRowsFromRecords(records, result),
       headerStyle: pw.TextStyle(
         fontWeight: pw.FontWeight.bold,
@@ -690,6 +779,23 @@ class _DailyReportState extends State<DailyReport> {
       failedList: failedList,
     );
     await saveOrSharePdf(bytes: bytes, fileName: dailyPdfFileName());
+  }
+
+  Future<void> viewDailyPdf({
+    required List<Map<String, dynamic>> passedList,
+    required List<Map<String, dynamic>> failedList,
+  }) async {
+    final fileName = dailyPdfFileName();
+    final bytes = await generateDailyPdf(
+      passedList: passedList,
+      failedList: failedList,
+    );
+    if (!mounted) return;
+    await openPdfPreview(
+      title: "Daily Report Preview",
+      fileName: fileName,
+      bytes: bytes,
+    );
   }
 
   Future<Uint8List> generateMonthlyPdf({
@@ -839,6 +945,45 @@ class _DailyReportState extends State<DailyReport> {
   }) async {
     final bytes = await generateMonthlyPdf(queueItems: queueItems);
     await saveOrSharePdf(bytes: bytes, fileName: monthlyPdfFileName());
+  }
+
+  Future<void> viewMonthlyPdf({
+    required List<Map<String, dynamic>> queueItems,
+  }) async {
+    final fileName = monthlyPdfFileName();
+    final bytes = await generateMonthlyPdf(queueItems: queueItems);
+    if (!mounted) return;
+    await openPdfPreview(
+      title: "Monthly Report Preview",
+      fileName: fileName,
+      bytes: bytes,
+    );
+  }
+
+  Future<void> openPdfPreview({
+    required String title,
+    required String fileName,
+    required Uint8List bytes,
+  }) async {
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (previewContext) {
+          return Scaffold(
+            appBar: AppBar(title: Text(title)),
+            body: PdfPreview(
+              build: (format) async => bytes,
+              pdfFileName: fileName,
+              canChangeOrientation: false,
+              canChangePageFormat: false,
+              canDebug: false,
+              allowPrinting: true,
+              allowSharing: true,
+            ),
+          );
+        },
+      ),
+    );
   }
 
   Future<void> saveOrSharePdf({
@@ -1065,7 +1210,10 @@ class _DailyReportState extends State<DailyReport> {
         ),
       ),
       child: Scaffold(
-        appBar: AppBar(title: const Text("Daily Report")),
+        appBar: AppBar(
+          title: Text(widget.analyticsOnly ? "Analytics" : "Reports"),
+          actions: [buildRefreshControl(), const SizedBox(width: 12)],
+        ),
         body: SafeArea(
           child: AppRefreshIndicator(
             onRefresh: refreshReport,
@@ -1091,11 +1239,44 @@ class _DailyReportState extends State<DailyReport> {
                       ),
                       child: Column(
                         children: [
-                          buildDateSelector(),
+                          buildDateSelector(
+                            label: widget.analyticsOnly
+                                ? "Analytics Reference Date"
+                                : "Report Date",
+                          ),
 
                           const SizedBox(height: 14),
 
-                          if (isLoading)
+                          if (widget.analyticsOnly && _analyticsLoading)
+                            cardContainer(
+                              child: Column(
+                                children: [
+                                  CircularProgressIndicator(
+                                    color: _primaryColor,
+                                  ),
+                                  const SizedBox(height: 14),
+                                  Text(
+                                    "Loading analytics...",
+                                    style: TextStyle(
+                                      color: _mutedTextColor,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          else if (widget.analyticsOnly && _reportError != null)
+                            buildErrorCard(
+                              _reportError.toString(),
+                              title: "Unable to load analytics",
+                            )
+                          else if (widget.analyticsOnly)
+                            buildSeasonalDetectionCard(
+                              wide: wide,
+                              queueItems: _analyticsQueueItems,
+                              appointments: _analyticsAppointments,
+                            )
+                          else if (isLoading)
                             cardContainer(
                               child: Column(
                                 children: [
@@ -1124,22 +1305,11 @@ class _DailyReportState extends State<DailyReport> {
 
                             const SizedBox(height: 14),
 
-                            buildSeasonalDetectionCard(
-                              wide: wide,
-                              queueItems: _analyticsQueueItems,
-                              appointments: _analyticsAppointments,
-                            ),
                             if (_analyticsLoading)
-                              Padding(
-                                padding: const EdgeInsets.only(top: 8),
-                                child: LinearProgressIndicator(
-                                  minHeight: 2,
-                                  color: _primaryColor,
-                                  backgroundColor: _softPrimaryColor,
-                                ),
+                              const Padding(
+                                padding: EdgeInsets.only(bottom: 14),
+                                child: LinearProgressIndicator(minHeight: 2),
                               ),
-
-                            const SizedBox(height: 14),
 
                             buildReportDetails(
                               date: selectedDate,
@@ -1168,7 +1338,7 @@ class _DailyReportState extends State<DailyReport> {
 
   // ================= DATE SELECTOR =================
 
-  Widget buildDateSelector() {
+  Widget buildDateSelector({String label = "Report Date"}) {
     return cardContainer(
       child: Row(
         children: [
@@ -1176,7 +1346,7 @@ class _DailyReportState extends State<DailyReport> {
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              "Report Date: $selectedDate",
+              "$label: $selectedDate",
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: _primaryColor,
@@ -1248,6 +1418,10 @@ class _DailyReportState extends State<DailyReport> {
                     subtitle: selectedDate,
                     icon: Icons.today_rounded,
                     color: _primaryColor,
+                    onView: () => viewDailyPdf(
+                      passedList: passedList,
+                      failedList: failedList,
+                    ),
                     onPrint: () => printDailyPdf(
                       passedList: passedList,
                       failedList: failedList,
@@ -1263,6 +1437,7 @@ class _DailyReportState extends State<DailyReport> {
                     subtitle: monthLabel,
                     icon: Icons.calendar_view_month_rounded,
                     color: Colors.green,
+                    onView: () => viewMonthlyPdf(queueItems: queueItems),
                     onPrint: () => printMonthlyPdf(queueItems: queueItems),
                     onDownload: () =>
                         downloadMonthlyPdf(queueItems: queueItems),
@@ -1282,6 +1457,7 @@ class _DailyReportState extends State<DailyReport> {
     required String subtitle,
     required IconData icon,
     required Color color,
+    required Future<void> Function() onView,
     required Future<void> Function() onPrint,
     required Future<void> Function() onDownload,
   }) {
@@ -1338,6 +1514,11 @@ class _DailyReportState extends State<DailyReport> {
             const SizedBox(height: 12),
             LayoutBuilder(
               builder: (context, constraints) {
+                final viewButton = OutlinedButton.icon(
+                  onPressed: () async => onView(),
+                  icon: const Icon(Icons.visibility_rounded, size: 18),
+                  label: const Text("VIEW"),
+                );
                 final printButton = OutlinedButton.icon(
                   onPressed: () async => onPrint(),
                   icon: const Icon(Icons.print_rounded, size: 18),
@@ -1353,9 +1534,11 @@ class _DailyReportState extends State<DailyReport> {
                   label: const Text("DOWNLOAD"),
                 );
 
-                if (constraints.maxWidth < 320) {
+                if (constraints.maxWidth < 430) {
                   return Column(
                     children: [
+                      SizedBox(width: double.infinity, child: viewButton),
+                      const SizedBox(height: 8),
                       SizedBox(width: double.infinity, child: printButton),
                       const SizedBox(height: 8),
                       SizedBox(width: double.infinity, child: downloadButton),
@@ -1365,6 +1548,8 @@ class _DailyReportState extends State<DailyReport> {
 
                 return Row(
                   children: [
+                    Expanded(child: viewButton),
+                    const SizedBox(width: 9),
                     Expanded(child: printButton),
                     const SizedBox(width: 9),
                     Expanded(child: downloadButton),
@@ -1378,14 +1563,17 @@ class _DailyReportState extends State<DailyReport> {
     );
   }
 
-  Widget buildErrorCard(String error) {
+  Widget buildErrorCard(
+    String error, {
+    String title = "Unable to load reports",
+  }) {
     return cardContainer(
       child: Column(
         children: [
           const Icon(Icons.error_outline_rounded, color: Colors.red, size: 46),
           const SizedBox(height: 12),
-          const Text(
-            "Unable to load daily report",
+          Text(
+            title,
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.red,
@@ -1557,7 +1745,11 @@ class _DailyReportState extends State<DailyReport> {
               ],
             ),
           const SizedBox(height: 16),
-          sectionHeader(icon: Icons.show_chart_rounded, title: "Analytics"),
+          sectionHeader(
+            icon: Icons.show_chart_rounded,
+            title: "Analytics",
+            trailing: buildAnalyticsChartTypeSelector(),
+          ),
           const SizedBox(height: 12),
           monthly.isEmpty
               ? emptyBox("No analytics data yet.")
@@ -1608,6 +1800,69 @@ class _DailyReportState extends State<DailyReport> {
       failedValues: visibleEntries
           .map((entry) => entry.value["failed"] ?? 0)
           .toList(),
+      chartType: _analyticsChartType,
+    );
+  }
+
+  Widget buildAnalyticsChartTypeSelector() {
+    final isLine = _analyticsChartType == AnalyticsChartType.line;
+
+    return PopupMenuButton<AnalyticsChartType>(
+      tooltip: "Choose chart type",
+      initialValue: _analyticsChartType,
+      onSelected: (value) {
+        if (_analyticsChartType == value) return;
+        setState(() => _analyticsChartType = value);
+      },
+      itemBuilder: (_) => const [
+        PopupMenuItem(
+          value: AnalyticsChartType.line,
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.show_chart_rounded),
+            title: Text("Line graph"),
+          ),
+        ),
+        PopupMenuItem(
+          value: AnalyticsChartType.bar,
+          child: ListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Icons.bar_chart_rounded),
+            title: Text("Bar graph"),
+          ),
+        ),
+      ],
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: _softPrimaryColor,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _borderColor),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isLine ? Icons.show_chart_rounded : Icons.bar_chart_rounded,
+              color: _primaryColor,
+              size: 18,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              isLine ? "LINE" : "BAR",
+              style: TextStyle(
+                color: _primaryColor,
+                fontSize: 11,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(width: 3),
+            Icon(Icons.arrow_drop_down_rounded, color: _primaryColor, size: 18),
+          ],
+        ),
+      ),
     );
   }
 

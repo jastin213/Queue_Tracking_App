@@ -198,6 +198,30 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('analytics chart supports the grouped bar view', (
+    WidgetTester tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: AnalyticsLineChart(
+            labels: ['Jan\n26', 'Feb\n26'],
+            servedValues: [12, 20],
+            appointmentValues: [8, 14],
+            walkInValues: [4, 6],
+            passedValues: [10, 17],
+            failedValues: [2, 3],
+            chartType: AnalyticsChartType.bar,
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('Walk-ins'), findsOneWidget);
+    expect(find.text('Passed'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('settings scrolls normally without pull to refresh', (
     WidgetTester tester,
   ) async {

@@ -15,6 +15,7 @@ import '../theme/app_theme.dart';
 import '../services/firestore_query_fields.dart';
 import '../widgets/app_responsive_content.dart';
 import '../widgets/app_refresh_indicator.dart';
+import 'analytics_page.dart';
 import 'daily_report.dart';
 import 'display_page.dart';
 import 'admin_dashboard.dart';
@@ -130,15 +131,17 @@ class _AdminPageState extends State<AdminPage> {
   _pendingAppointmentSubscription;
   List<Map<String, dynamic>> _pendingAppointments = [];
   final Set<String> _readPendingAppointmentNotifications = <String>{};
+  late final String _adminNotificationPreferenceKey;
   bool _receivedInitialPendingAppointments = false;
 
   @override
   void initState() {
     super.initState();
+    _adminNotificationPreferenceKey = _buildAdminNotificationPreferenceKey();
     _initializeAppointmentNotifications();
   }
 
-  String get _adminNotificationPreferenceKey {
+  String _buildAdminNotificationPreferenceKey() {
     String accountId = '';
     try {
       accountId = FirebaseAuth.instance.currentUser?.uid ?? '';
@@ -373,16 +376,17 @@ class _AdminPageState extends State<AdminPage> {
     final button = buttonContext?.findRenderObject() as RenderBox?;
     if (button == null || overlay == null) return;
 
-    final unreadNotifications = _pendingAppointments.where((appointment) {
-      return !_readPendingAppointmentNotifications.contains(
-        _adminAppointmentNotificationKey(appointment),
+    final notifications = _pendingAppointments.take(8).toList();
+    final unreadKeysBeforeOpen = _pendingAppointments
+        .map(_adminAppointmentNotificationKey)
+        .where((key) => !_readPendingAppointmentNotifications.contains(key))
+        .toSet();
+    if (unreadKeysBeforeOpen.isNotEmpty) {
+      setState(
+        () => _readPendingAppointmentNotifications.addAll(unreadKeysBeforeOpen),
       );
-    }).toList();
-    final notifications = unreadNotifications.take(8).toList();
-    final readKeys = unreadNotifications.map(_adminAppointmentNotificationKey);
-    if (unreadNotifications.isNotEmpty) {
-      setState(() => _readPendingAppointmentNotifications.addAll(readKeys));
-      unawaited(_saveReadAdminAppointmentNotifications());
+      await _saveReadAdminAppointmentNotifications();
+      if (!mounted) return;
     }
 
     final buttonTopLeft = button.localToGlobal(Offset.zero, ancestor: overlay);
@@ -455,12 +459,17 @@ class _AdminPageState extends State<AdminPage> {
             final queue = appointment['queue']?.toString() ?? '-';
             final plate = appointment['plate']?.toString() ?? '-';
             final date = appointment['date']?.toString() ?? '-';
+            final notificationKey = _adminAppointmentNotificationKey(
+              appointment,
+            );
+            final isViewed = !unreadKeysBeforeOpen.contains(notificationKey);
+            final contentColor = isViewed ? _mutedTextColor : _primaryColor;
             final time = formatNotificationTime(
               appointment['createdAt'] ?? appointment['updatedAt'],
             );
 
             return PopupMenuItem<String>(
-              value: _adminAppointmentNotificationKey(appointment),
+              value: notificationKey,
               height: 100,
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -469,12 +478,14 @@ class _AdminPageState extends State<AdminPage> {
                     width: 38,
                     height: 38,
                     decoration: BoxDecoration(
-                      color: AppColors.warning.withValues(alpha: 0.14),
+                      color: isViewed
+                          ? _mutedTextColor.withValues(alpha: 0.10)
+                          : AppColors.warning.withValues(alpha: 0.14),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(
+                    child: Icon(
                       Icons.event_note_rounded,
-                      color: AppColors.warning,
+                      color: isViewed ? _mutedTextColor : AppColors.warning,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -488,7 +499,7 @@ class _AdminPageState extends State<AdminPage> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: _primaryColor,
+                            color: contentColor,
                             fontWeight: FontWeight.w800,
                           ),
                         ),
@@ -497,7 +508,7 @@ class _AdminPageState extends State<AdminPage> {
                           "Queue $queue • Plate $plate",
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: _primaryColor, fontSize: 12),
+                          style: TextStyle(color: contentColor, fontSize: 12),
                         ),
                         const SizedBox(height: 3),
                         Text(
@@ -512,7 +523,20 @@ class _AdminPageState extends State<AdminPage> {
                       ],
                     ),
                   ),
-                  Icon(Icons.chevron_right_rounded, color: _mutedTextColor),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        isViewed ? "VIEWED" : "NEW",
+                        style: TextStyle(
+                          color: isViewed ? _mutedTextColor : AppColors.warning,
+                          fontSize: 8,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      Icon(Icons.chevron_right_rounded, color: _mutedTextColor),
+                    ],
+                  ),
                 ],
               ),
             );
@@ -1725,11 +1749,11 @@ class _AdminPageState extends State<AdminPage> {
     setState(() => _isCallingCustomer = true);
 
     try {
-      final activeQueue = await queueItemsRef(date)
-          .where("status", isEqualTo: "Now Serving")
-          .limit(1)
-          .get(const GetOptions(source: Source.server));
-      if (activeQueue.docs.isNotEmpty) {
+      final onlineItems = await getQueueItemsOnline(date, forceServer: true);
+      final activeQueue = onlineItems.where((item) {
+        return item["status"]?.toString() == "Now Serving";
+      });
+      if (activeQueue.isNotEmpty) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1741,6 +1765,39 @@ class _AdminPageState extends State<AdminPage> {
             ),
           ),
         );
+        return;
+      }
+
+      final waitingItems = onlineItems
+          .where((item) {
+            final status = item["status"]?.toString() ?? "Waiting";
+            return status == "Waiting" || status == "Skipped";
+          })
+          .toList(growable: false);
+      final requestedQueue = customer["queue"]?.toString() ?? "";
+
+      if (waitingItems.isEmpty ||
+          waitingItems.first["queue"]?.toString() != requestedQueue) {
+        if (!mounted) return;
+        final firstQueue = waitingItems.isEmpty
+            ? null
+            : waitingItems.first["queue"]?.toString();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              firstQueue == null
+                  ? text(
+                      "This queue is no longer waiting. Refresh and try again.",
+                      "Hindi na naghihintay ang queue na ito. I-refresh at subukan muli.",
+                    )
+                  : text(
+                      "First come, first served: call $firstQueue first. To move past it, call it and use Skip / No Show.",
+                      "First come, first served: tawagin muna ang $firstQueue. Para lumampas dito, tawagin ito at gamitin ang Skip / No Show.",
+                    ),
+            ),
+          ),
+        );
+        await refreshQueue();
         return;
       }
 
@@ -2437,12 +2494,23 @@ class _AdminPageState extends State<AdminPage> {
           ),
           drawerTile(
             icon: Icons.assessment_rounded,
-            title: text("Daily Report", "Daily Report"),
+            title: text("Reports", "Reports"),
             onTap: () {
               Navigator.pop(context);
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const DailyReport()),
+              );
+            },
+          ),
+          drawerTile(
+            icon: Icons.insights_rounded,
+            title: text("Analytics", "Analytics"),
+            onTap: () {
+              Navigator.pop(context);
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const AnalyticsPage()),
               );
             },
           ),
@@ -2465,6 +2533,7 @@ class _AdminPageState extends State<AdminPage> {
             title: text("Logout", "Logout"),
             isLogout: true,
             onTap: () async {
+              await _saveReadAdminAppointmentNotifications();
               await FirebaseAuth.instance.signOut();
 
               if (!context.mounted) return;
@@ -2516,8 +2585,8 @@ class _AdminPageState extends State<AdminPage> {
           Expanded(
             child: Text(
               text(
-                "Queue Date: ${selectedQueueDateNotifier.value}",
-                "Petsa ng Queue: ${selectedQueueDateNotifier.value}",
+                "Date: ${selectedQueueDateNotifier.value}",
+                "Petsa: ${selectedQueueDateNotifier.value}",
               ),
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -2809,6 +2878,17 @@ class _AdminPageState extends State<AdminPage> {
                     itemBuilder: (context, index) {
                       final customer = selectedDateQueue[index];
                       final bool canManageWalkIn = isWalkInQueueEntry(customer);
+                      final bool canCallThisCustomer =
+                          canCallCustomer && index == 0;
+                      final String callTooltip = canCallThisCustomer
+                          ? text(
+                              "Call the first waiting customer",
+                              "Tawagin ang unang naghihintay na customer",
+                            )
+                          : text(
+                              "First come, first served. Finish or skip the customer ahead first.",
+                              "First come, first served. Tapusin o i-skip muna ang customer na nauna.",
+                            );
 
                       return Container(
                         margin: const EdgeInsets.only(bottom: 10),
@@ -2832,21 +2912,13 @@ class _AdminPageState extends State<AdminPage> {
                                     children: [
                                       miniButton(
                                         Icons.volume_up_rounded,
-                                        canCallCustomer
+                                        canCallThisCustomer
                                             ? Colors.blue
                                             : Colors.grey,
-                                        canCallCustomer
+                                        canCallThisCustomer
                                             ? () => callCustomer(customer)
                                             : null,
-                                        tooltip: canCallCustomer
-                                            ? text(
-                                                "Call this customer",
-                                                "Tawagin ang customer na ito",
-                                              )
-                                            : text(
-                                                "Finish the current customer first",
-                                                "Tapusin muna ang kasalukuyang customer",
-                                              ),
+                                        tooltip: callTooltip,
                                       ),
                                       if (canManageWalkIn) ...[
                                         const SizedBox(width: 8),
@@ -2896,19 +2968,13 @@ class _AdminPageState extends State<AdminPage> {
                                 Expanded(child: buildQueueInfo(customer)),
                                 miniButton(
                                   Icons.volume_up_rounded,
-                                  canCallCustomer ? Colors.blue : Colors.grey,
-                                  canCallCustomer
+                                  canCallThisCustomer
+                                      ? Colors.blue
+                                      : Colors.grey,
+                                  canCallThisCustomer
                                       ? () => callCustomer(customer)
                                       : null,
-                                  tooltip: canCallCustomer
-                                      ? text(
-                                          "Call this customer",
-                                          "Tawagin ang customer na ito",
-                                        )
-                                      : text(
-                                          "Finish the current customer first",
-                                          "Tapusin muna ang kasalukuyang customer",
-                                        ),
+                                  tooltip: callTooltip,
                                 ),
                                 if (canManageWalkIn) ...[
                                   const SizedBox(width: 8),

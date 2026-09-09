@@ -36,6 +36,7 @@ class _CustomerHomeState extends State<CustomerHome> {
   List<Map<String, dynamic>> _customerAppointments = [];
   final Map<String, String> _knownAppointmentStatuses = {};
   final Set<String> _readAppointmentNotifications = {};
+  late final String _notificationPreferenceKey;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
   _appointmentSubscription;
   bool _receivedInitialAppointmentSnapshot = false;
@@ -43,10 +44,11 @@ class _CustomerHomeState extends State<CustomerHome> {
   @override
   void initState() {
     super.initState();
+    _notificationPreferenceKey = _buildNotificationPreferenceKey();
     _initializeAppointmentNotifications();
   }
 
-  String get _notificationPreferenceKey {
+  String _buildNotificationPreferenceKey() {
     String accountId = loggedInCustomerIdNotifier.value.trim();
     try {
       accountId = FirebaseAuth.instance.currentUser?.uid ?? accountId;
@@ -232,7 +234,7 @@ class _CustomerHomeState extends State<CustomerHome> {
     }).length;
   }
 
-  void openAppointmentStatus() {
+  Future<void> openAppointmentStatus() async {
     final readKeys = _customerAppointments
         .where((appointment) => isFinalAppointmentStatus(appointment["status"]))
         .map(_appointmentNotificationKey);
@@ -240,7 +242,8 @@ class _CustomerHomeState extends State<CustomerHome> {
     setState(() {
       _readAppointmentNotifications.addAll(readKeys);
     });
-    unawaited(_saveReadAppointmentNotifications());
+    await _saveReadAppointmentNotifications();
+    if (!mounted) return;
 
     Navigator.push(
       context,
@@ -255,19 +258,21 @@ class _CustomerHomeState extends State<CustomerHome> {
     final button = buttonContext?.findRenderObject() as RenderBox?;
     if (button == null || overlay == null) return;
 
-    final unreadNotifications = _customerAppointments
-        .where(
-          (appointment) =>
-              isFinalAppointmentStatus(appointment["status"]) &&
-              !_readAppointmentNotifications.contains(
-                _appointmentNotificationKey(appointment),
-              ),
-        )
+    final allNotifications = _customerAppointments
+        .where((appointment) => isFinalAppointmentStatus(appointment["status"]))
         .toList();
-    final notifications = unreadNotifications.take(8).toList();
-    final readKeys = unreadNotifications.map(_appointmentNotificationKey);
-    setState(() => _readAppointmentNotifications.addAll(readKeys));
-    unawaited(_saveReadAppointmentNotifications());
+    final notifications = allNotifications.take(8).toList();
+    final unreadKeysBeforeOpen = allNotifications
+        .map(_appointmentNotificationKey)
+        .where((key) => !_readAppointmentNotifications.contains(key))
+        .toSet();
+    if (unreadKeysBeforeOpen.isNotEmpty) {
+      setState(
+        () => _readAppointmentNotifications.addAll(unreadKeysBeforeOpen),
+      );
+      await _saveReadAppointmentNotifications();
+      if (!mounted) return;
+    }
 
     final buttonTopLeft = button.localToGlobal(Offset.zero, ancestor: overlay);
     final availableWidth = overlay.size.width - 24;
@@ -334,11 +339,14 @@ class _CustomerHomeState extends State<CustomerHome> {
             final status = appointment["status"]?.toString() ?? "Pending";
             final queue = appointment["queue"]?.toString() ?? "-";
             final date = appointment["date"]?.toString() ?? "-";
+            final notificationKey = _appointmentNotificationKey(appointment);
+            final isViewed = !unreadKeysBeforeOpen.contains(notificationKey);
+            final contentColor = isViewed ? _mutedTextColor : _primaryColor;
             final time = formatNotificationTime(
               appointmentDecisionTime(appointment),
             );
             return PopupMenuItem<String>(
-              value: _appointmentNotificationKey(appointment),
+              value: notificationKey,
               height: 92,
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -347,16 +355,20 @@ class _CustomerHomeState extends State<CustomerHome> {
                     width: 38,
                     height: 38,
                     decoration: BoxDecoration(
-                      color: appointmentStatusColor(
-                        status,
-                      ).withValues(alpha: 0.12),
+                      color: isViewed
+                          ? _mutedTextColor.withValues(alpha: 0.10)
+                          : appointmentStatusColor(
+                              status,
+                            ).withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(
                       status == "Approved"
                           ? Icons.check_circle_outline_rounded
                           : Icons.cancel_outlined,
-                      color: appointmentStatusColor(status),
+                      color: isViewed
+                          ? _mutedTextColor
+                          : appointmentStatusColor(status),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -368,7 +380,7 @@ class _CustomerHomeState extends State<CustomerHome> {
                         Text(
                           appointmentStatusTitle(status),
                           style: TextStyle(
-                            color: _primaryColor,
+                            color: contentColor,
                             fontWeight: FontWeight.w800,
                           ),
                         ),
@@ -377,7 +389,7 @@ class _CustomerHomeState extends State<CustomerHome> {
                           "Queue $queue • $date",
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: _primaryColor, fontSize: 12),
+                          style: TextStyle(color: contentColor, fontSize: 12),
                         ),
                         const SizedBox(height: 3),
                         Text(
@@ -390,7 +402,22 @@ class _CustomerHomeState extends State<CustomerHome> {
                       ],
                     ),
                   ),
-                  Icon(Icons.chevron_right_rounded, color: _mutedTextColor),
+                  Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        isViewed ? "VIEWED" : "NEW",
+                        style: TextStyle(
+                          color: isViewed
+                              ? _mutedTextColor
+                              : appointmentStatusColor(status),
+                          fontSize: 8,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      Icon(Icons.chevron_right_rounded, color: _mutedTextColor),
+                    ],
+                  ),
                 ],
               ),
             );
@@ -490,6 +517,7 @@ class _CustomerHomeState extends State<CustomerHome> {
     });
 
     try {
+      await _saveReadAppointmentNotifications();
       await FirebaseAuth.instance.signOut();
 
       loggedInCustomerNameNotifier.value = "";

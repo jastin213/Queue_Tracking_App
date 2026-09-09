@@ -6,6 +6,8 @@ import '../theme/app_theme.dart';
 
 const Color _analyticsAppointmentColor = Color(0xFF8B5CF6);
 
+enum AnalyticsChartType { line, bar }
+
 class AnalyticsLineChart extends StatelessWidget {
   const AnalyticsLineChart({
     super.key,
@@ -15,6 +17,7 @@ class AnalyticsLineChart extends StatelessWidget {
     required this.walkInValues,
     required this.passedValues,
     required this.failedValues,
+    this.chartType = AnalyticsChartType.line,
   });
 
   final List<String> labels;
@@ -23,12 +26,13 @@ class AnalyticsLineChart extends StatelessWidget {
   final List<int> walkInValues;
   final List<int> passedValues;
   final List<int> failedValues;
+  final AnalyticsChartType chartType;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
       label:
-          "Line graph comparing monthly served customers, appointments, walk-ins, passed customers, and failed customers",
+          "${chartType == AnalyticsChartType.line ? 'Line' : 'Bar'} graph comparing monthly served customers, appointments, walk-ins, passed customers, and failed customers",
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.fromLTRB(12, 16, 12, 10),
@@ -65,6 +69,7 @@ class AnalyticsLineChart extends StatelessWidget {
                   walkInValues: walkInValues,
                   passedValues: passedValues,
                   failedValues: failedValues,
+                  chartType: chartType,
                 ),
                 child: const SizedBox.expand(),
               ),
@@ -117,6 +122,7 @@ class _AnalyticsLineChartPainter extends CustomPainter {
     required this.walkInValues,
     required this.passedValues,
     required this.failedValues,
+    required this.chartType,
   });
 
   final List<String> labels;
@@ -125,6 +131,7 @@ class _AnalyticsLineChartPainter extends CustomPainter {
   final List<int> walkInValues;
   final List<int> passedValues;
   final List<int> failedValues;
+  final AnalyticsChartType chartType;
 
   static Color get _servedColor => AppColors.activePrimary;
   static const Color _appointmentColor = _analyticsAppointmentColor;
@@ -176,79 +183,92 @@ class _AnalyticsLineChartPainter extends CustomPainter {
       );
     }
 
-    final servedPoints = _pointsFor(
-      values: servedValues,
-      count: labels.length,
-      left: left,
-      top: top,
-      width: chartWidth,
-      height: chartHeight,
-      maxValue: maxValue,
-    );
-    final appointmentPoints = _pointsFor(
-      values: appointmentValues,
-      count: labels.length,
-      left: left,
-      top: top,
-      width: chartWidth,
-      height: chartHeight,
-      maxValue: maxValue,
-    );
-    final walkInPoints = _pointsFor(
-      values: walkInValues,
-      count: labels.length,
-      left: left,
-      top: top,
-      width: chartWidth,
-      height: chartHeight,
-      maxValue: maxValue,
-    );
-    final passedPoints = _pointsFor(
-      values: passedValues,
-      count: labels.length,
-      left: left,
-      top: top,
-      width: chartWidth,
-      height: chartHeight,
-      maxValue: maxValue,
-    );
-    final failedPoints = _pointsFor(
-      values: failedValues,
-      count: labels.length,
-      left: left,
-      top: top,
-      width: chartWidth,
-      height: chartHeight,
-      maxValue: maxValue,
-    );
+    if (chartType == AnalyticsChartType.bar) {
+      _drawGroupedBars(
+        canvas,
+        left: left,
+        top: top,
+        width: chartWidth,
+        height: chartHeight,
+        maxValue: maxValue,
+      );
+    } else {
+      final servedPoints = _pointsFor(
+        values: servedValues,
+        count: labels.length,
+        left: left,
+        top: top,
+        width: chartWidth,
+        height: chartHeight,
+        maxValue: maxValue,
+      );
+      final appointmentPoints = _pointsFor(
+        values: appointmentValues,
+        count: labels.length,
+        left: left,
+        top: top,
+        width: chartWidth,
+        height: chartHeight,
+        maxValue: maxValue,
+      );
+      final walkInPoints = _pointsFor(
+        values: walkInValues,
+        count: labels.length,
+        left: left,
+        top: top,
+        width: chartWidth,
+        height: chartHeight,
+        maxValue: maxValue,
+      );
+      final passedPoints = _pointsFor(
+        values: passedValues,
+        count: labels.length,
+        left: left,
+        top: top,
+        width: chartWidth,
+        height: chartHeight,
+        maxValue: maxValue,
+      );
+      final failedPoints = _pointsFor(
+        values: failedValues,
+        count: labels.length,
+        left: left,
+        top: top,
+        width: chartWidth,
+        height: chartHeight,
+        maxValue: maxValue,
+      );
 
-    if (servedPoints.length > 1) {
-      final fillPath = Path()
-        ..moveTo(servedPoints.first.dx, chartBottom)
-        ..lineTo(servedPoints.first.dx, servedPoints.first.dy);
+      if (servedPoints.length > 1) {
+        final fillPath = Path()
+          ..moveTo(servedPoints.first.dx, chartBottom)
+          ..lineTo(servedPoints.first.dx, servedPoints.first.dy);
 
-      for (final point in servedPoints.skip(1)) {
-        fillPath.lineTo(point.dx, point.dy);
+        for (final point in servedPoints.skip(1)) {
+          fillPath.lineTo(point.dx, point.dy);
+        }
+
+        fillPath
+          ..lineTo(servedPoints.last.dx, chartBottom)
+          ..close();
+
+        canvas.drawPath(
+          fillPath,
+          Paint()..color = _servedColor.withValues(alpha: 0.07),
+        );
       }
 
-      fillPath
-        ..lineTo(servedPoints.last.dx, chartBottom)
-        ..close();
-
-      canvas.drawPath(
-        fillPath,
-        Paint()..color = _servedColor.withValues(alpha: 0.07),
-      );
+      _drawSeries(canvas, servedPoints, _servedColor);
+      _drawSeries(canvas, appointmentPoints, _appointmentColor);
+      _drawSeries(canvas, walkInPoints, _walkInColor);
+      _drawSeries(canvas, passedPoints, _passedColor);
+      _drawSeries(canvas, failedPoints, _failedColor);
     }
 
-    _drawSeries(canvas, servedPoints, _servedColor);
-    _drawSeries(canvas, appointmentPoints, _appointmentColor);
-    _drawSeries(canvas, walkInPoints, _walkInColor);
-    _drawSeries(canvas, passedPoints, _passedColor);
-    _drawSeries(canvas, failedPoints, _failedColor);
-
     for (int index = 0; index < labels.length; index++) {
-      final x = labels.length == 1
+      final x = chartType == AnalyticsChartType.bar
+          ? left + (chartWidth * (index + 0.5) / labels.length)
+          : labels.length == 1
           ? left + (chartWidth / 2)
           : left + (chartWidth * index / (labels.length - 1));
 
@@ -259,6 +279,65 @@ class _AnalyticsLineChartPainter extends CustomPainter {
         const Size(52, 30),
         TextAlign.center,
       );
+    }
+  }
+
+  void _drawGroupedBars(
+    Canvas canvas, {
+    required double left,
+    required double top,
+    required double width,
+    required double height,
+    required int maxValue,
+  }) {
+    final series = <List<int>>[
+      servedValues,
+      appointmentValues,
+      walkInValues,
+      passedValues,
+      failedValues,
+    ];
+    final colors = <Color>[
+      _servedColor,
+      _appointmentColor,
+      _walkInColor,
+      _passedColor,
+      _failedColor,
+    ];
+    final groupWidth = width / labels.length;
+    final availableWidth = groupWidth * 0.78;
+    const gap = 1.5;
+    final barWidth = math.min(
+      14.0,
+      math.max(
+        2.0,
+        (availableWidth - gap * (series.length - 1)) / series.length,
+      ),
+    );
+    final barsWidth = (barWidth * series.length) + gap * (series.length - 1);
+    final chartBottom = top + height;
+
+    for (var monthIndex = 0; monthIndex < labels.length; monthIndex++) {
+      final groupCenter = left + (groupWidth * (monthIndex + 0.5));
+      final groupLeft = groupCenter - (barsWidth / 2);
+
+      for (var seriesIndex = 0; seriesIndex < series.length; seriesIndex++) {
+        final values = series[seriesIndex];
+        final value = monthIndex < values.length ? values[monthIndex] : 0;
+        if (value <= 0) continue;
+
+        final barHeight = height * value / maxValue;
+        final rect = Rect.fromLTWH(
+          groupLeft + seriesIndex * (barWidth + gap),
+          chartBottom - barHeight,
+          barWidth,
+          barHeight,
+        );
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(rect, const Radius.circular(3)),
+          Paint()..color = colors[seriesIndex],
+        );
+      }
     }
   }
 
@@ -342,6 +421,7 @@ class _AnalyticsLineChartPainter extends CustomPainter {
         oldDelegate.appointmentValues != appointmentValues ||
         oldDelegate.walkInValues != walkInValues ||
         oldDelegate.passedValues != passedValues ||
-        oldDelegate.failedValues != failedValues;
+        oldDelegate.failedValues != failedValues ||
+        oldDelegate.chartType != chartType;
   }
 }
