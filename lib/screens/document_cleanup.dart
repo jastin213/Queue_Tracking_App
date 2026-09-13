@@ -13,6 +13,7 @@ class DocumentCleanupPage extends StatefulWidget {
 class _DocumentCleanupPageState extends State<DocumentCleanupPage> {
   final DocumentRetentionCleanupService _cleanupService =
       DocumentRetentionCleanupService();
+  final ScrollController _scrollController = ScrollController();
 
   List<ExpiredDocumentCandidate> _candidates = const [];
   final Set<String> _selectedIds = <String>{};
@@ -31,6 +32,12 @@ class _DocumentCleanupPageState extends State<DocumentCleanupPage> {
   void initState() {
     super.initState();
     _loadExpiredDocuments();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadExpiredDocuments() async {
@@ -403,146 +410,322 @@ class _DocumentCleanupPageState extends State<DocumentCleanupPage> {
     final allSelected =
         _candidates.isNotEmpty && _selectedIds.length == _candidates.length;
 
-    return Theme(
-      data: Theme.of(context).copyWith(
-        scaffoldBackgroundColor: _backgroundColor,
-        appBarTheme: AppBarTheme(
-          backgroundColor: _backgroundColor,
-          foregroundColor: _primaryColor,
-          elevation: 0,
+    return Scaffold(
+      backgroundColor: _backgroundColor,
+      appBar: AppBar(
+        backgroundColor: _backgroundColor,
+        foregroundColor: _primaryColor,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        title: const Text(
+          'Document Retention',
+          style: TextStyle(fontWeight: FontWeight.w900),
         ),
-      ),
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text(
-            'Expired Document Cleanup',
-            style: TextStyle(fontWeight: FontWeight.w900),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh expired documents',
+            onPressed: _isLoading || _isCleaning ? null : _loadExpiredDocuments,
+            icon: const Icon(Icons.refresh_rounded),
           ),
-          actions: [
-            IconButton(
-              tooltip: 'Refresh expired documents',
-              onPressed: _isLoading || _isCleaning
-                  ? null
-                  : _loadExpiredDocuments,
-              icon: const Icon(Icons.refresh_rounded),
-            ),
-            const SizedBox(width: 8),
-          ],
-        ),
-        body: SafeArea(child: _buildBody(allSelected)),
-        bottomNavigationBar: _selectedIds.isEmpty
-            ? null
-            : SafeArea(
-                child: Container(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-                  decoration: BoxDecoration(
-                    color: _cardColor,
-                    border: Border(top: BorderSide(color: _borderColor)),
-                  ),
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 900),
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              '${_selectedIds.length} selected • ${_formatBytes(_selectedBytes)}',
-                              style: TextStyle(
-                                color: _primaryColor,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                          ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.red,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 18,
-                                vertical: 15,
-                              ),
-                            ),
-                            onPressed: _isCleaning ? null : _confirmAndClean,
-                            icon: _isCleaning
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : const Icon(Icons.delete_sweep_outlined),
-                            label: Text(
-                              _isCleaning ? 'CLEANING...' : 'CLEAN SELECTED',
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+          const SizedBox(width: 8),
+        ],
       ),
+      body: SafeArea(child: _buildBody(allSelected)),
     );
   }
 
   Widget _buildBody(bool allSelected) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final horizontalPadding = constraints.maxWidth >= 900 ? 24.0 : 16.0;
+        final wide = constraints.maxWidth >= 720;
+        final horizontalPadding = wide ? 24.0 : 12.0;
         return RefreshIndicator(
           onRefresh: _loadExpiredDocuments,
-          child: ListView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: EdgeInsets.fromLTRB(
-              horizontalPadding,
-              8,
-              horizontalPadding,
-              28,
-            ),
-            children: [
-              Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 900),
-                  child: Column(
-                    children: [
-                      _buildSafetyCard(),
-                      const SizedBox(height: 14),
-                      if (_isLoading)
-                        _buildLoadingCard()
-                      else if (_loadError != null)
-                        _buildErrorCard()
-                      else if (_candidates.isEmpty)
-                        _buildEmptyCard()
-                      else ...[
-                        _buildSelectionHeader(allSelected),
-                        const SizedBox(height: 10),
-                        for (final candidate in _candidates) ...[
-                          _buildCandidateCard(candidate),
+          child: Scrollbar(
+            controller: _scrollController,
+            thumbVisibility: wide,
+            child: ListView(
+              controller: _scrollController,
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: EdgeInsets.fromLTRB(
+                horizontalPadding,
+                12,
+                horizontalPadding,
+                32,
+              ),
+              children: [
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1040),
+                    child: Column(
+                      children: [
+                        _buildPageSummary(wide),
+                        const SizedBox(height: 14),
+                        _buildSafetyCard(),
+                        const SizedBox(height: 14),
+                        if (_isLoading)
+                          _buildLoadingCard()
+                        else if (_loadError != null)
+                          _buildErrorCard()
+                        else if (_candidates.isEmpty)
+                          _buildEmptyCard()
+                        else ...[
+                          _buildSelectionHeader(allSelected),
+                          if (_selectedIds.isNotEmpty) ...[
+                            const SizedBox(height: 10),
+                            _buildCleanupAction(wide),
+                          ],
                           const SizedBox(height: 10),
-                        ],
-                        if (_candidates.length ==
-                            DocumentRetentionCleanupService
-                                .maximumCandidatesPerLoad)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 6),
-                            child: Text(
-                              'Showing the oldest 100 expired appointments. '
-                              'Refresh after cleanup to load the next group.',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(color: _mutedTextColor),
+                          for (final candidate in _candidates) ...[
+                            _buildCandidateCard(candidate),
+                            const SizedBox(height: 10),
+                          ],
+                          if (_candidates.length ==
+                              DocumentRetentionCleanupService
+                                  .maximumCandidatesPerLoad)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text(
+                                'Showing the oldest 100 expired appointments. '
+                                'Refresh after cleanup to load the next group.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: _mutedTextColor),
+                              ),
                             ),
-                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPageSummary(bool wide) {
+    final totalBytes = _candidates.fold<int>(
+      0,
+      (total, candidate) => total + candidate.estimatedBytes,
+    );
+
+    final heading = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Expired Document Cleanup',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: wide ? 24 : 20,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        const SizedBox(height: 5),
+        Text(
+          'Review eligible uploads before permanently removing the files.',
+          style: TextStyle(
+            color: Colors.white.withValues(alpha: 0.82),
+            height: 1.35,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+
+    final metrics = <Widget>[
+      _summaryMetric(
+        Icons.event_busy_outlined,
+        _isLoading ? '—' : '${_candidates.length}',
+        'Expired records',
+      ),
+      _summaryMetric(
+        Icons.cloud_outlined,
+        _isLoading ? '—' : _formatBytes(totalBytes),
+        'Recorded size',
+      ),
+      _summaryMetric(
+        Icons.check_circle_outline_rounded,
+        '${_selectedIds.length}',
+        'Selected',
+      ),
+    ];
+
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(wide ? 22 : 18),
+      decoration: BoxDecoration(
+        color: _primaryColor,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: _primaryColor.withValues(alpha: 0.14),
+            blurRadius: 22,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: wide
+          ? Row(
+              children: [
+                Expanded(flex: 4, child: heading),
+                const SizedBox(width: 24),
+                Expanded(
+                  flex: 6,
+                  child: Row(
+                    children: [
+                      for (var index = 0; index < metrics.length; index++) ...[
+                        Expanded(child: metrics[index]),
+                        if (index != metrics.length - 1)
+                          const SizedBox(width: 8),
                       ],
                     ],
                   ),
                 ),
+              ],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                heading,
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    for (var index = 0; index < metrics.length; index++) ...[
+                      Expanded(child: metrics[index]),
+                      if (index != metrics.length - 1) const SizedBox(width: 6),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+    );
+  }
+
+  Widget _summaryMetric(IconData icon, String value, String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, color: Colors.white, size: 20),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.75),
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCleanupAction(bool wide) {
+    final information = Row(
+      children: [
+        Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: Colors.red.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(13),
+          ),
+          child: const Icon(Icons.delete_sweep_outlined, color: Colors.red),
+        ),
+        const SizedBox(width: 11),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${_selectedIds.length} record${_selectedIds.length == 1 ? '' : 's'} selected',
+                style: TextStyle(
+                  color: _primaryColor,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                '${_formatBytes(_selectedBytes)} of recorded uploads',
+                style: TextStyle(
+                  color: _mutedTextColor,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ],
           ),
-        );
-      },
+        ),
+      ],
+    );
+
+    final action = ElevatedButton.icon(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.red,
+        foregroundColor: Colors.white,
+        disabledBackgroundColor: Colors.red.withValues(alpha: 0.35),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+      onPressed: _isCleaning ? null : _confirmAndClean,
+      icon: _isCleaning
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: Colors.white,
+              ),
+            )
+          : const Icon(Icons.delete_forever_outlined),
+      label: Text(_isCleaning ? 'CLEANING...' : 'CLEAN SELECTED'),
+    );
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: _cardColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.red.withValues(alpha: 0.28)),
+      ),
+      child: wide
+          ? Row(
+              children: [
+                Expanded(child: information),
+                const SizedBox(width: 16),
+                action,
+              ],
+            )
+          : Column(
+              children: [
+                information,
+                const SizedBox(height: 12),
+                SizedBox(width: double.infinity, child: action),
+              ],
+            ),
     );
   }
 
