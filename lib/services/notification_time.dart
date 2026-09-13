@@ -7,6 +7,23 @@ DateTime? notificationDateTime(dynamic value) {
   return null;
 }
 
+DateTime? latestNotificationDate(Iterable<dynamic> values) {
+  DateTime? latest;
+  for (final value in values) {
+    final date = notificationDateTime(value);
+    if (date != null && (latest == null || date.isAfter(latest))) {
+      latest = date;
+    }
+  }
+  return latest;
+}
+
+bool notificationWasReadBy(dynamic value, DateTime? readThrough) {
+  if (readThrough == null) return false;
+  final date = notificationDateTime(value);
+  return date != null && !date.isAfter(readThrough);
+}
+
 String formatNotificationTime(dynamic value, {DateTime? now}) {
   final date = notificationDateTime(value);
   if (date == null) return 'Time unavailable';
@@ -30,10 +47,14 @@ String formatNotificationTime(dynamic value, {DateTime? now}) {
 dynamic appointmentDecisionTime(Map<String, dynamic> appointment) {
   final status = appointment['status']?.toString();
   if (status == 'Approved') {
-    return appointment['approvedAt'] ?? appointment['updatedAt'];
+    return appointment['approvedAt'] ??
+        appointment['updatedAt'] ??
+        appointment['createdAt'];
   }
   if (status == 'Rejected') {
-    return appointment['rejectedAt'] ?? appointment['updatedAt'];
+    return appointment['rejectedAt'] ??
+        appointment['updatedAt'] ??
+        appointment['createdAt'];
   }
   return appointment['createdAt'] ?? appointment['updatedAt'];
 }

@@ -132,6 +132,7 @@ class _AdminPageState extends State<AdminPage> {
   List<Map<String, dynamic>> _pendingAppointments = [];
   final Set<String> _readPendingAppointmentNotifications = <String>{};
   late final String _adminNotificationPreferenceKey;
+  DateTime? _adminNotificationsReadThrough;
   bool _receivedInitialPendingAppointments = false;
 
   @override
@@ -151,10 +152,49 @@ class _AdminPageState extends State<AdminPage> {
     return 'read_admin_appointment_notifications_${accountId.isEmpty ? 'admin' : accountId}';
   }
 
+  String get _adminNotificationReadThroughPreferenceKey =>
+      '${_adminNotificationPreferenceKey}_through';
+
   String _adminAppointmentNotificationKey(Map<String, dynamic> appointment) {
     final appointmentId = appointment['appointmentId']?.toString().trim() ?? '';
     if (appointmentId.isNotEmpty) return appointmentId;
     return '${appointment['queue']}:${appointment['date']}:${appointment['plate']}';
+  }
+
+  dynamic _adminAppointmentNotificationTime(Map<String, dynamic> appointment) {
+    return appointment['createdAt'] ?? appointment['updatedAt'];
+  }
+
+  void _mergeAdminNotificationsReadThrough(DateTime? value) {
+    if (value == null) return;
+    if (_adminNotificationsReadThrough == null ||
+        value.isAfter(_adminNotificationsReadThrough!)) {
+      _adminNotificationsReadThrough = value;
+    }
+  }
+
+  bool _isAdminAppointmentNotificationRead(Map<String, dynamic> appointment) {
+    return _readPendingAppointmentNotifications.contains(
+          _adminAppointmentNotificationKey(appointment),
+        ) ||
+        notificationWasReadBy(
+          _adminAppointmentNotificationTime(appointment),
+          _adminNotificationsReadThrough,
+        );
+  }
+
+  void _markAdminAppointmentNotificationsRead(
+    Iterable<Map<String, dynamic>> appointments,
+  ) {
+    final notificationList = appointments.toList(growable: false);
+    _readPendingAppointmentNotifications.addAll(
+      notificationList.map(_adminAppointmentNotificationKey),
+    );
+    _mergeAdminNotificationsReadThrough(
+      latestNotificationDate(
+        notificationList.map(_adminAppointmentNotificationTime),
+      ),
+    );
   }
 
   Future<void> _initializeAppointmentNotifications() async {
@@ -163,8 +203,33 @@ class _AdminPageState extends State<AdminPage> {
       _readPendingAppointmentNotifications.addAll(
         preferences.getStringList(_adminNotificationPreferenceKey) ?? const [],
       );
+      final savedReadThrough = preferences.getInt(
+        _adminNotificationReadThroughPreferenceKey,
+      );
+      if (savedReadThrough != null) {
+        _mergeAdminNotificationsReadThrough(
+          DateTime.fromMillisecondsSinceEpoch(savedReadThrough),
+        );
+      }
     } catch (_) {
       // Notifications still work for this session if local storage is blocked.
+    }
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final userDocument = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        _mergeAdminNotificationsReadThrough(
+          notificationDateTime(
+            userDocument.data()?['adminNotificationsReadAt'],
+          ),
+        );
+      }
+    } catch (_) {
+      // Local read state remains available when Firestore is offline.
     }
 
     if (mounted) _listenToPendingAppointments();
@@ -177,8 +242,27 @@ class _AdminPageState extends State<AdminPage> {
         _adminNotificationPreferenceKey,
         _readPendingAppointmentNotifications.toList(),
       );
+      final readThrough = _adminNotificationsReadThrough;
+      if (readThrough != null) {
+        await preferences.setInt(
+          _adminNotificationReadThroughPreferenceKey,
+          readThrough.millisecondsSinceEpoch,
+        );
+      }
     } catch (_) {
       // The badge remains cleared for the current session.
+    }
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      final readThrough = _adminNotificationsReadThrough;
+      if (user != null && readThrough != null) {
+        await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+          'adminNotificationsReadAt': Timestamp.fromDate(readThrough),
+        }, SetOptions(merge: true));
+      }
+    } catch (_) {
+      // Local storage remains the fallback if cloud state cannot be saved.
     }
   }
 
@@ -323,9 +407,7 @@ class _AdminPageState extends State<AdminPage> {
 
   Widget _buildAppointmentNotificationButton() {
     final count = _pendingAppointments.where((appointment) {
-      return !_readPendingAppointmentNotifications.contains(
-        _adminAppointmentNotificationKey(appointment),
-      );
+      return !_isAdminAppointmentNotificationRead(appointment);
     }).length;
     return SizedBox(
       key: _adminNotificationButtonKey,
@@ -378,12 +460,14 @@ class _AdminPageState extends State<AdminPage> {
 
     final notifications = _pendingAppointments.take(8).toList();
     final unreadKeysBeforeOpen = _pendingAppointments
+        .where(
+          (appointment) => !_isAdminAppointmentNotificationRead(appointment),
+        )
         .map(_adminAppointmentNotificationKey)
-        .where((key) => !_readPendingAppointmentNotifications.contains(key))
         .toSet();
     if (unreadKeysBeforeOpen.isNotEmpty) {
       setState(
-        () => _readPendingAppointmentNotifications.addAll(unreadKeysBeforeOpen),
+        () => _markAdminAppointmentNotificationsRead(_pendingAppointments),
       );
       await _saveReadAdminAppointmentNotifications();
       if (!mounted) return;
@@ -462,7 +546,7 @@ class _AdminPageState extends State<AdminPage> {
             final notificationKey = _adminAppointmentNotificationKey(
               appointment,
             );
-            final isViewed = !unreadKeysBeforeOpen.contains(notificationKey);
+            final isViewed = _isAdminAppointmentNotificationRead(appointment);
             final contentColor = isViewed ? _mutedTextColor : _primaryColor;
             final time = formatNotificationTime(
               appointment['createdAt'] ?? appointment['updatedAt'],

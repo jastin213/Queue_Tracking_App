@@ -10,6 +10,8 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../theme/app_theme.dart';
 import '../services/appointment_lifecycle.dart';
+import '../services/document_review_analyzer.dart';
+import '../services/document_text_recognition.dart';
 import '../services/firestore_query_fields.dart';
 import '../widgets/app_refresh_indicator.dart';
 import '../widgets/app_responsive_content.dart';
@@ -816,6 +818,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
       context: context,
       builder: (_) {
         bool isProcessing = false;
+        bool isAnalyzingDocuments = false;
+        String analysisProgress = '';
+        String? analysisError;
+        DocumentReviewResult? reviewResult;
 
         return StatefulBuilder(
           builder: (context, setDialogState) {
@@ -851,7 +857,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                             ),
                           ),
                           IconButton(
-                            onPressed: isProcessing
+                            onPressed: isProcessing || isAnalyzingDocuments
                                 ? null
                                 : () {
                                     Navigator.pop(context);
@@ -950,6 +956,100 @@ class _AdminDashboardState extends State<AdminDashboard> {
                               documentType: "CR",
                             ),
 
+                            const SizedBox(height: 4),
+
+                            SizedBox(
+                              width: double.infinity,
+                              height: 50,
+                              child: FilledButton.icon(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: _primaryColor,
+                                  foregroundColor: Colors.white,
+                                  disabledBackgroundColor: _borderColor,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                ),
+                                onPressed: isProcessing || isAnalyzingDocuments
+                                    ? null
+                                    : () async {
+                                        setDialogState(() {
+                                          isAnalyzingDocuments = true;
+                                          analysisProgress =
+                                              'Preparing document review...';
+                                          analysisError = null;
+                                        });
+
+                                        try {
+                                          final result =
+                                              await analyzeBookingDocuments(
+                                                booking,
+                                                onProgress: (message) {
+                                                  if (!context.mounted) return;
+                                                  setDialogState(() {
+                                                    analysisProgress = message;
+                                                  });
+                                                },
+                                              );
+                                          if (!context.mounted) return;
+                                          setDialogState(() {
+                                            reviewResult = result;
+                                          });
+                                        } catch (error) {
+                                          if (!context.mounted) return;
+                                          setDialogState(() {
+                                            analysisError =
+                                                'The document review could not be completed. '
+                                                'Check the connection and review the files manually.';
+                                          });
+                                        } finally {
+                                          if (context.mounted) {
+                                            setDialogState(() {
+                                              isAnalyzingDocuments = false;
+                                              analysisProgress = '';
+                                            });
+                                          }
+                                        }
+                                      },
+                                icon: isAnalyzingDocuments
+                                    ? const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2.4,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                    : const Icon(
+                                        Icons.document_scanner_outlined,
+                                      ),
+                                label: Text(
+                                  isAnalyzingDocuments
+                                      ? analysisProgress.toUpperCase()
+                                      : reviewResult == null
+                                      ? 'ANALYZE DOCUMENTS'
+                                      : 'ANALYZE AGAIN',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                            const SizedBox(height: 12),
+
+                            if (analysisError != null)
+                              _documentReviewMessage(
+                                icon: Icons.error_outline_rounded,
+                                color: Colors.red,
+                                message: analysisError!,
+                              ),
+
+                            if (reviewResult != null)
+                              documentReviewCard(reviewResult!),
+
                             const SizedBox(height: 10),
 
                             Container(
@@ -960,14 +1060,30 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                 borderRadius: BorderRadius.circular(16),
                                 border: Border.all(color: _borderColor),
                               ),
-                              child: Text(
-                                "Select VIEW FILE to open the document uploaded by the customer.",
-                                style: TextStyle(
-                                  color: _mutedTextColor,
-                                  fontSize: 13,
-                                  height: 1.35,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    "Select VIEW FILE to open the document uploaded by the customer.",
+                                    style: TextStyle(
+                                      color: _mutedTextColor,
+                                      fontSize: 13,
+                                      height: 1.35,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    "AI-assisted review uses OCR to compare visible text only. "
+                                    "It does not prove document authenticity, and the administrator "
+                                    "must make the final decision.",
+                                    style: TextStyle(
+                                      color: _mutedTextColor,
+                                      fontSize: 12,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ],
@@ -998,7 +1114,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                       borderRadius: BorderRadius.circular(14),
                                     ),
                                   ),
-                                  onPressed: isProcessing
+                                  onPressed:
+                                      isProcessing || isAnalyzingDocuments
                                       ? null
                                       : () async {
                                           setDialogState(() {
@@ -1049,7 +1166,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                       borderRadius: BorderRadius.circular(14),
                                     ),
                                   ),
-                                  onPressed: isProcessing
+                                  onPressed:
+                                      isProcessing || isAnalyzingDocuments
                                       ? null
                                       : () async {
                                           final rejection =
@@ -1109,6 +1227,295 @@ class _AdminDashboardState extends State<AdminDashboard> {
           },
         );
       },
+    );
+  }
+
+  Future<({Uint8List bytes, String fileName})> loadDocumentBytesForReview({
+    required Map<String, dynamic> booking,
+    required String documentType,
+  }) async {
+    final String prefix = switch (documentType) {
+      'ID' => 'id',
+      'OR' => 'or',
+      'CR' => 'cr',
+      _ => throw ArgumentError.value(documentType, 'documentType'),
+    };
+    final String fileName =
+        booking['${prefix}File']?.toString().trim() ??
+        '${documentType.toLowerCase()}.jpg';
+    final String storagePath =
+        booking['${prefix}StoragePath']?.toString().trim() ?? '';
+    final String fileUrl = booking['${prefix}FileUrl']?.toString().trim() ?? '';
+
+    const int maximumBytes = 10 * 1024 * 1024;
+
+    if (storagePath.isNotEmpty) {
+      final data = await FirebaseStorage.instance
+          .ref(storagePath)
+          .getData(maximumBytes);
+      if (data == null || data.isEmpty) {
+        throw StateError('The uploaded $documentType file is empty.');
+      }
+      return (bytes: data, fileName: fileName);
+    }
+
+    if (fileUrl.isNotEmpty) {
+      final data = await FirebaseStorage.instance
+          .refFromURL(fileUrl)
+          .getData(maximumBytes);
+      if (data == null || data.isEmpty) {
+        throw StateError('The uploaded $documentType file is empty.');
+      }
+      return (bytes: data, fileName: fileName);
+    }
+
+    final String appointmentId =
+        booking['appointmentId']?.toString().trim() ?? '';
+    if (appointmentId.isEmpty) {
+      throw StateError('The appointment reference is missing.');
+    }
+
+    final document = await loadFirestoreDocument(
+      appointmentId: appointmentId,
+      documentType: documentType,
+    );
+    return (bytes: document.bytes, fileName: document.fileName);
+  }
+
+  Future<DocumentReviewResult> analyzeBookingDocuments(
+    Map<String, dynamic> booking, {
+    required void Function(String message) onProgress,
+  }) async {
+    final recognizer = DocumentTextRecognizer();
+    if (!recognizer.isSupported) {
+      throw UnsupportedError(
+        'AI-assisted document review is not supported on this platform.',
+      );
+    }
+
+    final texts = <String, String>{};
+    final errors = <String, String>{};
+
+    Future<void> recognizeOne(String documentType, String label) async {
+      onProgress('Loading $label...');
+      try {
+        final document = await loadDocumentBytesForReview(
+          booking: booking,
+          documentType: documentType,
+        );
+
+        if (document.fileName.toLowerCase().endsWith('.pdf')) {
+          errors[documentType] =
+              'PDF OCR is not supported. Open and review this file manually.';
+          texts[documentType] = '';
+          return;
+        }
+
+        onProgress('Reading $label...');
+        final text = await recognizer.recognize(
+          bytes: document.bytes,
+          fileName: document.fileName,
+        );
+        texts[documentType] = text;
+        if (text.trim().isEmpty) {
+          errors[documentType] =
+              'No readable text was detected. Open the file and review it manually.';
+        }
+      } catch (_) {
+        texts[documentType] = '';
+        errors[documentType] =
+            'OCR could not read this file. Open it and review it manually.';
+      }
+    }
+
+    try {
+      await recognizeOne('ID', 'Valid ID');
+      await recognizeOne('OR', 'Official Receipt');
+      await recognizeOne('CR', 'Certificate of Registration');
+    } finally {
+      await recognizer.close();
+    }
+
+    onProgress('Comparing extracted details...');
+    return DocumentReviewAnalyzer.analyze(
+      customerName: booking['fullName']?.toString().trim() ?? '',
+      enteredPlate: booking['plate']?.toString().trim() ?? '',
+      idText: texts['ID'] ?? '',
+      orText: texts['OR'] ?? '',
+      crText: texts['CR'] ?? '',
+      errors: errors,
+    );
+  }
+
+  Widget _documentReviewMessage({
+    required IconData icon,
+    required Color color,
+    required String message,
+  }) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: color, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                color: _primaryColor,
+                fontWeight: FontWeight.w600,
+                height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget documentReviewCard(DocumentReviewResult result) {
+    final Color accentColor = switch (result.title) {
+      'Likely consistent' => Colors.green,
+      'Manual review required' => Colors.orange,
+      _ => Colors.red,
+    };
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(15),
+      decoration: BoxDecoration(
+        color: accentColor.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: accentColor.withValues(alpha: 0.38)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: accentColor.withValues(alpha: 0.13),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  result.title == 'Likely consistent'
+                      ? Icons.fact_check_outlined
+                      : Icons.manage_search_rounded,
+                  color: accentColor,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'AI-Assisted Review: ${result.title}',
+                      style: TextStyle(
+                        color: _primaryColor,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Consistency score: ${result.score}/100',
+                      style: TextStyle(
+                        color: accentColor,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            result.summary,
+            style: TextStyle(
+              color: _mutedTextColor,
+              fontWeight: FontWeight.w600,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 12),
+          ...result.checks.map((check) {
+            final (icon, color) = switch (check.state) {
+              DocumentReviewCheckState.passed => (
+                Icons.check_circle_outline_rounded,
+                Colors.green,
+              ),
+              DocumentReviewCheckState.warning => (
+                Icons.warning_amber_rounded,
+                Colors.orange,
+              ),
+              DocumentReviewCheckState.unavailable => (
+                Icons.help_outline_rounded,
+                _mutedTextColor,
+              ),
+            };
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(icon, color: color, size: 20),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          check.title,
+                          style: TextStyle(
+                            color: _primaryColor,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          check.detail,
+                          style: TextStyle(
+                            color: _mutedTextColor,
+                            fontSize: 12,
+                            height: 1.3,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+          const Divider(height: 18),
+          Text(
+            'This result is advisory only. Compare the actual document images '
+            'before approving, requesting a resubmission, or rejecting.',
+            style: TextStyle(
+              color: _mutedTextColor,
+              fontSize: 12,
+              fontStyle: FontStyle.italic,
+              height: 1.35,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1362,6 +1769,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       }
     }
 
+    if (!mounted) return;
+
     if (url.isEmpty) {
       final String id = appointmentId?.toString().trim() ?? '';
 
@@ -1436,7 +1845,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: _borderColor),
         boxShadow: [
-          BoxShadow(color: _primaryColor.withOpacity(0.04), blurRadius: 10),
+          BoxShadow(
+            color: _primaryColor.withValues(alpha: 0.04),
+            blurRadius: 10,
+          ),
         ],
       ),
       child: Column(
@@ -1449,7 +1861,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 decoration: BoxDecoration(
                   color: hasUploadedFile
                       ? _softPrimaryColor
-                      : Colors.red.withOpacity(0.08),
+                      : Colors.red.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(color: _borderColor),
                 ),
@@ -1996,7 +2408,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                     vertical: 5,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.orange.withOpacity(0.12),
+                    color: Colors.orange.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: const Text(

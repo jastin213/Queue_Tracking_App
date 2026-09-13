@@ -37,6 +37,7 @@ class _CustomerHomeState extends State<CustomerHome> {
   final Map<String, String> _knownAppointmentStatuses = {};
   final Set<String> _readAppointmentNotifications = {};
   late final String _notificationPreferenceKey;
+  DateTime? _notificationsReadThrough;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
   _appointmentSubscription;
   bool _receivedInitialAppointmentSnapshot = false;
@@ -58,6 +59,9 @@ class _CustomerHomeState extends State<CustomerHome> {
     return "read_appointment_notifications_${accountId.isEmpty ? 'customer' : accountId}";
   }
 
+  String get _notificationReadThroughPreferenceKey =>
+      "${_notificationPreferenceKey}_through";
+
   String _appointmentNotificationKey(Map<String, dynamic> appointment) {
     final id = appointment["appointmentId"]?.toString().trim() ?? "";
     final fallback = [
@@ -75,11 +79,66 @@ class _CustomerHomeState extends State<CustomerHome> {
       _readAppointmentNotifications.addAll(
         preferences.getStringList(_notificationPreferenceKey) ?? const [],
       );
+      final savedReadThrough = preferences.getInt(
+        _notificationReadThroughPreferenceKey,
+      );
+      if (savedReadThrough != null) {
+        _mergeNotificationsReadThrough(
+          DateTime.fromMillisecondsSinceEpoch(savedReadThrough),
+        );
+      }
     } catch (_) {
       // Notifications still work for this session if local storage is blocked.
     }
 
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final userDocument = await FirebaseFirestore.instance
+            .collection("users")
+            .doc(user.uid)
+            .get();
+        _mergeNotificationsReadThrough(
+          notificationDateTime(
+            userDocument.data()?["customerNotificationsReadAt"],
+          ),
+        );
+      }
+    } catch (_) {
+      // Local read state remains available when Firestore is offline.
+    }
+
     if (mounted) _listenToAppointmentNotifications();
+  }
+
+  void _mergeNotificationsReadThrough(DateTime? value) {
+    if (value == null) return;
+    if (_notificationsReadThrough == null ||
+        value.isAfter(_notificationsReadThrough!)) {
+      _notificationsReadThrough = value;
+    }
+  }
+
+  bool _isAppointmentNotificationRead(Map<String, dynamic> appointment) {
+    return _readAppointmentNotifications.contains(
+          _appointmentNotificationKey(appointment),
+        ) ||
+        notificationWasReadBy(
+          appointmentDecisionTime(appointment),
+          _notificationsReadThrough,
+        );
+  }
+
+  void _markAppointmentNotificationsRead(
+    Iterable<Map<String, dynamic>> appointments,
+  ) {
+    final notificationList = appointments.toList(growable: false);
+    _readAppointmentNotifications.addAll(
+      notificationList.map(_appointmentNotificationKey),
+    );
+    _mergeNotificationsReadThrough(
+      latestNotificationDate(notificationList.map(appointmentDecisionTime)),
+    );
   }
 
   @override
@@ -228,19 +287,17 @@ class _CustomerHomeState extends State<CustomerHome> {
   int get unreadAppointmentCount {
     return _customerAppointments.where((appointment) {
       return isFinalAppointmentStatus(appointment["status"]) &&
-          !_readAppointmentNotifications.contains(
-            _appointmentNotificationKey(appointment),
-          );
+          !_isAppointmentNotificationRead(appointment);
     }).length;
   }
 
   Future<void> openAppointmentStatus() async {
-    final readKeys = _customerAppointments
+    final notifications = _customerAppointments
         .where((appointment) => isFinalAppointmentStatus(appointment["status"]))
-        .map(_appointmentNotificationKey);
+        .toList(growable: false);
 
     setState(() {
-      _readAppointmentNotifications.addAll(readKeys);
+      _markAppointmentNotificationsRead(notifications);
     });
     await _saveReadAppointmentNotifications();
     if (!mounted) return;
@@ -263,13 +320,11 @@ class _CustomerHomeState extends State<CustomerHome> {
         .toList();
     final notifications = allNotifications.take(8).toList();
     final unreadKeysBeforeOpen = allNotifications
+        .where((appointment) => !_isAppointmentNotificationRead(appointment))
         .map(_appointmentNotificationKey)
-        .where((key) => !_readAppointmentNotifications.contains(key))
         .toSet();
     if (unreadKeysBeforeOpen.isNotEmpty) {
-      setState(
-        () => _readAppointmentNotifications.addAll(unreadKeysBeforeOpen),
-      );
+      setState(() => _markAppointmentNotificationsRead(allNotifications));
       await _saveReadAppointmentNotifications();
       if (!mounted) return;
     }
@@ -340,7 +395,7 @@ class _CustomerHomeState extends State<CustomerHome> {
             final queue = appointment["queue"]?.toString() ?? "-";
             final date = appointment["date"]?.toString() ?? "-";
             final notificationKey = _appointmentNotificationKey(appointment);
-            final isViewed = !unreadKeysBeforeOpen.contains(notificationKey);
+            final isViewed = _isAppointmentNotificationRead(appointment);
             final contentColor = isViewed ? _mutedTextColor : _primaryColor;
             final time = formatNotificationTime(
               appointmentDecisionTime(appointment),
@@ -451,8 +506,27 @@ class _CustomerHomeState extends State<CustomerHome> {
         _notificationPreferenceKey,
         _readAppointmentNotifications.toList(),
       );
+      final readThrough = _notificationsReadThrough;
+      if (readThrough != null) {
+        await preferences.setInt(
+          _notificationReadThroughPreferenceKey,
+          readThrough.millisecondsSinceEpoch,
+        );
+      }
     } catch (_) {
       // The badge is still cleared for the current session.
+    }
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      final readThrough = _notificationsReadThrough;
+      if (user != null && readThrough != null) {
+        await FirebaseFirestore.instance.collection("users").doc(user.uid).set({
+          "customerNotificationsReadAt": Timestamp.fromDate(readThrough),
+        }, SetOptions(merge: true));
+      }
+    } catch (_) {
+      // Local storage remains the fallback if cloud state cannot be saved.
     }
   }
 

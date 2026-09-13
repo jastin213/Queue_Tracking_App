@@ -18,21 +18,40 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="NPJN appointment and queue management system for emission testing services.">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="queue_tracking_app">
+  <meta name="apple-mobile-web-app-title" content="NPJN Queue System">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>queue_tracking_app</title>
+  <title>NPJN Queue System</title>
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
+  <!--
+    Tesseract.js performs OCR inside the administrator's browser. Uploaded
+    document images are not sent to an OCR API and no API key is required.
+  -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/tesseract.min.js"></script>
+  <script>
+    let queueOcrWorkerPromise;
+
+    window.queueOcrRecognize = async function (imageDataUrl) {
+      if (!window.Tesseract) {
+        throw new Error('The local OCR engine could not be loaded. Check the internet connection and try again.');
+      }
+
+      queueOcrWorkerPromise ??= window.Tesseract.createWorker('eng');
+      const worker = await queueOcrWorkerPromise;
+      const result = await worker.recognize(imageDataUrl);
+      return result?.data?.text ?? '';
+    };
+  </script>
   <!--
     You can customize the "flutter_bootstrap.js" script.
     This is useful to provide a custom configuration to the Flutter loader

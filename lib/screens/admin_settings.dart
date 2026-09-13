@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
 import '../theme/app_theme.dart';
+import 'document_cleanup.dart';
 // ============================================================================
 // THEME COLORS
 // ============================================================================
@@ -139,7 +140,7 @@ class _AdminSettingsState extends State<AdminSettings> {
       backgroundColor: _primaryColor,
       foregroundColor: Colors.white,
       elevation: 2,
-      shadowColor: _primaryColor.withOpacity(0.16),
+      shadowColor: _primaryColor.withValues(alpha: 0.16),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
       textStyle: const TextStyle(
         fontWeight: FontWeight.w800,
@@ -228,6 +229,8 @@ class _AdminSettingsState extends State<AdminSettings> {
         buildDisplaySettings(),
         const SizedBox(height: 16),
         buildAppointmentSettings(),
+        const SizedBox(height: 16),
+        buildDocumentRetentionSettings(),
         const SizedBox(height: 16),
         buildAdminReminders(),
       ],
@@ -536,6 +539,62 @@ class _AdminSettingsState extends State<AdminSettings> {
     );
   }
 
+  // ========================================================================
+  // SECTION: DOCUMENT RETENTION
+  // ========================================================================
+
+  Widget buildDocumentRetentionSettings() {
+    return settingsCard(
+      icon: Icons.inventory_2_outlined,
+      title: "Document Retention",
+      subtitle: "Safely review uploads that have passed the 365-day period.",
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "Expired Valid IDs, Official Receipts, and Certificates of "
+            "Registration can be archived and removed manually. Customer, "
+            "appointment, plate, status, and report information is preserved.",
+            style: TextStyle(
+              color: _mutedTextColor,
+              fontSize: 13,
+              height: 1.4,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            height: 50,
+            child: OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _primaryColor,
+                side: BorderSide(color: _borderColor, width: 1.2),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15),
+                ),
+                textStyle: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 0.4,
+                ),
+              ),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const DocumentCleanupPage(),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.manage_search_rounded),
+              label: const Text("REVIEW EXPIRED DOCUMENTS"),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ==========================================================================
   // SECTION: ADMIN REMINDERS
   // ==========================================================================
@@ -578,7 +637,10 @@ class _AdminSettingsState extends State<AdminSettings> {
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: _borderColor),
         boxShadow: [
-          BoxShadow(color: _primaryColor.withOpacity(0.06), blurRadius: 14),
+          BoxShadow(
+            color: _primaryColor.withValues(alpha: 0.06),
+            blurRadius: 14,
+          ),
         ],
       ),
       child: Column(

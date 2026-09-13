@@ -1,11 +1,11 @@
 {
-    "name": "queue_tracking_app",
-    "short_name": "queue_tracking_app",
+    "name": "NPJN Queue System",
+    "short_name": "NPJN Queue",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#F1FAFC",
+    "theme_color": "#06243A",
+    "description": "NPJN appointment and queue management system for emission testing services.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
