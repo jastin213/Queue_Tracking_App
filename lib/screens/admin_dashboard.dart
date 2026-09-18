@@ -3054,7 +3054,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           onSurface: _primaryColor,
         ),
         appBarTheme: AppBarTheme(
-          backgroundColor: _backgroundColor,
+          backgroundColor: _cardColor,
           foregroundColor: _primaryColor,
           elevation: 0,
           centerTitle: false,

@@ -205,6 +205,142 @@ class _DailyReportState extends State<DailyReport> {
     }
   }
 
+  Future<void> pickAnalyticsMonth() async {
+    final initial = parseDate(selectedDate);
+    const firstYear = 2020;
+    const lastYear = 2030;
+    const monthNames = [
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
+    ];
+
+    final picked = await showDialog<DateTime>(
+      context: context,
+      builder: (dialogContext) {
+        var displayedYear = initial.year.clamp(firstYear, lastYear).toInt();
+
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: _cardColor,
+              title: Text(
+                "Select Analytics Month",
+                style: TextStyle(
+                  color: _primaryColor,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              content: SizedBox(
+                width: 420,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        IconButton(
+                          tooltip: "Previous year",
+                          onPressed: displayedYear > firstYear
+                              ? () => setDialogState(() => displayedYear--)
+                              : null,
+                          icon: const Icon(Icons.chevron_left_rounded),
+                        ),
+                        Text(
+                          "$displayedYear",
+                          style: TextStyle(
+                            color: _primaryColor,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: "Next year",
+                          onPressed: displayedYear < lastYear
+                              ? () => setDialogState(() => displayedYear++)
+                              : null,
+                          icon: const Icon(Icons.chevron_right_rounded),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: monthNames.length,
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 3,
+                            mainAxisSpacing: 8,
+                            crossAxisSpacing: 8,
+                            childAspectRatio: 2.35,
+                          ),
+                      itemBuilder: (context, index) {
+                        final month = index + 1;
+                        final selected =
+                            initial.year == displayedYear &&
+                            initial.month == month;
+                        return OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            backgroundColor: selected
+                                ? _primaryColor
+                                : _softPrimaryColor,
+                            foregroundColor: selected
+                                ? Colors.white
+                                : _primaryColor,
+                            side: BorderSide(
+                              color: selected ? _primaryColor : _borderColor,
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                          ),
+                          onPressed: () => Navigator.pop(
+                            dialogContext,
+                            DateTime(displayedYear, month),
+                          ),
+                          child: Text(
+                            monthNames[index],
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text("CANCEL"),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (picked == null || !mounted) return;
+    setState(() {
+      selectedDate = formatPickedDate(picked);
+      expandedReportSection = null;
+    });
+    await _loadAnalyticsWindow();
+  }
+
   void toggleReportSection(_ReportSection section) {
     setState(() {
       expandedReportSection = expandedReportSection == section ? null : section;
@@ -1197,7 +1333,7 @@ class _DailyReportState extends State<DailyReport> {
           onSurface: _primaryColor,
         ),
         appBarTheme: AppBarTheme(
-          backgroundColor: _backgroundColor,
+          backgroundColor: _cardColor,
           foregroundColor: _primaryColor,
           elevation: 0,
           centerTitle: false,
@@ -1241,7 +1377,7 @@ class _DailyReportState extends State<DailyReport> {
                         children: [
                           buildDateSelector(
                             label: widget.analyticsOnly
-                                ? "Analytics Reference Date"
+                                ? "Analytics Month"
                                 : "Report Date",
                           ),
 
@@ -1339,6 +1475,9 @@ class _DailyReportState extends State<DailyReport> {
   // ================= DATE SELECTOR =================
 
   Widget buildDateSelector({String label = "Report Date"}) {
+    final selectedValue = widget.analyticsOnly
+        ? monthLabelFromKey(currentMonthKey())
+        : selectedDate;
     return cardContainer(
       child: Row(
         children: [
@@ -1346,7 +1485,7 @@ class _DailyReportState extends State<DailyReport> {
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              "$label: $selectedDate",
+              "$label: $selectedValue",
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: _primaryColor,
@@ -1365,7 +1504,9 @@ class _DailyReportState extends State<DailyReport> {
                 borderRadius: BorderRadius.circular(14),
               ),
             ),
-            onPressed: pickReportDate,
+            onPressed: widget.analyticsOnly
+                ? pickAnalyticsMonth
+                : pickReportDate,
             child: const Text(
               "Change",
               style: TextStyle(fontWeight: FontWeight.w800),

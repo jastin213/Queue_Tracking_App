@@ -10,6 +10,7 @@ import '../services/notification_time.dart';
 import '../services/customer_preferences.dart';
 import '../widgets/app_refresh_indicator.dart';
 import '../widgets/app_responsive_content.dart';
+import '../widgets/app_motion.dart';
 import 'track_page.dart';
 import 'book_appointment.dart';
 import 'booking_status_page.dart';
@@ -37,7 +38,6 @@ class _CustomerHomeState extends State<CustomerHome> {
   final Map<String, String> _knownAppointmentStatuses = {};
   final Set<String> _readAppointmentNotifications = {};
   late final String _notificationPreferenceKey;
-  DateTime? _notificationsReadThrough;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
   _appointmentSubscription;
   bool _receivedInitialAppointmentSnapshot = false;
@@ -56,11 +56,8 @@ class _CustomerHomeState extends State<CustomerHome> {
     } catch (_) {
       // Firebase is unavailable only in isolated widget tests.
     }
-    return "read_appointment_notifications_${accountId.isEmpty ? 'customer' : accountId}";
+    return "read_v2_appointment_notifications_${accountId.isEmpty ? 'customer' : accountId}";
   }
-
-  String get _notificationReadThroughPreferenceKey =>
-      "${_notificationPreferenceKey}_through";
 
   String _appointmentNotificationKey(Map<String, dynamic> appointment) {
     final id = appointment["appointmentId"]?.toString().trim() ?? "";
@@ -79,14 +76,6 @@ class _CustomerHomeState extends State<CustomerHome> {
       _readAppointmentNotifications.addAll(
         preferences.getStringList(_notificationPreferenceKey) ?? const [],
       );
-      final savedReadThrough = preferences.getInt(
-        _notificationReadThroughPreferenceKey,
-      );
-      if (savedReadThrough != null) {
-        _mergeNotificationsReadThrough(
-          DateTime.fromMillisecondsSinceEpoch(savedReadThrough),
-        );
-      }
     } catch (_) {
       // Notifications still work for this session if local storage is blocked.
     }
@@ -98,11 +87,15 @@ class _CustomerHomeState extends State<CustomerHome> {
             .collection("users")
             .doc(user.uid)
             .get();
-        _mergeNotificationsReadThrough(
-          notificationDateTime(
-            userDocument.data()?["customerNotificationsReadAt"],
-          ),
-        );
+        final cloudReadKeys = userDocument
+            .data()?["customerReadNotificationKeysV2"];
+        if (cloudReadKeys is Iterable) {
+          _readAppointmentNotifications.addAll(
+            cloudReadKeys
+                .map((value) => value.toString().trim())
+                .where((value) => value.isNotEmpty),
+          );
+        }
       }
     } catch (_) {
       // Local read state remains available when Firestore is offline.
@@ -111,34 +104,14 @@ class _CustomerHomeState extends State<CustomerHome> {
     if (mounted) _listenToAppointmentNotifications();
   }
 
-  void _mergeNotificationsReadThrough(DateTime? value) {
-    if (value == null) return;
-    if (_notificationsReadThrough == null ||
-        value.isAfter(_notificationsReadThrough!)) {
-      _notificationsReadThrough = value;
-    }
-  }
-
   bool _isAppointmentNotificationRead(Map<String, dynamic> appointment) {
     return _readAppointmentNotifications.contains(
-          _appointmentNotificationKey(appointment),
-        ) ||
-        notificationWasReadBy(
-          appointmentDecisionTime(appointment),
-          _notificationsReadThrough,
-        );
+      _appointmentNotificationKey(appointment),
+    );
   }
 
-  void _markAppointmentNotificationsRead(
-    Iterable<Map<String, dynamic>> appointments,
-  ) {
-    final notificationList = appointments.toList(growable: false);
-    _readAppointmentNotifications.addAll(
-      notificationList.map(_appointmentNotificationKey),
-    );
-    _mergeNotificationsReadThrough(
-      latestNotificationDate(notificationList.map(appointmentDecisionTime)),
-    );
+  void _markAppointmentNotificationRead(Map<String, dynamic> appointment) {
+    _readAppointmentNotifications.add(_appointmentNotificationKey(appointment));
   }
 
   @override
@@ -291,21 +264,22 @@ class _CustomerHomeState extends State<CustomerHome> {
     }).length;
   }
 
-  Future<void> openAppointmentStatus() async {
-    final notifications = _customerAppointments
-        .where((appointment) => isFinalAppointmentStatus(appointment["status"]))
-        .toList(growable: false);
-
-    setState(() {
-      _markAppointmentNotificationsRead(notifications);
-    });
-    await _saveReadAppointmentNotifications();
-    if (!mounted) return;
-
+  void openAppointmentStatus() {
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const BookingStatusPage()),
     );
+  }
+
+  Future<void> _openAppointmentNotification(
+    Map<String, dynamic> appointment,
+  ) async {
+    if (!_isAppointmentNotificationRead(appointment)) {
+      setState(() => _markAppointmentNotificationRead(appointment));
+      await _saveReadAppointmentNotifications();
+      if (!mounted) return;
+    }
+    openAppointmentStatus();
   }
 
   Future<void> showAppointmentNotificationPopover() async {
@@ -319,15 +293,6 @@ class _CustomerHomeState extends State<CustomerHome> {
         .where((appointment) => isFinalAppointmentStatus(appointment["status"]))
         .toList();
     final notifications = allNotifications.take(8).toList();
-    final unreadKeysBeforeOpen = allNotifications
-        .where((appointment) => !_isAppointmentNotificationRead(appointment))
-        .map(_appointmentNotificationKey)
-        .toSet();
-    if (unreadKeysBeforeOpen.isNotEmpty) {
-      setState(() => _markAppointmentNotificationsRead(allNotifications));
-      await _saveReadAppointmentNotifications();
-      if (!mounted) return;
-    }
 
     final buttonTopLeft = button.localToGlobal(Offset.zero, ancestor: overlay);
     final availableWidth = overlay.size.width - 24;
@@ -402,78 +367,90 @@ class _CustomerHomeState extends State<CustomerHome> {
             );
             return PopupMenuItem<String>(
               value: notificationKey,
-              height: 92,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: isViewed
-                          ? _mutedTextColor.withValues(alpha: 0.10)
-                          : appointmentStatusColor(
-                              status,
-                            ).withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
+              height: 100,
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: isViewed
+                      ? Colors.transparent
+                      : appointmentStatusColor(status).withValues(alpha: 0.07),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: isViewed
+                            ? _mutedTextColor.withValues(alpha: 0.10)
+                            : appointmentStatusColor(
+                                status,
+                              ).withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        status == "Approved"
+                            ? Icons.check_circle_outline_rounded
+                            : Icons.cancel_outlined,
+                        color: isViewed
+                            ? _mutedTextColor
+                            : appointmentStatusColor(status),
+                      ),
                     ),
-                    child: Icon(
-                      status == "Approved"
-                          ? Icons.check_circle_outline_rounded
-                          : Icons.cancel_outlined,
-                      color: isViewed
-                          ? _mutedTextColor
-                          : appointmentStatusColor(status),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            appointmentStatusTitle(status),
+                            style: TextStyle(
+                              color: contentColor,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            "Queue $queue • $date",
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: contentColor, fontSize: 12),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            time,
+                            style: TextStyle(
+                              color: _mutedTextColor,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          appointmentStatusTitle(status),
-                          style: TextStyle(
-                            color: contentColor,
-                            fontWeight: FontWeight.w800,
+                        if (!isViewed)
+                          Container(
+                            width: 9,
+                            height: 9,
+                            decoration: const BoxDecoration(
+                              color: AppColors.danger,
+                              shape: BoxShape.circle,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          "Queue $queue • $date",
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: contentColor, fontSize: 12),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          time,
-                          style: TextStyle(
-                            color: _mutedTextColor,
-                            fontSize: 11,
-                          ),
+                        if (!isViewed) const SizedBox(height: 6),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          color: _mutedTextColor,
                         ),
                       ],
                     ),
-                  ),
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        isViewed ? "VIEWED" : "NEW",
-                        style: TextStyle(
-                          color: isViewed
-                              ? _mutedTextColor
-                              : appointmentStatusColor(status),
-                          fontSize: 8,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      Icon(Icons.chevron_right_rounded, color: _mutedTextColor),
-                    ],
-                  ),
-                ],
+                  ],
+                ),
               ),
             );
           }),
@@ -491,11 +468,18 @@ class _CustomerHomeState extends State<CustomerHome> {
       ],
     );
 
-    if (selectedId != null && mounted) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const BookingStatusPage()),
-      );
+    if (selectedId == null || !mounted) return;
+    if (selectedId == "__view_all__") {
+      openAppointmentStatus();
+      return;
+    }
+
+    final selectedAppointment = notifications.firstWhere(
+      (appointment) => _appointmentNotificationKey(appointment) == selectedId,
+      orElse: () => <String, dynamic>{},
+    );
+    if (selectedAppointment.isNotEmpty) {
+      await _openAppointmentNotification(selectedAppointment);
     }
   }
 
@@ -506,23 +490,16 @@ class _CustomerHomeState extends State<CustomerHome> {
         _notificationPreferenceKey,
         _readAppointmentNotifications.toList(),
       );
-      final readThrough = _notificationsReadThrough;
-      if (readThrough != null) {
-        await preferences.setInt(
-          _notificationReadThroughPreferenceKey,
-          readThrough.millisecondsSinceEpoch,
-        );
-      }
     } catch (_) {
-      // The badge is still cleared for the current session.
+      // Read state still works for the current session.
     }
 
     try {
       final user = FirebaseAuth.instance.currentUser;
-      final readThrough = _notificationsReadThrough;
-      if (user != null && readThrough != null) {
+      if (user != null) {
+        final readKeys = _readAppointmentNotifications.toList()..sort();
         await FirebaseFirestore.instance.collection("users").doc(user.uid).set({
-          "customerNotificationsReadAt": Timestamp.fromDate(readThrough),
+          "customerReadNotificationKeysV2": readKeys,
         }, SetOptions(merge: true));
       }
     } catch (_) {
@@ -550,7 +527,9 @@ class _CustomerHomeState extends State<CustomerHome> {
           action: SnackBarAction(
             label: "VIEW",
             textColor: Colors.white,
-            onPressed: openAppointmentStatus,
+            onPressed: () {
+              unawaited(_openAppointmentNotification(appointment));
+            },
           ),
         ),
       );
@@ -632,7 +611,7 @@ class _CustomerHomeState extends State<CustomerHome> {
             return Scaffold(
               backgroundColor: _backgroundColor,
               appBar: AppBar(
-                backgroundColor: _backgroundColor,
+                backgroundColor: _cardColor,
                 elevation: 0,
                 foregroundColor: _primaryColor,
                 title: Text(
@@ -666,42 +645,9 @@ class _CustomerHomeState extends State<CustomerHome> {
                     key: _notificationButtonKey,
                     tooltip: "Appointment notifications",
                     onPressed: showAppointmentNotificationPopover,
-                    icon: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        const Icon(Icons.notifications_outlined),
-                        if (unreadAppointmentCount > 0)
-                          Positioned(
-                            top: -5,
-                            right: -7,
-                            child: Container(
-                              constraints: const BoxConstraints(minWidth: 17),
-                              height: 17,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                              ),
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: Colors.red,
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(
-                                  color: _backgroundColor,
-                                  width: 1.5,
-                                ),
-                              ),
-                              child: Text(
-                                unreadAppointmentCount > 9
-                                    ? "9+"
-                                    : "$unreadAppointmentCount",
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 8.5,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                              ),
-                            ),
-                          ),
-                      ],
+                    icon: AppNotificationBell(
+                      count: unreadAppointmentCount,
+                      badgeBorderColor: _cardColor,
                     ),
                   ),
                   IconButton(
@@ -1047,68 +993,71 @@ class _ActionCard extends StatelessWidget {
         ? Colors.white70
         : _primaryColor.withOpacity(0.45);
 
-    return Material(
-      color: backgroundColor,
-      borderRadius: BorderRadius.circular(24),
-      elevation: isFilled ? 4 : 2,
-      shadowColor: _primaryColor.withOpacity(0.12),
-      child: InkWell(
+    return AppHoverLift(
+      borderRadius: 24,
+      child: Material(
+        color: backgroundColor,
         borderRadius: BorderRadius.circular(24),
-        onTap: onTap,
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: isFilled ? _primaryColor : _primaryColor,
-              width: isFilled ? 0 : 1.5,
+        elevation: isFilled ? 4 : 2,
+        shadowColor: _primaryColor.withOpacity(0.12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(24),
+          onTap: onTap,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: isFilled ? _primaryColor : _primaryColor,
+                width: isFilled ? 0 : 1.5,
+              ),
             ),
-          ),
-          child: Row(
-            children: [
-              Container(
-                height: 52,
-                width: 52,
-                decoration: BoxDecoration(
-                  color: iconBackgroundColor,
-                  borderRadius: BorderRadius.circular(16),
+            child: Row(
+              children: [
+                Container(
+                  height: 52,
+                  width: 52,
+                  decoration: BoxDecoration(
+                    color: iconBackgroundColor,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Icon(icon, color: iconColor, size: 28),
                 ),
-                child: Icon(icon, color: iconColor, size: 28),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w800,
-                        color: titleColor,
-                        letterSpacing: 0.6,
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                          color: titleColor,
+                          letterSpacing: 0.6,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        fontSize: 13.5,
-                        height: 1.35,
-                        color: subtitleColor,
+                      const SizedBox(height: 5),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          height: 1.35,
+                          color: subtitleColor,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Icon(
-                Icons.arrow_forward_ios_rounded,
-                size: 18,
-                color: arrowColor,
-              ),
-            ],
+                const SizedBox(width: 10),
+                Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  size: 18,
+                  color: arrowColor,
+                ),
+              ],
+            ),
           ),
         ),
       ),

@@ -14,6 +14,7 @@ export '../services/customer_preferences.dart'
 
 Color get _backgroundColor => AppColors.activeBackground;
 Color get _primaryColor => AppColors.activePrimary;
+Color get _cardColor => AppColors.activeSurface;
 Color get _borderColor => AppColors.activeBorder;
 Color get _mutedTextColor => AppColors.activeMutedText;
 
@@ -198,7 +199,7 @@ class _CustomerSettingsState extends State<CustomerSettings> {
       data: Theme.of(context).copyWith(
         scaffoldBackgroundColor: _backgroundColor,
         appBarTheme: AppBarTheme(
-          backgroundColor: _backgroundColor,
+          backgroundColor: _cardColor,
           foregroundColor: _primaryColor,
           elevation: 0,
           titleTextStyle: TextStyle(

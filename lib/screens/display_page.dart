@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import '../widgets/app_motion.dart';
 import 'admin_settings.dart';
 
 // ============================================================================
@@ -368,26 +369,31 @@ class DisplayPage extends StatelessWidget {
 
           SizedBox(height: isShort ? 14 : 20),
 
-          Container(
-            width: double.infinity,
-            padding: EdgeInsets.symmetric(
-              horizontal: 18,
-              vertical: isShort ? 18 : 26,
-            ),
-            decoration: BoxDecoration(
-              color: _dangerColor.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(26),
-              border: Border.all(color: _dangerColor, width: 3),
-            ),
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(
-                nowServing == null ? "-" : nowServing["queue"] ?? "-",
-                style: TextStyle(
-                  color: _dangerColor,
-                  fontSize: queueFontSize,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 4,
+          AppStatusPulse(
+            active: nowServing != null,
+            color: _dangerColor,
+            borderRadius: 26,
+            child: Container(
+              width: double.infinity,
+              padding: EdgeInsets.symmetric(
+                horizontal: 18,
+                vertical: isShort ? 18 : 26,
+              ),
+              decoration: BoxDecoration(
+                color: _dangerColor.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(26),
+                border: Border.all(color: _dangerColor, width: 3),
+              ),
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  nowServing == null ? "-" : nowServing["queue"] ?? "-",
+                  style: TextStyle(
+                    color: _dangerColor,
+                    fontSize: queueFontSize,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 4,
+                  ),
                 ),
               ),
             ),

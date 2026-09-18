@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
 import '../widgets/app_responsive_content.dart';
+import '../widgets/app_motion.dart';
 import 'track_page.dart';
 import 'customer_login.dart';
 
@@ -72,7 +73,7 @@ class CustomerPortal extends StatelessWidget {
                       borderRadius: BorderRadius.circular(28),
                       boxShadow: [
                         BoxShadow(
-                          color: _primaryColor.withOpacity(0.16),
+                          color: _primaryColor.withValues(alpha: 0.16),
                           blurRadius: 18,
                         ),
                       ],
@@ -116,7 +117,7 @@ class CustomerPortal extends StatelessWidget {
                       border: Border.all(color: _borderColor),
                       boxShadow: [
                         BoxShadow(
-                          color: _primaryColor.withOpacity(0.08),
+                          color: _primaryColor.withValues(alpha: 0.08),
                           blurRadius: 18,
                         ),
                       ],
@@ -131,7 +132,8 @@ class CustomerPortal extends StatelessWidget {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (_) => const TrackPage(),
+                                builder: (_) =>
+                                    const TrackPage(isWalkInTracking: true),
                               ),
                             );
                           },
@@ -196,55 +198,61 @@ class _PortalButton extends StatelessWidget {
     final Color backgroundColor = isFilled ? _primaryColor : _cardColor;
     final Color textColor = isFilled ? Colors.white : _primaryColor;
     final Color iconBackgroundColor = isFilled
-        ? Colors.white.withOpacity(0.14)
+        ? Colors.white.withValues(alpha: 0.14)
         : _softPrimaryColor;
 
-    return Material(
-      color: backgroundColor,
-      borderRadius: BorderRadius.circular(22),
-      elevation: isFilled ? 4 : 1,
-      shadowColor: _primaryColor.withOpacity(0.12),
-      child: InkWell(
+    return AppHoverLift(
+      borderRadius: 22,
+      child: Material(
+        color: backgroundColor,
         borderRadius: BorderRadius.circular(22),
-        onTap: onPressed,
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: _primaryColor, width: isFilled ? 0 : 1.5),
-          ),
-          child: Row(
-            children: [
-              Container(
-                height: 48,
-                width: 48,
-                decoration: BoxDecoration(
-                  color: iconBackgroundColor,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Icon(icon, color: textColor, size: 26),
+        elevation: isFilled ? 4 : 1,
+        shadowColor: _primaryColor.withValues(alpha: 0.12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(22),
+          onTap: onPressed,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                color: _primaryColor,
+                width: isFilled ? 0 : 1.5,
               ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  height: 48,
+                  width: 48,
+                  decoration: BoxDecoration(
+                    color: iconBackgroundColor,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Icon(icon, color: textColor, size: 26),
+                ),
 
-              const SizedBox(width: 16),
+                const SizedBox(width: 16),
 
-              Expanded(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 16.5,
-                    fontWeight: FontWeight.w800,
-                    color: textColor,
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 16.5,
+                      fontWeight: FontWeight.w800,
+                      color: textColor,
+                    ),
                   ),
                 ),
-              ),
 
-              Icon(
-                Icons.arrow_forward_ios_rounded,
-                size: 18,
-                color: isFilled ? Colors.white70 : _primaryColor,
-              ),
-            ],
+                Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  size: 18,
+                  color: isFilled ? Colors.white70 : _primaryColor,
+                ),
+              ],
+            ),
           ),
         ),
       ),

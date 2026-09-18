@@ -1566,7 +1566,7 @@ class _BookAppointmentState extends State<BookAppointment> {
             borderRadius: BorderRadius.circular(14),
           ),
           side: BorderSide(color: _borderColor),
-          backgroundColor: _backgroundColor,
+          backgroundColor: _cardColor,
         ),
       ),
     );
@@ -1883,7 +1883,7 @@ class _BookAppointmentState extends State<BookAppointment> {
           onSurface: _primaryColor,
         ),
         appBarTheme: AppBarTheme(
-          backgroundColor: _backgroundColor,
+          backgroundColor: _cardColor,
           foregroundColor: _primaryColor,
           elevation: 0,
           centerTitle: false,

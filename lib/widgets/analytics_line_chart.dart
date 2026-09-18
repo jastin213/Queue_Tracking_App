@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../theme/app_theme.dart';
+import 'app_motion.dart';
 
 const Color _analyticsAppointmentColor = Color(0xFF8B5CF6);
 
@@ -59,19 +60,22 @@ class AnalyticsLineChart extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
-            SizedBox(
-              height: 245,
-              child: CustomPaint(
-                painter: _AnalyticsLineChartPainter(
-                  labels: labels,
-                  servedValues: servedValues,
-                  appointmentValues: appointmentValues,
-                  walkInValues: walkInValues,
-                  passedValues: passedValues,
-                  failedValues: failedValues,
-                  chartType: chartType,
+            AppChartReveal(
+              key: ValueKey(chartType),
+              child: SizedBox(
+                height: 245,
+                child: CustomPaint(
+                  painter: _AnalyticsLineChartPainter(
+                    labels: labels,
+                    servedValues: servedValues,
+                    appointmentValues: appointmentValues,
+                    walkInValues: walkInValues,
+                    passedValues: passedValues,
+                    failedValues: failedValues,
+                    chartType: chartType,
+                  ),
+                  child: const SizedBox.expand(),
                 ),
-                child: const SizedBox.expand(),
               ),
             ),
           ],

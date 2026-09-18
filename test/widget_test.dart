@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:queue_tracking_app/main.dart';
+import 'package:queue_tracking_app/services/document_upload_consent.dart';
 import 'package:queue_tracking_app/services/firestore_query_fields.dart';
 import 'package:queue_tracking_app/screens/admin_settings.dart';
 import 'package:queue_tracking_app/screens/book_appointment.dart';
@@ -14,6 +15,76 @@ import 'package:queue_tracking_app/widgets/analytics_line_chart.dart';
 import 'package:queue_tracking_app/widgets/app_refresh_indicator.dart';
 
 void main() {
+  testWidgets('document authorization can be declined without continuing', (
+    tester,
+  ) async {
+    bool? consentResult;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) {
+            return Scaffold(
+              body: ElevatedButton(
+                onPressed: () async {
+                  consentResult = await requestDocumentUploadConsent(context);
+                },
+                child: const Text('CREATE ACCOUNT'),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('CREATE ACCOUNT'));
+    await tester.pumpAndSettle();
+
+    final acceptButton = tester.widget<FilledButton>(
+      find.ancestor(
+        of: find.text('ACCEPT & CONTINUE'),
+        matching: find.byType(FilledButton),
+      ),
+    );
+    expect(acceptButton.onPressed, isNull);
+
+    await tester.tap(find.text('NOT NOW'));
+    await tester.pumpAndSettle();
+    expect(consentResult, isFalse);
+  });
+
+  testWidgets('document authorization requires the consent checkbox', (
+    tester,
+  ) async {
+    bool? consentResult;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) {
+            return Scaffold(
+              body: ElevatedButton(
+                onPressed: () async {
+                  consentResult = await requestDocumentUploadConsent(context);
+                },
+                child: const Text('CREATE ACCOUNT'),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('CREATE ACCOUNT'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(Checkbox));
+    await tester.pump();
+    await tester.tap(find.text('ACCEPT & CONTINUE'));
+    await tester.pumpAndSettle();
+
+    expect(consentResult, isTrue);
+  });
+
   test('builds a dedicated web display route', () {
     final uri = displayPageUri(
       Uri.parse('https://npjn-queue-system-jkr.web.app/#/admin'),
@@ -53,6 +124,36 @@ void main() {
     expect(formatQueueDuration(180), '3 hours');
   });
 
+  test('walk-in queue position and time update from the live queue order', () {
+    final initialItems = <Map<String, dynamic>>[
+      {'queue': 'G002', 'status': 'Now Serving'},
+      {'queue': 'G003', 'status': 'Waiting'},
+      {'queue': 'G004', 'status': 'Waiting'},
+    ];
+    final updatedItems = <Map<String, dynamic>>[
+      {'queue': 'G002', 'status': 'Passed'},
+      {'queue': 'G003', 'status': 'Now Serving'},
+      {'queue': 'G004', 'status': 'Waiting'},
+    ];
+
+    expect(
+      calculateLiveQueuePosition(queueNumber: 'g004', items: initialItems),
+      2,
+    );
+    expect(
+      calculateLiveEstimatedQueueTime(queueNumber: 'G004', items: initialItems),
+      18,
+    );
+    expect(
+      calculateLiveQueuePosition(queueNumber: 'G004', items: updatedItems),
+      1,
+    );
+    expect(
+      calculateLiveEstimatedQueueTime(queueNumber: 'G004', items: updatedItems),
+      9,
+    );
+  });
+
   test('validates Philippine vehicle plate numbers', () {
     expect(validatePhilippinePlateNumber('ABC123'), isNull);
     expect(validatePhilippinePlateNumber('abc1234'), isNull);
@@ -67,6 +168,14 @@ void main() {
 
   test('customer voice queue alerts are enabled by default', () {
     expect(customerVoiceAlertsEnabledNotifier.value, isTrue);
+  });
+
+  test('walk-in tracking explicitly bypasses appointment ownership checks', () {
+    const walkInTracker = TrackPage(isWalkInTracking: true);
+    const appointmentTracker = TrackPage();
+
+    expect(walkInTracker.isWalkInTracking, isTrue);
+    expect(appointmentTracker.isWalkInTracking, isFalse);
   });
 
   test('shared appearance mode switches the active app palette', () {

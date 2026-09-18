@@ -116,7 +116,7 @@ class BookingStatusPage extends StatelessWidget {
           onSurface: _primaryColor,
         ),
         appBarTheme: AppBarTheme(
-          backgroundColor: _backgroundColor,
+          backgroundColor: _cardColor,
           foregroundColor: _primaryColor,
           elevation: 0,
           centerTitle: false,

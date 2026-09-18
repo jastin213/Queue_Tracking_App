@@ -7,6 +7,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 
 import '../services/appointment_lifecycle.dart';
 import '../theme/app_theme.dart';
+import '../widgets/app_motion.dart';
 import '../services/customer_preferences.dart';
 import '../widgets/app_refresh_indicator.dart';
 import '../widgets/app_responsive_content.dart';
@@ -28,6 +29,36 @@ String formatQueueDuration(int minutes) {
 
   return "$hourText $remainingMinutes "
       "${remainingMinutes == 1 ? "min" : "mins"}";
+}
+
+int? calculateLiveQueuePosition({
+  required String queueNumber,
+  required Iterable<Map<String, dynamic>> items,
+}) {
+  final normalizedQueue = queueNumber.trim().toUpperCase();
+  if (normalizedQueue.isEmpty) return null;
+
+  final waitingItems = items.where((item) {
+    final status = item["status"]?.toString() ?? "Waiting";
+    return status == "Waiting" || status == "Skipped";
+  }).toList();
+  final index = waitingItems.indexWhere(
+    (item) => item["queue"]?.toString().trim().toUpperCase() == normalizedQueue,
+  );
+
+  return index < 0 ? null : index + 1;
+}
+
+int? calculateLiveEstimatedQueueTime({
+  required String queueNumber,
+  required Iterable<Map<String, dynamic>> items,
+  int averageServiceMinutes = 9,
+}) {
+  final position = calculateLiveQueuePosition(
+    queueNumber: queueNumber,
+    items: items,
+  );
+  return position == null ? null : position * averageServiceMinutes;
 }
 
 String? validateAppointmentQueueOwnership({
@@ -60,7 +91,11 @@ String? validateAppointmentQueueOwnership({
 }
 
 class TrackPage extends StatefulWidget {
-  const TrackPage({super.key});
+  const TrackPage({super.key, this.isWalkInTracking = false});
+
+  /// Walk-in queue codes are issued at the center and intentionally remain
+  /// trackable without matching them to a Firebase appointment account.
+  final bool isWalkInTracking;
 
   @override
   State<TrackPage> createState() => _TrackPageState();
@@ -69,6 +104,11 @@ class TrackPage extends StatefulWidget {
 class _TrackPageState extends State<TrackPage> {
   final TextEditingController queueController = TextEditingController();
   final FlutterTts flutterTts = FlutterTts();
+  StreamSubscription<List<Map<String, dynamic>>>? _queueSubscription;
+
+  List<Map<String, dynamic>> _liveQueueItems = const [];
+  ConnectionState _queueConnectionState = ConnectionState.waiting;
+  Object? _queueStreamError;
 
   String trackedQueueNumber = "";
 
@@ -90,14 +130,58 @@ class _TrackPageState extends State<TrackPage> {
   bool isLoadingEta = false;
   bool isCheckingQueue = false;
   bool isNearTurnDialogOpen = false;
+  bool isNowServingDialogOpen = false;
+
+  String? _nearTurnAlertedQueue;
+  String? _nowServingAlertedQueue;
 
   final int averageServiceTime = 9;
 
   @override
+  void initState() {
+    super.initState();
+    _queueSubscription = todayQueueStream().listen(
+      _handleLiveQueueItems,
+      onError: _handleLiveQueueError,
+    );
+  }
+
+  @override
   void dispose() {
+    _queueSubscription?.cancel();
     queueController.dispose();
     flutterTts.stop();
     super.dispose();
+  }
+
+  void _handleLiveQueueItems(List<Map<String, dynamic>> items) {
+    if (!mounted) return;
+
+    setState(() {
+      _liveQueueItems = items;
+      _queueConnectionState = ConnectionState.active;
+      _queueStreamError = null;
+    });
+
+    final queueNumber = trackedQueueNumber;
+    if (queueNumber.isEmpty) return;
+
+    unawaited(
+      updateTrackedQueueStateFromItems(
+        input: queueNumber,
+        items: items,
+        showNearAlert: true,
+        refreshTravelTime: false,
+      ),
+    );
+  }
+
+  void _handleLiveQueueError(Object error, StackTrace stackTrace) {
+    if (!mounted) return;
+    setState(() {
+      _queueConnectionState = ConnectionState.active;
+      _queueStreamError = error;
+    });
   }
 
   // ================= DATE HELPERS =================
@@ -153,14 +237,19 @@ class _TrackPageState extends State<TrackPage> {
   Future<void> refreshQueue() async {
     final items = await getTodayQueueOnce(forceServer: true);
 
+    if (!mounted) return;
+    setState(() {
+      _liveQueueItems = items;
+      _queueConnectionState = ConnectionState.active;
+      _queueStreamError = null;
+    });
+
     if (trackedQueueNumber.isNotEmpty) {
       await updateTrackedQueueStateFromItems(
         input: trackedQueueNumber,
         items: items,
         showNearAlert: false,
       );
-    } else if (mounted) {
-      setState(() {});
     }
   }
 
@@ -219,6 +308,10 @@ class _TrackPageState extends State<TrackPage> {
   // ================= CHECK QUEUE =================
 
   Future<String?> _appointmentQueueOwnershipError(String input) async {
+    // The public walk-in entry point must remain independent of any Firebase
+    // login that the browser may have cached from an earlier customer session.
+    if (widget.isWalkInTracking) return null;
+
     User? user;
     try {
       user = FirebaseAuth.instance.currentUser;
@@ -301,6 +394,7 @@ class _TrackPageState extends State<TrackPage> {
       return;
     }
 
+    final isNewTrackedQueue = trackedQueueNumber != input;
     setState(() {
       isCheckingQueue = false;
       trackedQueueNumber = input;
@@ -315,6 +409,10 @@ class _TrackPageState extends State<TrackPage> {
       orsStatusText = "";
       leaveAdviceText = "";
       calculationText = "";
+      if (isNewTrackedQueue) {
+        _nearTurnAlertedQueue = null;
+        _nowServingAlertedQueue = null;
+      }
     });
 
     try {
@@ -342,8 +440,8 @@ class _TrackPageState extends State<TrackPage> {
     required String input,
     required List<Map<String, dynamic>> items,
     required bool showNearAlert,
+    bool refreshTravelTime = true,
   }) async {
-    final waitingQueue = getWaitingQueue(items);
     final nowServing = getNowServing(items);
     final queueItem = findQueueItem(items: items, queueNumber: input);
 
@@ -390,12 +488,19 @@ class _TrackPageState extends State<TrackPage> {
     final String status = queueItem["status"]?.toString() ?? "Waiting";
 
     if (status == "Waiting" || status == "Skipped") {
-      final int index = waitingQueue.indexWhere((item) {
-        return item["queue"]?.toString().toUpperCase() == input;
-      });
-
-      final int position = index >= 0 ? index + 1 : 1;
-      final int estimatedTime = position * averageServiceTime;
+      final int position =
+          calculateLiveQueuePosition(queueNumber: input, items: items) ?? 1;
+      final int estimatedTime =
+          calculateLiveEstimatedQueueTime(
+            queueNumber: input,
+            items: items,
+            averageServiceMinutes: averageServiceTime,
+          ) ??
+          averageServiceTime;
+      final isAppointment = queueItem["source"] == "Appointment";
+      final existingTravelMinutes = travelMinutes;
+      final existingMunicipalityText = municipalityText;
+      final existingOrsStatusText = orsStatusText;
 
       if (!mounted) return;
 
@@ -405,22 +510,32 @@ class _TrackPageState extends State<TrackPage> {
         positionText = "Position $position in line";
         queuePosition = position;
         estimatedQueueTime = estimatedTime;
-        travelMinutes = null;
-        leaveInMinutes = null;
-        municipalityText = queueItem["municipality"] ?? "";
-        orsStatusText = "";
-        leaveAdviceText = "";
-        calculationText = "";
+        if (!isAppointment || refreshTravelTime) {
+          travelMinutes = null;
+          leaveInMinutes = null;
+          municipalityText = queueItem["municipality"] ?? "";
+          orsStatusText = "";
+          leaveAdviceText = "";
+          calculationText = "";
+        } else {
+          travelMinutes = existingTravelMinutes;
+          municipalityText = existingMunicipalityText;
+          orsStatusText = existingOrsStatusText;
+        }
       });
 
-      if (queueItem["source"] == "Appointment" &&
+      if (isAppointment &&
           queueItem["municipality"] != null &&
           queueItem["municipality"].toString().trim().isNotEmpty) {
-        await calculateSmartEta(
-          municipality: queueItem["municipality"],
-          barangay: queueItem["barangay"]?.toString() ?? "",
-          estimatedQueueTime: estimatedTime,
-        );
+        if (refreshTravelTime || (travelMinutes == null && !isLoadingEta)) {
+          await calculateSmartEta(
+            municipality: queueItem["municipality"],
+            barangay: queueItem["barangay"]?.toString() ?? "",
+            estimatedQueueTime: estimatedTime,
+          );
+        } else if (travelMinutes != null) {
+          _updateSmartEtaForQueueTime(estimatedTime);
+        }
       }
 
       if (showNearAlert && position <= 5) {
@@ -446,6 +561,8 @@ class _TrackPageState extends State<TrackPage> {
         leaveAdviceText = "";
         calculationText = "";
       });
+
+      unawaited(showNowServingDialog(input));
 
       return;
     }
@@ -648,9 +765,13 @@ class _TrackPageState extends State<TrackPage> {
       originLat: barangayLocation?.lat ?? location.lat,
     );
 
-    int computedLeaveIn = estimatedQueueTime - (result.minutes + bufferMinutes);
-
     if (!mounted) return;
+
+    // The queue may move while ORS is calculating. Always use the newest live
+    // queue estimate when the travel-time request completes.
+    final queueTimeForAdvice = this.estimatedQueueTime ?? estimatedQueueTime;
+    final computedLeaveIn =
+        queueTimeForAdvice - (result.minutes + bufferMinutes);
 
     setState(() {
       isLoadingEta = false;
@@ -664,17 +785,44 @@ class _TrackPageState extends State<TrackPage> {
       if (computedLeaveIn <= 0) {
         leaveAdviceText =
             "Leave your house now. Your turn is estimated in "
-            "${formatQueueDuration(estimatedQueueTime)}.";
+            "${formatQueueDuration(queueTimeForAdvice)}.";
       } else {
         leaveAdviceText =
             "Leave your house in ${formatQueueDuration(computedLeaveIn)}. "
             "Your turn is estimated in "
-            "${formatQueueDuration(estimatedQueueTime)}.";
+            "${formatQueueDuration(queueTimeForAdvice)}.";
       }
 
       calculationText =
-          "${formatQueueDuration(estimatedQueueTime)} queue time - "
+          "${formatQueueDuration(queueTimeForAdvice)} queue time - "
           "${formatQueueDuration(result.minutes)} travel time - "
+          "${formatQueueDuration(bufferMinutes)} buffer = "
+          "${formatQueueDuration(computedLeaveIn <= 0 ? 0 : computedLeaveIn)} "
+          "before leaving";
+    });
+  }
+
+  void _updateSmartEtaForQueueTime(int updatedQueueTime) {
+    final currentTravelMinutes = travelMinutes;
+    if (!mounted || currentTravelMinutes == null) return;
+
+    final computedLeaveIn =
+        updatedQueueTime - (currentTravelMinutes + bufferMinutes);
+    setState(() {
+      leaveInMinutes = computedLeaveIn;
+      if (computedLeaveIn <= 0) {
+        leaveAdviceText =
+            "Leave your house now. Your turn is estimated in "
+            "${formatQueueDuration(updatedQueueTime)}.";
+      } else {
+        leaveAdviceText =
+            "Leave your house in ${formatQueueDuration(computedLeaveIn)}. "
+            "Your turn is estimated in "
+            "${formatQueueDuration(updatedQueueTime)}.";
+      }
+      calculationText =
+          "${formatQueueDuration(updatedQueueTime)} queue time - "
+          "${formatQueueDuration(currentTravelMinutes)} travel time - "
           "${formatQueueDuration(bufferMinutes)} buffer = "
           "${formatQueueDuration(computedLeaveIn <= 0 ? 0 : computedLeaveIn)} "
           "before leaving";
@@ -700,9 +848,33 @@ class _TrackPageState extends State<TrackPage> {
     }
   }
 
-  void showNearTurnDialog() {
-    if (!mounted || isNearTurnDialogOpen) return;
+  Future<void> speakNowServingAlert() async {
+    try {
+      await flutterTts.stop();
+      final filipino = customerVoiceLanguageNotifier.value == "Filipino";
+      await flutterTts.setLanguage(filipino ? "fil-PH" : "en-US");
+      await flutterTts.setSpeechRate(0.45);
+      await flutterTts.setPitch(1.0);
+      await flutterTts.speak(
+        filipino
+            ? "Mangyaring pumunta na po sa testing area."
+            : "Please proceed to the testing area.",
+      );
+    } catch (_) {
+      // The in-app notification remains available if speech is unsupported.
+    }
+  }
 
+  void showNearTurnDialog() {
+    final queueNumber = trackedQueueNumber;
+    if (!mounted ||
+        queueNumber.isEmpty ||
+        isNearTurnDialogOpen ||
+        _nearTurnAlertedQueue == queueNumber) {
+      return;
+    }
+
+    _nearTurnAlertedQueue = queueNumber;
     isNearTurnDialogOpen = true;
 
     if (customerVoiceAlertsEnabledNotifier.value) {
@@ -726,6 +898,50 @@ class _TrackPageState extends State<TrackPage> {
     ).whenComplete(() {
       isNearTurnDialogOpen = false;
     });
+  }
+
+  Future<void> showNowServingDialog(String queueNumber) async {
+    final normalizedQueue = queueNumber.trim().toUpperCase();
+    if (!mounted ||
+        normalizedQueue.isEmpty ||
+        isNowServingDialogOpen ||
+        _nowServingAlertedQueue == normalizedQueue) {
+      return;
+    }
+
+    _nowServingAlertedQueue = normalizedQueue;
+
+    if (isNearTurnDialogOpen) {
+      await Navigator.of(context, rootNavigator: true).maybePop();
+      isNearTurnDialogOpen = false;
+      if (!mounted) return;
+    }
+
+    isNowServingDialogOpen = true;
+    if (customerVoiceAlertsEnabledNotifier.value) {
+      unawaited(speakNowServingAlert());
+    }
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        icon: const Icon(Icons.campaign_rounded, color: Colors.green, size: 44),
+        title: Text("Now Serving: $normalizedQueue"),
+        content: const Text(
+          "Please proceed to the testing area.",
+          textAlign: TextAlign.center,
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text("OK"),
+          ),
+        ],
+      ),
+    );
+
+    isNowServingDialogOpen = false;
   }
 
   // ================= COLOR HELPERS =================
@@ -762,78 +978,85 @@ class _TrackPageState extends State<TrackPage> {
 
   @override
   Widget build(BuildContext context) {
+    final queueSnapshot = _queueStreamError == null
+        ? AsyncSnapshot<List<Map<String, dynamic>>>.withData(
+            _queueConnectionState,
+            _liveQueueItems,
+          )
+        : AsyncSnapshot<List<Map<String, dynamic>>>.withError(
+            _queueConnectionState,
+            _queueStreamError!,
+          );
+    final nowServing = getNowServing(_liveQueueItems);
+
     return Scaffold(
       backgroundColor: AppColors.activeBackground,
       appBar: AppBar(
         title: const Text("Track Queue"),
-        backgroundColor: AppColors.activeBackground,
+        backgroundColor: AppColors.activeSurface,
         foregroundColor: AppColors.activePrimary,
       ),
       body: SafeArea(
         child: AppResponsiveContent(
           maxWidth: 960,
-          child: StreamBuilder<List<Map<String, dynamic>>>(
-            stream: todayQueueStream(),
-            builder: (context, snapshot) {
-              final List<Map<String, dynamic>> items = snapshot.data ?? [];
-              final Map<String, dynamic>? nowServing = getNowServing(items);
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final bool wide = constraints.maxWidth >= 700;
 
-              return LayoutBuilder(
-                builder: (context, constraints) {
-                  final bool wide = constraints.maxWidth >= 700;
+              return AppRefreshIndicator(
+                onRefresh: refreshQueue,
+                child: ListView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: EdgeInsets.all(wide ? 24 : 16),
+                  children: [
+                    buildQueueNumberReminder(),
 
-                  return AppRefreshIndicator(
-                    onRefresh: refreshQueue,
-                    child: ListView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: EdgeInsets.all(wide ? 24 : 16),
-                      children: [
-                        buildNowServingCard(nowServing),
+                    const SizedBox(height: 14),
 
-                        const SizedBox(height: 18),
+                    buildNowServingCard(nowServing),
 
-                        buildSearchCard(),
+                    const SizedBox(height: 18),
 
-                        const SizedBox(height: 18),
+                    buildSearchCard(),
 
-                        if (trackedQueueNumber.isNotEmpty)
-                          buildLiveQueueStatusCard(snapshot)
-                        else if (statusText.isNotEmpty)
-                          buildQueueStatusCard(
-                            queue: queueNumberText,
-                            status: statusText,
-                            position: positionText,
-                          ),
+                    const SizedBox(height: 18),
 
-                        if (estimatedQueueTime != null) ...[
-                          const SizedBox(height: 14),
-                          buildTimeSummaryCard(),
-                        ],
+                    if (trackedQueueNumber.isNotEmpty)
+                      buildLiveQueueStatusCard(queueSnapshot)
+                    else if (statusText.isNotEmpty)
+                      buildQueueStatusCard(
+                        queue: queueNumberText,
+                        status: statusText,
+                        position: positionText,
+                      ),
 
-                        if (isLoadingEta)
-                          const Padding(
-                            padding: EdgeInsets.all(24),
-                            child: Center(child: CircularProgressIndicator()),
-                          ),
+                    if (estimatedQueueTime != null) ...[
+                      const SizedBox(height: 14),
+                      buildTimeSummaryCard(),
+                    ],
 
-                        if (orsStatusText.isNotEmpty) ...[
-                          const SizedBox(height: 12),
-                          buildInfoNote(orsStatusText),
-                        ],
+                    if (isLoadingEta)
+                      const Padding(
+                        padding: EdgeInsets.all(24),
+                        child: Center(child: CircularProgressIndicator()),
+                      ),
 
-                        if (leaveAdviceText.isNotEmpty) ...[
-                          const SizedBox(height: 14),
-                          buildLeaveAdviceCard(),
-                        ],
+                    if (orsStatusText.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      buildInfoNote(orsStatusText),
+                    ],
 
-                        if (calculationText.isNotEmpty) ...[
-                          const SizedBox(height: 14),
-                          buildCalculationCard(),
-                        ],
-                      ],
-                    ),
-                  );
-                },
+                    if (leaveAdviceText.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      buildLeaveAdviceCard(),
+                    ],
+
+                    if (calculationText.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      buildCalculationCard(),
+                    ],
+                  ],
+                ),
               );
             },
           ),
@@ -842,37 +1065,76 @@ class _TrackPageState extends State<TrackPage> {
     );
   }
 
-  // ================= NOW SERVING =================
-
-  Widget buildNowServingCard(Map<String, dynamic>? customer) {
+  Widget buildQueueNumberReminder() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: cardDecoration(),
-      child: Column(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.activeSoftPrimary,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.activeBorder),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            "NOW SERVING",
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 15,
-              color: AppColors.activeMutedText,
-              letterSpacing: 1,
-            ),
+          Icon(
+            Icons.info_outline_rounded,
+            color: AppColors.activePrimary,
+            size: 21,
           ),
-          const SizedBox(height: 10),
-          FittedBox(
-            fit: BoxFit.scaleDown,
+          const SizedBox(width: 10),
+          Expanded(
             child: Text(
-              customer == null ? "-" : customer['queue'] ?? "-",
-              style: const TextStyle(
-                color: Colors.red,
-                fontSize: 44,
-                fontWeight: FontWeight.w900,
+              "Please enter only the queue number assigned to you. Using the "
+              "correct code prevents confusion and ensures that you track "
+              "your own queue.",
+              style: TextStyle(
+                color: AppColors.activePrimary,
+                height: 1.35,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // ================= NOW SERVING =================
+
+  Widget buildNowServingCard(Map<String, dynamic>? customer) {
+    return AppStatusPulse(
+      active: customer != null,
+      color: AppColors.danger,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(20),
+        decoration: cardDecoration(),
+        child: Column(
+          children: [
+            Text(
+              "NOW SERVING",
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 15,
+                color: AppColors.activeMutedText,
+                letterSpacing: 1,
+              ),
+            ),
+            const SizedBox(height: 10),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                customer == null ? "-" : customer['queue'] ?? "-",
+                style: const TextStyle(
+                  color: Colors.red,
+                  fontSize: 44,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1037,11 +1299,14 @@ class _TrackPageState extends State<TrackPage> {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.10),
+        color: color.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withOpacity(0.45), width: 1.5),
+        border: Border.all(color: color.withValues(alpha: 0.45), width: 1.5),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.07), blurRadius: 10),
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.07),
+            blurRadius: 10,
+          ),
         ],
       ),
       child: Column(
@@ -1192,7 +1457,7 @@ class _TrackPageState extends State<TrackPage> {
       child: Row(
         children: [
           CircleAvatar(
-            backgroundColor: color.withOpacity(0.12),
+            backgroundColor: color.withValues(alpha: 0.12),
             child: Icon(icon, color: color, size: 20),
           ),
           const SizedBox(width: 12),
@@ -1266,9 +1531,9 @@ class _TrackPageState extends State<TrackPage> {
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.blueGrey.withOpacity(0.08),
+        color: Colors.blueGrey.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.blueGrey.withOpacity(0.20)),
+        border: Border.all(color: Colors.blueGrey.withValues(alpha: 0.20)),
       ),
       child: Row(
         children: [
@@ -1295,7 +1560,7 @@ class _TrackPageState extends State<TrackPage> {
       borderRadius: BorderRadius.circular(20),
       border: Border.all(color: AppColors.activeBorder),
       boxShadow: [
-        BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 10),
+        BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 10),
       ],
     );
   }

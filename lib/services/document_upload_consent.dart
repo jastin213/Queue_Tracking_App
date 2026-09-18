@@ -4,37 +4,13 @@ import 'package:flutter/material.dart';
 
 const String documentUploadConsentVersion = '2026-09-08-v1';
 
-/// Requests and records the customer's authorization before sensitive
-/// appointment documents are selected or uploaded.
-Future<bool> ensureDocumentUploadConsent(
-  BuildContext context, {
-  bool forcePrompt = false,
-}) async {
-  final user = FirebaseAuth.instance.currentUser;
-  if (user == null) return false;
-
-  if (!forcePrompt) {
-    try {
-      final profile = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-      final data = profile.data();
-      if (data?['documentUploadConsent'] == true &&
-          data?['documentUploadConsentVersion'] ==
-              documentUploadConsentVersion) {
-        return true;
-      }
-    } catch (_) {
-      // Continue to the notice. No upload is allowed unless saving succeeds.
-    }
-  }
-
+/// Shows the authorization notice without creating an account or writing data.
+/// Registration uses this first so choosing "Not now" cancels account creation.
+Future<bool> requestDocumentUploadConsent(BuildContext context) async {
   if (!context.mounted) return false;
   bool authorized = false;
 
-  final accepted =
-      await showDialog<bool>(
+  return await showDialog<bool>(
         context: context,
         barrierDismissible: false,
         builder: (dialogContext) {
@@ -107,6 +83,36 @@ Future<bool> ensureDocumentUploadConsent(
         },
       ) ??
       false;
+}
+
+/// Requests and records the customer's authorization before sensitive
+/// appointment documents are selected or uploaded.
+Future<bool> ensureDocumentUploadConsent(
+  BuildContext context, {
+  bool forcePrompt = false,
+}) async {
+  final user = FirebaseAuth.instance.currentUser;
+  if (user == null) return false;
+
+  if (!forcePrompt) {
+    try {
+      final profile = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      final data = profile.data();
+      if (data?['documentUploadConsent'] == true &&
+          data?['documentUploadConsentVersion'] ==
+              documentUploadConsentVersion) {
+        return true;
+      }
+    } catch (_) {
+      // Continue to the notice. No upload is allowed unless saving succeeds.
+    }
+  }
+
+  if (!context.mounted) return false;
+  final accepted = await requestDocumentUploadConsent(context);
 
   if (!accepted) return false;
 

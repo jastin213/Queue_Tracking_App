@@ -34,7 +34,6 @@ ValueNotifier<String> displayAnnouncementNotifier = ValueNotifier(
 ValueNotifier<bool> showCustomerNameNotifier = ValueNotifier(true);
 ValueNotifier<bool> showVehicleTypeNotifier = ValueNotifier(true);
 ValueNotifier<bool> showEstimatedWaitingTimeNotifier = ValueNotifier(true);
-ValueNotifier<bool> autoApproveAppointmentsNotifier = ValueNotifier(false);
 
 // ============================================================================
 // ADMIN SETTINGS PAGE
@@ -165,7 +164,7 @@ class _AdminSettingsState extends State<AdminSettings> {
           onSurface: _primaryColor,
         ),
         appBarTheme: AppBarTheme(
-          backgroundColor: _backgroundColor,
+          backgroundColor: _cardColor,
           foregroundColor: _primaryColor,
           elevation: 0,
           centerTitle: false,
@@ -227,8 +226,6 @@ class _AdminSettingsState extends State<AdminSettings> {
         buildQueueSettings(),
         const SizedBox(height: 16),
         buildDisplaySettings(),
-        const SizedBox(height: 16),
-        buildAppointmentSettings(),
         const SizedBox(height: 16),
         buildDocumentRetentionSettings(),
         const SizedBox(height: 16),
@@ -505,36 +502,6 @@ class _AdminSettingsState extends State<AdminSettings> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  // ==========================================================================
-  // SECTION: APPOINTMENT SETTINGS
-  // ==========================================================================
-
-  Widget buildAppointmentSettings() {
-    return settingsCard(
-      icon: Icons.event_available_rounded,
-      title: "Appointment Settings",
-      subtitle: "Control how online appointments are handled.",
-      child: settingTile(
-        icon: Icons.auto_mode_rounded,
-        title: "Auto-Approve Appointments",
-        subtitle: "Recommended OFF for document checking.",
-        trailing: ValueListenableBuilder<bool>(
-          valueListenable: autoApproveAppointmentsNotifier,
-          builder: (context, value, _) {
-            return Switch(
-              value: value,
-              activeThumbColor: _primaryColor,
-              onChanged: (newValue) {
-                autoApproveAppointmentsNotifier.value = newValue;
-                setState(() {});
-              },
-            );
-          },
-        ),
       ),
     );
   }

@@ -274,6 +274,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
         loggedInCustomerEmailNotifier.value = authEmail;
         loggedInCustomerIdNotifier.value = user.uid;
 
+        if (!mounted) return;
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => const CustomerHome()),
@@ -493,7 +494,9 @@ class _CustomerLoginState extends State<CustomerLogin> {
                                       Navigator.push(
                                         context,
                                         MaterialPageRoute(
-                                          builder: (_) => const TrackPage(),
+                                          builder: (_) => const TrackPage(
+                                            isWalkInTracking: true,
+                                          ),
                                         ),
                                       );
                                     },

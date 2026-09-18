@@ -106,6 +106,19 @@ class _CustomerRegisterState extends State<CustomerRegister> {
       return;
     }
 
+    final consentAccepted = await requestDocumentUploadConsent(context);
+    if (!mounted) return;
+    if (!consentAccepted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Account was not created. Document upload authorization is required.",
+          ),
+        ),
+      );
+      return;
+    }
+
     setState(() {
       isLoading = true;
     });
@@ -131,6 +144,9 @@ class _CustomerRegisterState extends State<CustomerRegister> {
         "email": email,
         "municipality": selectedAddress,
         "role": "customer",
+        "documentUploadConsent": true,
+        "documentUploadConsentVersion": documentUploadConsentVersion,
+        "documentUploadConsentAcceptedAt": FieldValue.serverTimestamp(),
         "createdAt": FieldValue.serverTimestamp(),
         "updatedAt": FieldValue.serverTimestamp(),
       });
@@ -141,19 +157,9 @@ class _CustomerRegisterState extends State<CustomerRegister> {
 
       if (!mounted) return;
 
-      final consentAccepted = await ensureDocumentUploadConsent(
-        context,
-        forcePrompt: true,
-      );
-      if (!mounted) return;
-
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            consentAccepted
-                ? "Account created and document authorization saved."
-                : "Account created. Authorization will be required before uploading documents.",
-          ),
+        const SnackBar(
+          content: Text("Account created and document authorization saved."),
         ),
       );
 
@@ -222,7 +228,7 @@ class _CustomerRegisterState extends State<CustomerRegister> {
           onSurface: _primaryColor,
         ),
         appBarTheme: AppBarTheme(
-          backgroundColor: _backgroundColor,
+          backgroundColor: _cardColor,
           foregroundColor: _primaryColor,
           elevation: 0,
           centerTitle: false,

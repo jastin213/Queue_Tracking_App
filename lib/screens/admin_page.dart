@@ -15,6 +15,7 @@ import '../theme/app_theme.dart';
 import '../services/firestore_query_fields.dart';
 import '../widgets/app_responsive_content.dart';
 import '../widgets/app_refresh_indicator.dart';
+import '../widgets/app_motion.dart';
 import 'analytics_page.dart';
 import 'daily_report.dart';
 import 'display_page.dart';
@@ -132,7 +133,6 @@ class _AdminPageState extends State<AdminPage> {
   List<Map<String, dynamic>> _pendingAppointments = [];
   final Set<String> _readPendingAppointmentNotifications = <String>{};
   late final String _adminNotificationPreferenceKey;
-  DateTime? _adminNotificationsReadThrough;
   bool _receivedInitialPendingAppointments = false;
 
   @override
@@ -149,11 +149,8 @@ class _AdminPageState extends State<AdminPage> {
     } catch (_) {
       // Session-only notification state is used when Firebase is unavailable.
     }
-    return 'read_admin_appointment_notifications_${accountId.isEmpty ? 'admin' : accountId}';
+    return 'read_v2_admin_appointment_notifications_${accountId.isEmpty ? 'admin' : accountId}';
   }
-
-  String get _adminNotificationReadThroughPreferenceKey =>
-      '${_adminNotificationPreferenceKey}_through';
 
   String _adminAppointmentNotificationKey(Map<String, dynamic> appointment) {
     final appointmentId = appointment['appointmentId']?.toString().trim() ?? '';
@@ -161,39 +158,15 @@ class _AdminPageState extends State<AdminPage> {
     return '${appointment['queue']}:${appointment['date']}:${appointment['plate']}';
   }
 
-  dynamic _adminAppointmentNotificationTime(Map<String, dynamic> appointment) {
-    return appointment['createdAt'] ?? appointment['updatedAt'];
-  }
-
-  void _mergeAdminNotificationsReadThrough(DateTime? value) {
-    if (value == null) return;
-    if (_adminNotificationsReadThrough == null ||
-        value.isAfter(_adminNotificationsReadThrough!)) {
-      _adminNotificationsReadThrough = value;
-    }
-  }
-
   bool _isAdminAppointmentNotificationRead(Map<String, dynamic> appointment) {
     return _readPendingAppointmentNotifications.contains(
-          _adminAppointmentNotificationKey(appointment),
-        ) ||
-        notificationWasReadBy(
-          _adminAppointmentNotificationTime(appointment),
-          _adminNotificationsReadThrough,
-        );
+      _adminAppointmentNotificationKey(appointment),
+    );
   }
 
-  void _markAdminAppointmentNotificationsRead(
-    Iterable<Map<String, dynamic>> appointments,
-  ) {
-    final notificationList = appointments.toList(growable: false);
-    _readPendingAppointmentNotifications.addAll(
-      notificationList.map(_adminAppointmentNotificationKey),
-    );
-    _mergeAdminNotificationsReadThrough(
-      latestNotificationDate(
-        notificationList.map(_adminAppointmentNotificationTime),
-      ),
+  void _markAdminAppointmentNotificationRead(Map<String, dynamic> appointment) {
+    _readPendingAppointmentNotifications.add(
+      _adminAppointmentNotificationKey(appointment),
     );
   }
 
@@ -203,14 +176,6 @@ class _AdminPageState extends State<AdminPage> {
       _readPendingAppointmentNotifications.addAll(
         preferences.getStringList(_adminNotificationPreferenceKey) ?? const [],
       );
-      final savedReadThrough = preferences.getInt(
-        _adminNotificationReadThroughPreferenceKey,
-      );
-      if (savedReadThrough != null) {
-        _mergeAdminNotificationsReadThrough(
-          DateTime.fromMillisecondsSinceEpoch(savedReadThrough),
-        );
-      }
     } catch (_) {
       // Notifications still work for this session if local storage is blocked.
     }
@@ -222,11 +187,15 @@ class _AdminPageState extends State<AdminPage> {
             .collection('users')
             .doc(user.uid)
             .get();
-        _mergeAdminNotificationsReadThrough(
-          notificationDateTime(
-            userDocument.data()?['adminNotificationsReadAt'],
-          ),
-        );
+        final cloudReadKeys = userDocument
+            .data()?['adminReadNotificationKeysV2'];
+        if (cloudReadKeys is Iterable) {
+          _readPendingAppointmentNotifications.addAll(
+            cloudReadKeys
+                .map((value) => value.toString().trim())
+                .where((value) => value.isNotEmpty),
+          );
+        }
       }
     } catch (_) {
       // Local read state remains available when Firestore is offline.
@@ -242,23 +211,16 @@ class _AdminPageState extends State<AdminPage> {
         _adminNotificationPreferenceKey,
         _readPendingAppointmentNotifications.toList(),
       );
-      final readThrough = _adminNotificationsReadThrough;
-      if (readThrough != null) {
-        await preferences.setInt(
-          _adminNotificationReadThroughPreferenceKey,
-          readThrough.millisecondsSinceEpoch,
-        );
-      }
     } catch (_) {
-      // The badge remains cleared for the current session.
+      // Read state still works for the current session.
     }
 
     try {
       final user = FirebaseAuth.instance.currentUser;
-      final readThrough = _adminNotificationsReadThrough;
-      if (user != null && readThrough != null) {
+      if (user != null) {
+        final readKeys = _readPendingAppointmentNotifications.toList()..sort();
         await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-          'adminNotificationsReadAt': Timestamp.fromDate(readThrough),
+          'adminReadNotificationKeysV2': readKeys,
         }, SetOptions(merge: true));
       }
     } catch (_) {
@@ -379,6 +341,17 @@ class _AdminPageState extends State<AdminPage> {
     });
   }
 
+  Future<void> _openAdminAppointmentNotification(
+    Map<String, dynamic> appointment,
+  ) async {
+    if (!_isAdminAppointmentNotificationRead(appointment)) {
+      setState(() => _markAdminAppointmentNotificationRead(appointment));
+      await _saveReadAdminAppointmentNotifications();
+      if (!mounted) return;
+    }
+    _openAppointmentDetails(appointment);
+  }
+
   void _showNewAppointmentNotification(Map<String, dynamic> appointment) {
     final name =
         (appointment["fullName"] ?? appointment["customerName"] ?? "Customer")
@@ -399,7 +372,9 @@ class _AdminPageState extends State<AdminPage> {
           action: SnackBarAction(
             label: "CHECK",
             textColor: Colors.white,
-            onPressed: () => _openAppointmentDetails(appointment),
+            onPressed: () {
+              unawaited(_openAdminAppointmentNotification(appointment));
+            },
           ),
         ),
       );
@@ -417,36 +392,7 @@ class _AdminPageState extends State<AdminPage> {
             ? "No new appointment notifications"
             : "$count new appointment notification${count == 1 ? '' : 's'}",
         onPressed: _showAppointmentNotifications,
-        icon: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            const Icon(Icons.notifications_outlined),
-            if (count > 0)
-              Positioned(
-                top: -6,
-                right: -7,
-                child: Container(
-                  constraints: const BoxConstraints(minWidth: 18),
-                  height: 18,
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: Colors.red,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: _backgroundColor, width: 1.5),
-                  ),
-                  child: Text(
-                    count > 9 ? "9+" : "$count",
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
+        icon: AppNotificationBell(count: count, badgeBorderColor: _cardColor),
       ),
     );
   }
@@ -459,19 +405,6 @@ class _AdminPageState extends State<AdminPage> {
     if (button == null || overlay == null) return;
 
     final notifications = _pendingAppointments.take(8).toList();
-    final unreadKeysBeforeOpen = _pendingAppointments
-        .where(
-          (appointment) => !_isAdminAppointmentNotificationRead(appointment),
-        )
-        .map(_adminAppointmentNotificationKey)
-        .toSet();
-    if (unreadKeysBeforeOpen.isNotEmpty) {
-      setState(
-        () => _markAdminAppointmentNotificationsRead(_pendingAppointments),
-      );
-      await _saveReadAdminAppointmentNotifications();
-      if (!mounted) return;
-    }
 
     final buttonTopLeft = button.localToGlobal(Offset.zero, ancestor: overlay);
     final availableWidth = overlay.size.width - 24;
@@ -554,74 +487,88 @@ class _AdminPageState extends State<AdminPage> {
 
             return PopupMenuItem<String>(
               value: notificationKey,
-              height: 100,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 38,
-                    height: 38,
-                    decoration: BoxDecoration(
-                      color: isViewed
-                          ? _mutedTextColor.withValues(alpha: 0.10)
-                          : AppColors.warning.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(12),
+              height: 108,
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: isViewed
+                      ? Colors.transparent
+                      : AppColors.warning.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: isViewed
+                            ? _mutedTextColor.withValues(alpha: 0.10)
+                            : AppColors.warning.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        Icons.event_note_rounded,
+                        color: isViewed ? _mutedTextColor : AppColors.warning,
+                      ),
                     ),
-                    child: Icon(
-                      Icons.event_note_rounded,
-                      color: isViewed ? _mutedTextColor : AppColors.warning,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            "New appointment from $name",
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: contentColor,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            "Queue $queue • Plate $plate",
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: contentColor, fontSize: 12),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            "$date • $time",
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: _mutedTextColor,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          "New appointment from $name",
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: contentColor,
-                            fontWeight: FontWeight.w800,
+                        if (!isViewed)
+                          Container(
+                            width: 9,
+                            height: 9,
+                            decoration: const BoxDecoration(
+                              color: AppColors.danger,
+                              shape: BoxShape.circle,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          "Queue $queue • Plate $plate",
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: contentColor, fontSize: 12),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          "$date • $time",
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: _mutedTextColor,
-                            fontSize: 11,
-                          ),
+                        if (!isViewed) const SizedBox(height: 6),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          color: _mutedTextColor,
                         ),
                       ],
                     ),
-                  ),
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        isViewed ? "VIEWED" : "NEW",
-                        style: TextStyle(
-                          color: isViewed ? _mutedTextColor : AppColors.warning,
-                          fontSize: 8,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      Icon(Icons.chevron_right_rounded, color: _mutedTextColor),
-                    ],
-                  ),
-                ],
+                  ],
+                ),
               ),
             );
           }),
@@ -651,7 +598,7 @@ class _AdminPageState extends State<AdminPage> {
       orElse: () => <String, dynamic>{},
     );
     if (selectedAppointment.isNotEmpty) {
-      _openAppointmentDetails(selectedAppointment);
+      await _openAdminAppointmentNotification(selectedAppointment);
     }
   }
 
@@ -1062,11 +1009,13 @@ class _AdminPageState extends State<AdminPage> {
   // ================= PICK QUEUE DATE =================
 
   Future<void> pickQueueDate() async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
     DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: DateTime.now(),
-      firstDate: DateTime.now().subtract(const Duration(days: 1)),
-      lastDate: DateTime(2030),
+      initialDate: today,
+      firstDate: today,
+      lastDate: DateTime(today.year + 5, 12, 31),
       builder: (context, child) {
         return Theme(
           data: Theme.of(context).copyWith(
@@ -2397,7 +2346,7 @@ class _AdminPageState extends State<AdminPage> {
                   onSurface: _primaryColor,
                 ),
                 appBarTheme: AppBarTheme(
-                  backgroundColor: _backgroundColor,
+                  backgroundColor: _cardColor,
                   foregroundColor: _primaryColor,
                   elevation: 0,
                   centerTitle: false,
@@ -2848,43 +2797,51 @@ class _AdminPageState extends State<AdminPage> {
             centered: true,
           ),
           const SizedBox(height: 16),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
-            decoration: BoxDecoration(
-              color: _softPrimaryColor,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: _borderColor),
-            ),
-            child: Column(
-              children: [
-                FittedBox(
-                  fit: BoxFit.scaleDown,
-                  child: Text(
-                    displayedNowServing == null
-                        ? "-"
-                        : displayedNowServing['queue'],
-                    style: const TextStyle(
-                      fontSize: 54,
-                      fontWeight: FontWeight.w900,
-                      color: Colors.red,
+          AppStatusPulse(
+            active: displayedNowServing != null,
+            color: AppColors.danger,
+            borderRadius: 20,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
+              decoration: BoxDecoration(
+                color: _softPrimaryColor,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: _borderColor),
+              ),
+              child: Column(
+                children: [
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      displayedNowServing == null
+                          ? "-"
+                          : displayedNowServing['queue'],
+                      style: const TextStyle(
+                        fontSize: 54,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.red,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  displayedNowServing == null
-                      ? text("No customer currently called", "Walang tinatawag")
-                      : displayedNowServing['name'],
-                  textAlign: TextAlign.center,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                    color: _primaryColor,
+                  const SizedBox(height: 6),
+                  Text(
+                    displayedNowServing == null
+                        ? text(
+                            "No customer currently called",
+                            "Walang tinatawag",
+                          )
+                        : displayedNowServing['name'],
+                    textAlign: TextAlign.center,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      color: _primaryColor,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 18),

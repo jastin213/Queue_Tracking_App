@@ -413,7 +413,7 @@ class _DocumentCleanupPageState extends State<DocumentCleanupPage> {
     return Scaffold(
       backgroundColor: _backgroundColor,
       appBar: AppBar(
-        backgroundColor: _backgroundColor,
+        backgroundColor: _cardColor,
         foregroundColor: _primaryColor,
         surfaceTintColor: Colors.transparent,
         elevation: 0,

@@ -29,22 +29,16 @@ class AppSectionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasHeader = title != null || subtitle != null || icon != null;
 
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      curve: Curves.easeOutCubic,
       width: double.infinity,
       padding: padding,
       decoration: BoxDecoration(
         color: AppColors.activeSurface,
         borderRadius: BorderRadius.circular(AppRadii.card),
         border: Border.all(color: AppColors.activeBorder),
-        boxShadow: showShadow
-            ? [
-                BoxShadow(
-                  color: AppColors.activePrimary.withValues(alpha: 0.06),
-                  blurRadius: 16,
-                  offset: const Offset(0, 4),
-                ),
-              ]
-            : null,
+        boxShadow: showShadow ? AppEffects.raisedShadow : AppEffects.cardShadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -60,6 +54,7 @@ class AppSectionCard extends StatelessWidget {
                     decoration: BoxDecoration(
                       color: AppColors.activeSoftPrimary,
                       borderRadius: BorderRadius.circular(AppRadii.control),
+                      border: Border.all(color: AppColors.activeBorder),
                     ),
                     child: Icon(icon, color: AppColors.activePrimary, size: 22),
                   ),
