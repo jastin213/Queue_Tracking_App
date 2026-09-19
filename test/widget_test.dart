@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:queue_tracking_app/main.dart';
 import 'package:queue_tracking_app/services/document_upload_consent.dart';
 import 'package:queue_tracking_app/services/firestore_query_fields.dart';
+import 'package:queue_tracking_app/services/customer_onboarding.dart';
 import 'package:queue_tracking_app/screens/admin_settings.dart';
 import 'package:queue_tracking_app/screens/book_appointment.dart';
 import 'package:queue_tracking_app/screens/customer_home.dart';
@@ -13,6 +14,14 @@ import 'package:queue_tracking_app/screens/track_page.dart';
 import 'package:queue_tracking_app/theme/app_theme.dart';
 import 'package:queue_tracking_app/widgets/analytics_line_chart.dart';
 import 'package:queue_tracking_app/widgets/app_refresh_indicator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+Future<void> pumpLoginApp(WidgetTester tester) async {
+  SharedPreferences.setMockInitialValues({});
+  await completeCustomerOnboarding();
+  await tester.pumpWidget(const MyApp());
+  await tester.pumpAndSettle();
+}
 
 void main() {
   testWidgets('document authorization can be declined without continuing', (
@@ -191,7 +200,7 @@ void main() {
   });
 
   testWidgets('shows one shared account login', (WidgetTester tester) async {
-    await tester.pumpWidget(const MyApp());
+    await pumpLoginApp(tester);
 
     expect(find.text('Account Login'), findsOneWidget);
     expect(find.text('Email'), findsOneWidget);
@@ -215,7 +224,7 @@ void main() {
   testWidgets('opens the password recovery dialog', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(const MyApp());
+    await pumpLoginApp(tester);
 
     final forgotPasswordLink = find.text('Forgot Password?');
     await tester.ensureVisible(forgotPasswordLink);
@@ -231,7 +240,7 @@ void main() {
   testWidgets('registration can show and hide the password', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(const MyApp());
+    await pumpLoginApp(tester);
 
     final createAccountLink = find.text('Create Account');
     await tester.ensureVisible(createAccountLink);

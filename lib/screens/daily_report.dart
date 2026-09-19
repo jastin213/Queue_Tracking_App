@@ -10,7 +10,9 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import '../services/app_language.dart';
 import '../services/firestore_query_fields.dart';
+import '../services/queue_source.dart';
 import '../theme/app_theme.dart';
 import '../widgets/analytics_line_chart.dart';
 import '../widgets/app_refresh_indicator.dart';
@@ -761,7 +763,7 @@ class _DailyReportState extends State<DailyReport> {
   }
 
   String recordSource(Map<String, dynamic> record) {
-    return safeText(record["source"] ?? "-");
+    return normalizedQueueSource(record);
   }
 
   List<List<String>> pdfRowsFromRecords(
@@ -2707,20 +2709,7 @@ class _DailyReportState extends State<DailyReport> {
   }
 
   String reportCustomerType(Map<String, dynamic> record) {
-    final String source =
-        record["source"]?.toString().trim().toLowerCase() ?? "";
-    final String appointmentId =
-        record["appointmentId"]?.toString().trim() ?? "";
-    final String appointmentPath =
-        record["_appointmentDocumentPath"]?.toString().trim() ?? "";
-
-    if (source == "appointment" ||
-        appointmentId.isNotEmpty ||
-        appointmentPath.isNotEmpty) {
-      return "Appointment";
-    }
-
-    return "Walk-in";
+    return normalizedQueueSource(record);
   }
 
   String reportRecordKey(Map<String, dynamic> record) {
@@ -2816,8 +2805,8 @@ class _DailyReportState extends State<DailyReport> {
               String? hint,
             }) {
               return InputDecoration(
-                labelText: label,
-                hintText: hint,
+                labelText: appText(label),
+                hintText: hint == null ? null : appText(hint),
                 prefixIcon: Icon(icon),
                 filled: true,
                 fillColor: _backgroundColor,
@@ -3213,8 +3202,8 @@ class _DailyReportState extends State<DailyReport> {
       textCapitalization: TextCapitalization.words,
       onChanged: _scheduleReportSearch,
       decoration: InputDecoration(
-        labelText: "Search plate number or customer name",
-        hintText: "Enter a plate number or name",
+        labelText: appText("Search plate number or customer name"),
+        hintText: appText("Enter a plate number or name"),
         prefixIcon: const Icon(Icons.search_rounded),
         suffixIcon: reportSearchQuery.isEmpty
             ? null
@@ -3958,8 +3947,7 @@ class _DailyReportState extends State<DailyReport> {
     final vehicle =
         record["type"]?.toString() ?? record["vehicle"]?.toString() ?? "-";
 
-    final source =
-        record["source"]?.toString() ?? record["status"]?.toString() ?? "-";
+    final source = normalizedQueueSource(record);
 
     final time = record["time"]?.toString();
 

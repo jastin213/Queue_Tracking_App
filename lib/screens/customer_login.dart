@@ -929,14 +929,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
                                         mainAxisAlignment:
                                             MainAxisAlignment.center,
                                         children: [
-                                          Text(
-                                            "G",
-                                            style: TextStyle(
-                                              color: Color(0xFF4285F4),
-                                              fontSize: 22,
-                                              fontWeight: FontWeight.w900,
-                                            ),
-                                          ),
+                                          _GoogleLogo(size: 21),
                                           SizedBox(width: 10),
                                           Flexible(
                                             child: FittedBox(
@@ -1130,4 +1123,99 @@ class _CustomerLoginState extends State<CustomerLogin> {
       ),
     );
   }
+}
+
+class _GoogleLogo extends StatelessWidget {
+  const _GoogleLogo({this.size = 20});
+
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox.square(
+      dimension: size,
+      child: CustomPaint(painter: const _GoogleLogoPainter()),
+    );
+  }
+}
+
+class _GoogleLogoPainter extends CustomPainter {
+  const _GoogleLogoPainter();
+
+  static const _blue = Color(0xFF4285F4);
+  static const _red = Color(0xFFEA4335);
+  static const _yellow = Color(0xFFFBBC05);
+  static const _green = Color(0xFF34A853);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.scale(size.width / 18, size.height / 18);
+
+    Paint fill(Color color) => Paint()
+      ..color = color
+      ..style = PaintingStyle.fill
+      ..isAntiAlias = true;
+
+    final bluePath = Path()
+      ..moveTo(17.64, 9.2045)
+      ..relativeCubicTo(0, -0.638, -0.0573, -1.2518, -0.1636, -1.8409)
+      ..lineTo(9, 7.3636)
+      ..relativeLineTo(0, 3.4818)
+      ..relativeLineTo(4.8436, 0)
+      ..relativeCubicTo(-0.2086, 1.125, -0.8427, 2.0782, -1.7964, 2.7164)
+      ..relativeLineTo(0, 2.2582)
+      ..relativeLineTo(2.9082, 0)
+      ..relativeCubicTo(1.702, -1.5668, 2.6846, -3.8741, 2.6846, -6.6155)
+      ..close();
+
+    final greenPath = Path()
+      ..moveTo(9, 18)
+      ..relativeCubicTo(2.43, 0, 4.4673, -0.8059, 5.9564, -2.18)
+      ..relativeLineTo(-2.9082, -2.2582)
+      ..relativeCubicTo(-0.8059, 0.54, -1.8354, 0.8591, -3.0482, 0.8591)
+      ..relativeCubicTo(-2.3441, 0, -4.3286, -1.5845, -5.0373, -3.7104)
+      ..lineTo(0.9564, 10.7105)
+      ..relativeLineTo(0, 2.3327)
+      ..cubicTo(2.4373, 15.9832, 5.4818, 18, 9, 18)
+      ..close();
+
+    final yellowPath = Path()
+      ..moveTo(3.9627, 10.7105)
+      ..arcToPoint(
+        const Offset(3.6818, 9),
+        radius: const Radius.elliptical(5.4099, 5.4099),
+        clockwise: true,
+      )
+      ..relativeCubicTo(0, -0.5932, 0.1018, -1.17, 0.2809, -1.7105)
+      ..lineTo(3.9627, 4.9568)
+      ..lineTo(0.9564, 4.9568)
+      ..arcToPoint(
+        const Offset(0, 9),
+        radius: const Radius.elliptical(9.0043, 9.0043),
+        clockwise: false,
+      )
+      ..relativeCubicTo(0, 1.4527, 0.3477, 2.8273, 0.9564, 4.0432)
+      ..relativeLineTo(3.0063, -2.3327)
+      ..close();
+
+    final redPath = Path()
+      ..moveTo(9, 3.5791)
+      ..relativeCubicTo(1.3214, 0, 2.5077, 0.4545, 3.4418, 1.3459)
+      ..relativeLineTo(2.5814, -2.5814)
+      ..cubicTo(13.4632, 0.8918, 11.43, 0, 9, 0)
+      ..cubicTo(5.4818, 0, 2.4373, 2.0168, 0.9564, 4.9568)
+      ..relativeLineTo(3.0063, 2.3327)
+      ..cubicTo(4.6714, 5.1636, 6.6559, 3.5791, 9, 3.5791)
+      ..close();
+
+    canvas.drawPath(bluePath, fill(_blue));
+    canvas.drawPath(greenPath, fill(_green));
+    canvas.drawPath(yellowPath, fill(_yellow));
+    canvas.drawPath(redPath, fill(_red));
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _GoogleLogoPainter oldDelegate) => false;
 }

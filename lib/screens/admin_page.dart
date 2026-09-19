@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/appointment_lifecycle.dart';
 import '../services/browser_tab_opener.dart';
 import '../services/notification_time.dart';
+import '../services/queue_source.dart';
 import '../services/queue_voice.dart';
 import '../theme/app_theme.dart';
 import '../services/firestore_query_fields.dart';
@@ -1901,9 +1902,12 @@ class _AdminPageState extends State<AdminPage> {
       return;
     }
 
+    final originalSource = normalizedQueueSource(customer);
     final skippedCustomer = {
       ...customer,
-      "source": "Skipped / No Show",
+      "source": originalSource,
+      "originalSource": originalSource,
+      "wasSkipped": true,
       "status": "Skipped",
     };
 
@@ -1912,7 +1916,10 @@ class _AdminPageState extends State<AdminPage> {
         customer: skippedCustomer,
         status: "Skipped",
         extraData: {
-          "source": "Skipped / No Show",
+          "source": originalSource,
+          "originalSource": originalSource,
+          "wasSkipped": true,
+          "skipCount": FieldValue.increment(1),
           "originalCreatedAt":
               customer["originalCreatedAt"] ?? customer["createdAt"],
           "createdAt": FieldValue.serverTimestamp(),

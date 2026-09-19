@@ -9,6 +9,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../services/app_language.dart';
 import '../theme/app_theme.dart';
 import '../services/appointment_lifecycle.dart';
 import '../services/document_review_analyzer.dart';
@@ -673,9 +674,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       initialValue: selectedReason,
                       isExpanded: true,
                       decoration: InputDecoration(
-                        labelText: "Rejection reason",
+                        labelText: appText("Rejection reason"),
                         errorText: showValidation && selectedReason == null
-                            ? "Select a reason."
+                            ? appText("Select a reason.")
                             : null,
                       ),
                       items: reasons
@@ -700,9 +701,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       maxLines: 5,
                       maxLength: 300,
                       decoration: InputDecoration(
-                        labelText: "Message / feedback for customer",
-                        hintText:
-                            "Example: This slot was already taken. Please choose another available queue code.",
+                        labelText: appText(
+                          "Message / feedback for customer",
+                        ),
+                        hintText: appText(
+                          "Example: This slot was already taken. Please choose another available queue code.",
+                        ),
                         alignLabelWithHint: true,
                         errorText:
                             showValidation &&
