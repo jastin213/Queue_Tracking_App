@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
+import '../widgets/localized_text.dart';
 
 import '../theme/app_theme.dart';
 import '../widgets/app_responsive_content.dart';

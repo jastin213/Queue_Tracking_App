@@ -6,6 +6,10 @@ service firebase.storage {
       return request.auth != null;
     }
 
+    function hasVerifiedEmail() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
     function isAdmin() {
       return isSignedIn()
           && firestore.get(
@@ -24,7 +28,7 @@ service firebase.storage {
       allow read: if isSignedIn()
           && (request.auth.uid == customerId || isAdmin());
 
-      allow create: if isSignedIn()
+      allow create: if hasVerifiedEmail()
           && request.auth.uid == customerId
           && isAllowedAppointmentDocument();
 

@@ -3,7 +3,8 @@ import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
+import '../widgets/localized_text.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';

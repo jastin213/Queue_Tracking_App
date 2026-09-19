@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'firebase_options.dart';
 import 'screens/display_page.dart';
 import 'screens/home_page.dart';
+import 'services/app_language.dart';
 import 'services/customer_preferences.dart';
 import 'theme/app_theme.dart';
 
@@ -12,6 +14,7 @@ Future<void> main() async {
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await initializeAppTheme();
+  await initializeAppLanguage();
   await initializeCustomerPreferences();
 
   runApp(const MyApp());
@@ -22,21 +25,33 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ValueListenableBuilder<ThemeMode>(
-      valueListenable: appThemeModeNotifier,
-      builder: (context, themeMode, _) {
-        return MaterialApp(
-          title: 'Queue System',
-          debugShowCheckedModeBanner: false,
-          theme: AppTheme.light,
-          darkTheme: AppTheme.dark,
-          themeMode: themeMode,
-          home: const HomePage(),
-          routes: {
-            displayPageRoute: (_) => const DisplayPage(showBackButton: false),
-          },
-        );
-      },
+    return ValueListenableBuilder<String>(
+      valueListenable: appLanguageNotifier,
+      builder: (context, language, _) => ValueListenableBuilder<ThemeMode>(
+        valueListenable: appThemeModeNotifier,
+        builder: (context, themeMode, _) {
+          return MaterialApp(
+            title: 'Queue System',
+            debugShowCheckedModeBanner: false,
+            theme: AppTheme.light,
+            darkTheme: AppTheme.dark,
+            themeMode: themeMode,
+            locale: language == filipinoLanguage
+                ? const Locale('fil', 'PH')
+                : const Locale('en', 'US'),
+            supportedLocales: const [Locale('en', 'US'), Locale('fil', 'PH')],
+            localizationsDelegates: const [
+              GlobalMaterialLocalizations.delegate,
+              GlobalWidgetsLocalizations.delegate,
+              GlobalCupertinoLocalizations.delegate,
+            ],
+            home: const HomePage(),
+            routes: {
+              displayPageRoute: (_) => const DisplayPage(showBackButton: false),
+            },
+          );
+        },
+      ),
     );
   }
 }

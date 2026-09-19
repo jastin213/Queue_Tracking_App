@@ -1,8 +1,14 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
+import '../widgets/localized_text.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
+import '../services/app_language.dart';
+import '../services/queue_voice.dart';
 import '../theme/app_theme.dart';
 import 'document_cleanup.dart';
+
+export '../services/app_language.dart' show appLanguageNotifier;
+
 // ============================================================================
 // THEME COLORS
 // ============================================================================
@@ -20,7 +26,6 @@ Color get _softPrimaryColor => AppColors.activeSoftPrimary;
 
 // Existing settings
 ValueNotifier<String> voiceLanguageNotifier = ValueNotifier("English");
-ValueNotifier<String> appLanguageNotifier = ValueNotifier("English");
 
 // New settings
 ValueNotifier<String> voiceSpeedNotifier = ValueNotifier("Normal");
@@ -73,23 +78,15 @@ class _AdminSettingsState extends State<AdminSettings> {
   }
 
   Future<void> testVoice() async {
-    if (voiceLanguageNotifier.value == "Filipino") {
-      await flutterTts.setLanguage("fil-PH");
-      await flutterTts.setSpeechRate(getSpeechRate());
-      await flutterTts.setPitch(1.0);
-
-      await flutterTts.speak(
-        "Tinatawag ang numero G001, pumunta na po sa testing area",
-      );
-    } else {
-      await flutterTts.setLanguage("en-US");
-      await flutterTts.setSpeechRate(getSpeechRate());
-      await flutterTts.setPitch(1.0);
-
-      await flutterTts.speak(
-        "Now serving G001, please proceed to the testing area",
-      );
-    }
+    final filipino = voiceLanguageNotifier.value == "Filipino";
+    await QueueVoice.configure(
+      flutterTts,
+      filipino: filipino,
+      speechRate: getSpeechRate(),
+    );
+    await flutterTts.speak(
+      QueueVoice.nowServingMessage('G001', filipino: filipino),
+    );
   }
 
   // ==========================================================================
@@ -117,20 +114,20 @@ class _AdminSettingsState extends State<AdminSettings> {
 
   InputDecoration inputDecoration(String hint) {
     return InputDecoration(
-      hintText: hint,
+      hintText: appText(hint),
       hintStyle: TextStyle(color: _mutedTextColor),
       filled: true,
       fillColor: _backgroundColor,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         borderSide: BorderSide(color: _borderColor, width: 1.2),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         borderSide: BorderSide(color: _primaryColor, width: 1.5),
       ),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
     );
   }
 
@@ -140,10 +137,25 @@ class _AdminSettingsState extends State<AdminSettings> {
       foregroundColor: Colors.white,
       elevation: 2,
       shadowColor: _primaryColor.withValues(alpha: 0.16),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
       textStyle: const TextStyle(
         fontWeight: FontWeight.w800,
         letterSpacing: 0.5,
+      ),
+    );
+  }
+
+  ButtonStyle secondaryButtonStyle() {
+    return OutlinedButton.styleFrom(
+      foregroundColor: _primaryColor,
+      backgroundColor: _cardColor,
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+      side: BorderSide(color: _borderColor, width: 1.2),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+      textStyle: const TextStyle(
+        fontWeight: FontWeight.w800,
+        letterSpacing: 0.3,
       ),
     );
   }
@@ -198,7 +210,7 @@ class _AdminSettingsState extends State<AdminSettings> {
                   child: Center(
                     child: ConstrainedBox(
                       constraints: BoxConstraints(
-                        maxWidth: wideWeb ? 900 : double.infinity,
+                        maxWidth: wideWeb ? 760 : double.infinity,
                       ),
                       child: buildOneLineSettingsLayout(),
                     ),
@@ -265,42 +277,73 @@ class _AdminSettingsState extends State<AdminSettings> {
               );
             },
           ),
-          const SizedBox(height: 14),
-          settingLabel("Voice Speed"),
-          ValueListenableBuilder<String>(
-            valueListenable: voiceSpeedNotifier,
-            builder: (context, value, _) {
-              return DropdownButtonFormField<String>(
-                initialValue: value,
-                dropdownColor: _cardColor,
-                decoration: inputDecoration("Select voice speed"),
-                iconEnabledColor: _primaryColor,
-                style: TextStyle(
-                  color: _primaryColor,
-                  fontWeight: FontWeight.w700,
-                ),
-                items: const [
-                  DropdownMenuItem(value: "Slow", child: Text("Slow")),
-                  DropdownMenuItem(value: "Normal", child: Text("Normal")),
-                  DropdownMenuItem(value: "Fast", child: Text("Fast")),
+          const SizedBox(height: 16),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final speedControl = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  settingLabel("Voice Speed"),
+                  ValueListenableBuilder<String>(
+                    valueListenable: voiceSpeedNotifier,
+                    builder: (context, value, _) {
+                      return DropdownButtonFormField<String>(
+                        initialValue: value,
+                        dropdownColor: _cardColor,
+                        decoration: inputDecoration("Select voice speed"),
+                        iconEnabledColor: _primaryColor,
+                        style: TextStyle(
+                          color: _primaryColor,
+                          fontWeight: FontWeight.w700,
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: "Slow", child: Text("Slow")),
+                          DropdownMenuItem(
+                            value: "Normal",
+                            child: Text("Normal"),
+                          ),
+                          DropdownMenuItem(value: "Fast", child: Text("Fast")),
+                        ],
+                        onChanged: (newValue) {
+                          voiceSpeedNotifier.value = newValue!;
+                          setState(() {});
+                        },
+                      );
+                    },
+                  ),
                 ],
-                onChanged: (newValue) {
-                  voiceSpeedNotifier.value = newValue!;
-                  setState(() {});
-                },
+              );
+
+              final testButton = SizedBox(
+                height: 48,
+                child: OutlinedButton.icon(
+                  style: secondaryButtonStyle(),
+                  onPressed: testVoice,
+                  icon: const Icon(Icons.volume_up_rounded, size: 19),
+                  label: const Text("Test Voice"),
+                ),
+              );
+
+              if (constraints.maxWidth >= 560) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(child: speedControl),
+                    const SizedBox(width: 12),
+                    testButton,
+                  ],
+                );
+              }
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  speedControl,
+                  const SizedBox(height: 12),
+                  testButton,
+                ],
               );
             },
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: ElevatedButton.icon(
-              style: primaryButtonStyle(),
-              onPressed: testVoice,
-              icon: const Icon(Icons.volume_up_rounded),
-              label: const Text("TEST VOICE"),
-            ),
           ),
         ],
       ),
@@ -330,8 +373,7 @@ class _AdminSettingsState extends State<AdminSettings> {
               DropdownMenuItem(value: "Filipino", child: Text("Filipino")),
             ],
             onChanged: (newValue) {
-              appLanguageNotifier.value = newValue!;
-              setState(() {});
+              if (newValue != null) setAppLanguage(newValue);
             },
           );
         },
@@ -482,24 +524,56 @@ class _AdminSettingsState extends State<AdminSettings> {
               },
             ),
           ),
-          const SizedBox(height: 14),
-          settingLabel("Display Announcement"),
-          TextField(
-            controller: announcementController,
-            maxLines: 3,
-            style: TextStyle(color: _primaryColor, fontWeight: FontWeight.w600),
-            decoration: inputDecoration("Enter display announcement"),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: ElevatedButton.icon(
-              style: primaryButtonStyle(),
-              onPressed: saveAnnouncement,
-              icon: const Icon(Icons.save_rounded),
-              label: const Text("SAVE ANNOUNCEMENT"),
-            ),
+          const SizedBox(height: 16),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final announcementControl = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  settingLabel("Display Announcement"),
+                  TextField(
+                    controller: announcementController,
+                    minLines: 2,
+                    maxLines: 3,
+                    style: TextStyle(
+                      color: _primaryColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    decoration: inputDecoration("Enter display announcement"),
+                  ),
+                ],
+              );
+
+              final saveButton = SizedBox(
+                height: 48,
+                child: ElevatedButton.icon(
+                  style: primaryButtonStyle(),
+                  onPressed: saveAnnouncement,
+                  icon: const Icon(Icons.save_rounded, size: 19),
+                  label: const Text("Save Announcement"),
+                ),
+              );
+
+              if (constraints.maxWidth >= 560) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Expanded(child: announcementControl),
+                    const SizedBox(width: 12),
+                    saveButton,
+                  ],
+                );
+              }
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  announcementControl,
+                  const SizedBox(height: 12),
+                  saveButton,
+                ],
+              );
+            },
           ),
         ],
       ),
@@ -598,10 +672,10 @@ class _AdminSettingsState extends State<AdminSettings> {
   }) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: _cardColor,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: _borderColor),
         boxShadow: [
           BoxShadow(
@@ -645,7 +719,7 @@ class _AdminSettingsState extends State<AdminSettings> {
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
           child,
         ],
       ),
@@ -721,13 +795,13 @@ class _AdminSettingsState extends State<AdminSettings> {
 
   Widget iconBox(IconData icon) {
     return Container(
-      height: 46,
-      width: 46,
+      height: 42,
+      width: 42,
       decoration: BoxDecoration(
         color: _primaryColor,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
       ),
-      child: Icon(icon, color: Colors.white, size: 24),
+      child: Icon(icon, color: Colors.white, size: 22),
     );
   }
 }

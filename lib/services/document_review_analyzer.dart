@@ -30,15 +30,27 @@ class DocumentReviewAnalyzer {
   static const _idMarkers = <String>[
     'DRIVER LICENSE',
     'DRIVERS LICENSE',
+    'DRIVER S LICENSE',
     'DRIVING LICENSE',
     'PHILSYS',
     'PHILIPPINE IDENTIFICATION',
+    'PHILIPPINE IDENTIFICATION CARD',
     'NATIONAL ID',
     'PASSPORT',
+    'PHILIPPINE PASSPORT',
     'UNIFIED MULTI PURPOSE ID',
     'UMID',
     'POSTAL ID',
     'PROFESSIONAL REGULATION COMMISSION',
+    'PHILHEALTH',
+    'SOCIAL SECURITY SYSTEM',
+    'SSS ID',
+    'GOVERNMENT SERVICE INSURANCE SYSTEM',
+    'GSIS',
+    'VOTER S ID',
+    'SENIOR CITIZEN ID',
+    'PWD ID',
+    'TIN ID',
   ];
 
   static DocumentReviewResult analyze({
@@ -58,6 +70,15 @@ class DocumentReviewAnalyzer {
       text: idText,
       error: errors['ID'],
       markers: _idMarkers,
+      supportingMarkers: const [
+        'SURNAME',
+        'GIVEN NAME',
+        'DATE OF BIRTH',
+        'BIRTH DATE',
+        'LICENSE NO',
+        'IDENTIFICATION NO',
+        'ADDRESS',
+      ],
       markerDescription: 'a supported government ID label',
     );
     if (idReadable) score += 10;
@@ -68,6 +89,15 @@ class DocumentReviewAnalyzer {
       text: orText,
       error: errors['OR'],
       markers: const ['OFFICIAL RECEIPT'],
+      supportingMarkers: const [
+        'OR NO',
+        'AMOUNT PAID',
+        'TOTAL AMOUNT',
+        'TRANSACTION DATE',
+        'DATE OF PAYMENT',
+        'PAYMENT',
+        'FEE',
+      ],
       markerDescription: 'the Official Receipt label',
     );
     if (orReadable) score += 10;
@@ -77,7 +107,19 @@ class DocumentReviewAnalyzer {
       label: 'Certificate of Registration (CR)',
       text: crText,
       error: errors['CR'],
-      markers: const ['CERTIFICATE OF REGISTRATION'],
+      markers: const [
+        'CERTIFICATE OF REGISTRATION',
+        'CERTIFICATE REGISTRATION',
+      ],
+      supportingMarkers: const [
+        'CHASSIS NO',
+        'ENGINE NO',
+        'MV FILE NO',
+        'YEAR MODEL',
+        'BODY TYPE',
+        'MAKE',
+        'COLOR',
+      ],
       markerDescription: 'the Certificate of Registration label',
     );
     if (crReadable) score += 10;
@@ -134,15 +176,20 @@ class DocumentReviewAnalyzer {
     );
     if (crPlateMatch) score += 20;
 
-    final allReadable =
-        idText.trim().isNotEmpty &&
-        orText.trim().isNotEmpty &&
-        crText.trim().isNotEmpty &&
-        errors.isEmpty;
-    if (allReadable) score += 5;
-
     final criticalMatches = nameMatch && orPlateMatch && crPlateMatch;
-    if (score >= 85 && criticalMatches && errors.isEmpty) {
+    final allDocumentTypesConfirmed = idReadable && orReadable && crReadable;
+    final coherentEvidence =
+        nameMatch &&
+        (orPlateMatch || crPlateMatch) &&
+        allDocumentTypesConfirmed;
+    if (coherentEvidence && errors.isEmpty) {
+      score += 5;
+    }
+
+    if (score >= 85 &&
+        criticalMatches &&
+        allDocumentTypesConfirmed &&
+        errors.isEmpty) {
       return DocumentReviewResult(
         score: score,
         title: 'Likely consistent',
@@ -180,6 +227,7 @@ class DocumentReviewAnalyzer {
     required String text,
     required String? error,
     required List<String> markers,
+    List<String> supportingMarkers = const [],
     required String markerDescription,
   }) {
     if (error != null) {
@@ -206,7 +254,13 @@ class DocumentReviewAnalyzer {
       return false;
     }
 
-    final markerFound = markers.any(normalizedText.contains);
+    final primaryMarkerFound = markers.any(
+      (marker) => _containsApproximatePhrase(normalizedText, marker),
+    );
+    final supportingMarkerCount = supportingMarkers
+        .where((marker) => _containsApproximatePhrase(normalizedText, marker))
+        .length;
+    final markerFound = primaryMarkerFound || supportingMarkerCount >= 2;
     checks.add(
       DocumentReviewCheck(
         title: '$label document type',
@@ -259,20 +313,118 @@ class DocumentReviewAnalyzer {
     ).split(' ').where((token) => token.length >= 2).toList();
     if (nameTokens.length < 2) return false;
 
-    final textTokens = _normalizeWords(text).split(' ').toSet();
+    final textTokens = _normalizeWords(text).split(' ');
+    bool containsNameToken(String nameToken) => textTokens.any(
+      (textToken) => _tokensApproximatelyEqual(nameToken, textToken),
+    );
     final firstAndLastMatch =
-        textTokens.contains(nameTokens.first) &&
-        textTokens.contains(nameTokens.last);
+        containsNameToken(nameTokens.first) &&
+        containsNameToken(nameTokens.last);
     if (!firstAndLastMatch) return false;
 
-    final matchedTokens = nameTokens.where(textTokens.contains).length;
+    final matchedTokens = nameTokens.where(containsNameToken).length;
     return matchedTokens >= 2;
   }
 
   static bool _plateAppearsInText(String plate, String text) {
     final normalizedPlate = _normalizeCompact(plate);
     if (normalizedPlate.length < 5) return false;
-    return _normalizeCompact(text).contains(normalizedPlate);
+    if (_normalizeCompact(text).contains(normalizedPlate)) return true;
+
+    final textTokens = _normalizeWords(
+      text,
+    ).split(' ').where((token) => token.isNotEmpty).toList();
+    for (var start = 0; start < textTokens.length; start++) {
+      var candidate = '';
+      for (
+        var tokenCount = 1;
+        tokenCount <= 3 && start + tokenCount <= textTokens.length;
+        tokenCount++
+      ) {
+        candidate += textTokens[start + tokenCount - 1];
+        if ((candidate.length - normalizedPlate.length).abs() > 1) continue;
+        if (_levenshteinDistance(candidate, normalizedPlate) <= 1) return true;
+      }
+    }
+    return false;
+  }
+
+  static bool _containsApproximatePhrase(String text, String phrase) {
+    final textTokens = _normalizeWords(
+      text,
+    ).split(' ').where((token) => token.isNotEmpty).toList();
+    final phraseTokens = _normalizeWords(
+      phrase,
+    ).split(' ').where((token) => token.isNotEmpty).toList();
+    if (phraseTokens.isEmpty || textTokens.length < phraseTokens.length) {
+      return false;
+    }
+
+    for (
+      var start = 0;
+      start <= textTokens.length - phraseTokens.length;
+      start++
+    ) {
+      var totalDistance = 0;
+      var matches = true;
+      for (var index = 0; index < phraseTokens.length; index++) {
+        final expected = _normalizeOcrWord(phraseTokens[index]);
+        final actual = _normalizeOcrWord(textTokens[start + index]);
+        final allowedDistance = expected.length >= 5 ? 1 : 0;
+        final distance = _levenshteinDistance(expected, actual);
+        if (distance > allowedDistance) {
+          matches = false;
+          break;
+        }
+        totalDistance += distance;
+      }
+      if (matches && totalDistance <= 2) return true;
+    }
+    return false;
+  }
+
+  static bool _tokensApproximatelyEqual(String expected, String actual) {
+    if (expected == actual) return true;
+    if (expected.length < 4 || actual.length < 4) return false;
+    if ((expected.length - actual.length).abs() > 1) return false;
+    return _levenshteinDistance(expected, actual) <= 1;
+  }
+
+  static String _normalizeOcrWord(String value) {
+    return value
+        .replaceAll('0', 'O')
+        .replaceAll('1', 'I')
+        .replaceAll('5', 'S')
+        .replaceAll('8', 'B');
+  }
+
+  static int _levenshteinDistance(String first, String second) {
+    if (first == second) return 0;
+    if (first.isEmpty) return second.length;
+    if (second.isEmpty) return first.length;
+
+    var previous = List<int>.generate(second.length + 1, (index) => index);
+    for (var firstIndex = 1; firstIndex <= first.length; firstIndex++) {
+      final current = List<int>.filled(second.length + 1, 0);
+      current[0] = firstIndex;
+      for (var secondIndex = 1; secondIndex <= second.length; secondIndex++) {
+        final substitutionCost =
+            first.codeUnitAt(firstIndex - 1) ==
+                second.codeUnitAt(secondIndex - 1)
+            ? 0
+            : 1;
+        final deletion = previous[secondIndex] + 1;
+        final insertion = current[secondIndex - 1] + 1;
+        final substitution = previous[secondIndex - 1] + substitutionCost;
+        current[secondIndex] = [
+          deletion,
+          insertion,
+          substitution,
+        ].reduce((minimum, value) => value < minimum ? value : minimum);
+      }
+      previous = current;
+    }
+    return previous.last;
   }
 
   static String _normalizeWords(String value) {

@@ -2,13 +2,16 @@ import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
+import '../widgets/localized_text.dart';
+import '../services/app_language.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
 import '../services/appointment_lifecycle.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_motion.dart';
 import '../services/customer_preferences.dart';
+import '../services/queue_voice.dart';
 import '../widgets/app_refresh_indicator.dart';
 import '../widgets/app_responsive_content.dart';
 import 'ors_service.dart';
@@ -833,16 +836,9 @@ class _TrackPageState extends State<TrackPage> {
 
   Future<void> speakNearTurnAlert() async {
     try {
-      await flutterTts.stop();
       final filipino = customerVoiceLanguageNotifier.value == "Filipino";
-      await flutterTts.setLanguage(filipino ? "fil-PH" : "en-US");
-      await flutterTts.setSpeechRate(0.45);
-      await flutterTts.setPitch(1.0);
-      await flutterTts.speak(
-        filipino
-            ? "Maghanda na po. Malapit na ang inyong turno."
-            : "Please prepare. Your turn is near.",
-      );
+      await QueueVoice.configure(flutterTts, filipino: filipino);
+      await flutterTts.speak(QueueVoice.nearTurnMessage(filipino: filipino));
     } catch (_) {
       // Keep the visual queue alert working if voice playback is unavailable.
     }
@@ -850,16 +846,9 @@ class _TrackPageState extends State<TrackPage> {
 
   Future<void> speakNowServingAlert() async {
     try {
-      await flutterTts.stop();
       final filipino = customerVoiceLanguageNotifier.value == "Filipino";
-      await flutterTts.setLanguage(filipino ? "fil-PH" : "en-US");
-      await flutterTts.setSpeechRate(0.45);
-      await flutterTts.setPitch(1.0);
-      await flutterTts.speak(
-        filipino
-            ? "Mangyaring pumunta na po sa testing area."
-            : "Please proceed to the testing area.",
-      );
+      await QueueVoice.configure(flutterTts, filipino: filipino);
+      await flutterTts.speak(QueueVoice.proceedMessage(filipino: filipino));
     } catch (_) {
       // The in-app notification remains available if speech is unsupported.
     }
@@ -1158,8 +1147,8 @@ class _TrackPageState extends State<TrackPage> {
             controller: queueController,
             textCapitalization: TextCapitalization.characters,
             decoration: InputDecoration(
-              labelText: "Queue Number",
-              hintText: "Example: G001 or D001",
+              labelText: appText("Queue Number"),
+              hintText: appText("Example: G001 or D001"),
               filled: true,
               fillColor: AppColors.activeSoftPrimary,
               prefixIcon: const Icon(Icons.confirmation_number),

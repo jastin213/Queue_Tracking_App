@@ -3,7 +3,8 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
+import '../widgets/localized_text.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -11,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/appointment_lifecycle.dart';
 import '../services/browser_tab_opener.dart';
 import '../services/notification_time.dart';
+import '../services/queue_voice.dart';
 import '../theme/app_theme.dart';
 import '../services/firestore_query_fields.dart';
 import '../widgets/app_responsive_content.dart';
@@ -987,23 +989,15 @@ class _AdminPageState extends State<AdminPage> {
   // ================= SPEAK =================
 
   Future<void> speak(String queueNumber) async {
-    if (voiceLanguageNotifier.value == "Filipino") {
-      await flutterTts.setLanguage("fil-PH");
-      await flutterTts.setSpeechRate(0.45);
-      await flutterTts.setPitch(1.0);
-
-      await flutterTts.speak(
-        "Tinatawag ang numero $queueNumber, pumunta na po sa testing area",
-      );
-    } else {
-      await flutterTts.setLanguage("en-US");
-      await flutterTts.setSpeechRate(0.45);
-      await flutterTts.setPitch(1.0);
-
-      await flutterTts.speak(
-        "Now serving $queueNumber, please proceed to the testing area",
-      );
-    }
+    final filipino = voiceLanguageNotifier.value == "Filipino";
+    await QueueVoice.configure(
+      flutterTts,
+      filipino: filipino,
+      speechRate: 0.45,
+    );
+    await flutterTts.speak(
+      QueueVoice.nowServingMessage(queueNumber, filipino: filipino),
+    );
   }
 
   // ================= PICK QUEUE DATE =================

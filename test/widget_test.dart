@@ -196,6 +196,8 @@ void main() {
     expect(find.text('Account Login'), findsOneWidget);
     expect(find.text('Email'), findsOneWidget);
     expect(find.text('Password'), findsOneWidget);
+    expect(find.text('CONTINUE WITH GOOGLE'), findsOneWidget);
+    expect(find.text('OR SIGN IN WITH EMAIL'), findsOneWidget);
     expect(find.text('LOGIN'), findsOneWidget);
     expect(find.text('Forgot Password?'), findsOneWidget);
     expect(find.byTooltip('Show password'), findsOneWidget);
@@ -223,7 +225,7 @@ void main() {
 
     expect(find.text('Reset Password'), findsOneWidget);
     expect(find.text('SEND RESET LINK'), findsOneWidget);
-    expect(find.textContaining('create a new password'), findsOneWidget);
+    expect(find.textContaining('create a separate password'), findsOneWidget);
   });
 
   testWidgets('registration can show and hide the password', (
@@ -304,6 +306,15 @@ void main() {
     expect(find.text('Walk-ins'), findsOneWidget);
     expect(find.text('Passed'), findsOneWidget);
     expect(find.text('Failed'), findsOneWidget);
+    expect(find.byType(Scrollbar), findsOneWidget);
+    expect(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is SingleChildScrollView &&
+            widget.scrollDirection == Axis.horizontal,
+      ),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 

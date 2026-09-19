@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
+import '../widgets/localized_text.dart';
+import '../services/app_language.dart';
 
 import '../theme/app_theme.dart';
 import 'admin_page.dart';
@@ -158,7 +160,7 @@ class _AdminLoginState extends State<AdminLogin> {
     Widget? suffixIcon,
   }) {
     return InputDecoration(
-      labelText: label,
+      labelText: appText(label),
       labelStyle: TextStyle(
         color: _mutedTextColor,
         fontWeight: FontWeight.w600,

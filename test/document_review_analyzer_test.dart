@@ -60,5 +60,49 @@ void main() {
         isTrue,
       );
     });
+
+    test('tolerates common OCR mistakes in otherwise matching documents', () {
+      final result = DocumentReviewAnalyzer.analyze(
+        customerName: 'Julie Rebadavia',
+        enteredPlate: '624EJH',
+        idText:
+            'REPUBLIC OF THE PHILIPPINES DRIVER L1CENSE '
+            'Ju1ie Rebadavia DATE OF BIRTH 01 01 2000',
+        orText:
+            'LAND TRANSPORTATION OFFICE OFFlCIAL RECEIPT '
+            'PLATE NO 624EJH AMOUNT PAID 500',
+        crText:
+            'CERTIF1CATE OF REGISTRATlON ENGINE NO 12345 '
+            'CHASSIS NO 67890 PLATE 624EJH',
+      );
+
+      expect(result.title, 'Likely consistent');
+      expect(result.score, 100);
+      expect(
+        result.checks.where(
+          (check) => check.state == DocumentReviewCheckState.warning,
+        ),
+        isEmpty,
+      );
+    });
+
+    test('gives unrelated readable images a zero consistency score', () {
+      final result = DocumentReviewAnalyzer.analyze(
+        customerName: 'Kehn Rebadavia',
+        enteredPlate: 'WQER123',
+        idText: 'A beautiful mountain landscape during sunset',
+        orText: 'Birthday celebration with family and friends',
+        crText: 'Fresh fruit vegetables and flowers at the market',
+      );
+
+      expect(result.title, 'Issues detected');
+      expect(result.score, 0);
+      expect(
+        result.checks.where(
+          (check) => check.state == DocumentReviewCheckState.passed,
+        ),
+        isEmpty,
+      );
+    });
   });
 }

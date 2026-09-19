@@ -3,7 +3,8 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
+import '../widgets/localized_text.dart';
 import 'package:flutter/services.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -437,10 +438,10 @@ class _DailyReportState extends State<DailyReport> {
 
   List<String> _analyticsDates() {
     final selected = parseDate(selectedDate);
-    final firstMonth = DateTime(selected.year, selected.month - 5);
+    final firstMonth = DateTime(selected.year, selected.month - 6);
     final dates = <String>[];
 
-    for (var monthOffset = 0; monthOffset < 6; monthOffset++) {
+    for (var monthOffset = 0; monthOffset < 12; monthOffset++) {
       final month = DateTime(firstMonth.year, firstMonth.month + monthOffset);
       final daysInMonth = DateTime(month.year, month.month + 1, 0).day;
       for (var day = 1; day <= daysInMonth; day++) {
@@ -1918,29 +1919,21 @@ class _DailyReportState extends State<DailyReport> {
     final entries = monthly.entries.toList()
       ..sort((a, b) => a.key.compareTo(b.key));
 
-    final visibleEntries = entries.length > 6
-        ? entries.sublist(entries.length - 6)
-        : entries;
-
     return AnalyticsLineChart(
-      labels: visibleEntries
+      labels: entries
           .map((entry) => shortMonthLabelFromKey(entry.key))
           .toList(),
-      servedValues: visibleEntries
+      servedValues: entries
           .map((entry) => entry.value["totalServed"] ?? 0)
           .toList(),
-      appointmentValues: visibleEntries
+      appointmentValues: entries
           .map((entry) => entry.value["appointmentActivity"] ?? 0)
           .toList(),
-      walkInValues: visibleEntries
+      walkInValues: entries
           .map((entry) => entry.value["walkIns"] ?? 0)
           .toList(),
-      passedValues: visibleEntries
-          .map((entry) => entry.value["passed"] ?? 0)
-          .toList(),
-      failedValues: visibleEntries
-          .map((entry) => entry.value["failed"] ?? 0)
-          .toList(),
+      passedValues: entries.map((entry) => entry.value["passed"] ?? 0).toList(),
+      failedValues: entries.map((entry) => entry.value["failed"] ?? 0).toList(),
       chartType: _analyticsChartType,
     );
   }

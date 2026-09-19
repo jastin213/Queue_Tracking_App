@@ -1,4 +1,6 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
+import '../widgets/localized_text.dart';
+import '../services/app_language.dart';
 
 import '../theme/app_theme.dart';
 import '../widgets/app_responsive_content.dart';
@@ -144,6 +146,8 @@ class _CustomerRegisterState extends State<CustomerRegister> {
         "email": email,
         "municipality": selectedAddress,
         "role": "customer",
+        "authProvider": "password",
+        "emailVerified": false,
         "documentUploadConsent": true,
         "documentUploadConsentVersion": documentUploadConsentVersion,
         "documentUploadConsentAcceptedAt": FieldValue.serverTimestamp(),
@@ -151,15 +155,27 @@ class _CustomerRegisterState extends State<CustomerRegister> {
         "updatedAt": FieldValue.serverTimestamp(),
       });
 
-      loggedInCustomerNameNotifier.value = fullName;
-      loggedInCustomerEmailNotifier.value = email;
-      loggedInCustomerIdNotifier.value = user.uid;
+      bool verificationSent = true;
+      try {
+        await user.sendEmailVerification();
+      } on FirebaseAuthException {
+        verificationSent = false;
+      }
+      await FirebaseAuth.instance.signOut();
+
+      loggedInCustomerNameNotifier.value = "";
+      loggedInCustomerEmailNotifier.value = "";
+      loggedInCustomerIdNotifier.value = "";
 
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Account created and document authorization saved."),
+        SnackBar(
+          content: Text(
+            verificationSent
+                ? "Account created. Open the verification link sent to your email before signing in."
+                : "Account created, but the verification email could not be sent. Sign in once to request another link.",
+          ),
         ),
       );
 
@@ -192,8 +208,8 @@ class _CustomerRegisterState extends State<CustomerRegister> {
     Widget? suffixIcon,
   }) {
     return InputDecoration(
-      labelText: label,
-      hintText: hint,
+      labelText: appText(label),
+      hintText: appText(hint),
       prefixIcon: Icon(icon, color: _primaryColor),
       suffixIcon: suffixIcon,
       labelStyle: TextStyle(
@@ -466,7 +482,7 @@ class _CustomerRegisterState extends State<CustomerRegister> {
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
-                            "Please use a valid email address. This will be used for secure account login.",
+                            "Use a real email address. You must open the verification link sent to that address before you can sign in.",
                             style: TextStyle(
                               fontSize: 13,
                               height: 1.3,

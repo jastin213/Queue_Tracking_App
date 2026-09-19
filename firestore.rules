@@ -10,6 +10,10 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == userId;
     }
 
+    function hasVerifiedEmail() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
     function isAdmin() {
       return isSignedIn()
         && exists(/databases/$(database)/documents/users/$(request.auth.uid))
@@ -32,6 +36,7 @@ service cloud.firestore {
 
     match /appointments/{appointmentId} {
       allow create: if isSignedIn()
+        && hasVerifiedEmail()
         && request.resource.data.customerId == request.auth.uid
         && request.resource.data.status == "Pending";
 
@@ -41,6 +46,7 @@ service cloud.firestore {
 
       match /documents/{documentType} {
         allow create: if isSignedIn()
+          && hasVerifiedEmail()
           && request.resource.data.customerId == request.auth.uid
           && request.resource.data.documentType in ["ID", "OR", "CR"]
           && request.resource.data.size <= 10 * 1024 * 1024
@@ -55,6 +61,7 @@ service cloud.firestore {
 
         match /chunks/{chunkId} {
           allow create: if isSignedIn()
+            && hasVerifiedEmail()
             && request.resource.data.customerId == request.auth.uid
             && request.resource.data.index is int
             && request.resource.data.data is bytes

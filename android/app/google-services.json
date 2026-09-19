@@ -12,7 +12,20 @@
           "package_name": "com.example.queue_tracking_app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "725297483957-1sknqclciirdtnplc62c4ar0fmtg46ea.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.queue_tracking_app",
+            "certificate_hash": "090fe615b16a52b7ebc6d2812c056d1a123ffac2"
+          }
+        },
+        {
+          "client_id": "725297483957-m43diga6m1mef6up4ec9ltk2htcm45ga.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyBwEDKsjPo1iWfD-lEwYAP5EdXCDUAmZH4"
@@ -20,7 +33,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "725297483957-m43diga6m1mef6up4ec9ltk2htcm45ga.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "725297483957-nhokmk77q2egjr8ingsettjtohcu535o.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.queueTrackingApp"
+              }
+            }
+          ]
         }
       }
     }

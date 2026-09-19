@@ -1,9 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Text;
+import '../widgets/localized_text.dart';
+import '../services/app_language.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
 import '../services/customer_preferences.dart';
+import '../services/queue_voice.dart';
 import '../theme/app_theme.dart';
 import '../widgets/app_responsive_content.dart';
 import '../widgets/app_section_card.dart';
@@ -42,15 +45,8 @@ class _CustomerSettingsState extends State<CustomerSettings> {
 
     try {
       final filipino = customerVoiceLanguageNotifier.value == 'Filipino';
-      await flutterTts.stop();
-      await flutterTts.setLanguage(filipino ? 'fil-PH' : 'en-US');
-      await flutterTts.setSpeechRate(0.45);
-      await flutterTts.setPitch(1.0);
-      await flutterTts.speak(
-        filipino
-            ? 'Maghanda na po. Malapit na ang inyong turno.'
-            : 'Please prepare. Your turn is near.',
-      );
+      await QueueVoice.configure(flutterTts, filipino: filipino);
+      await flutterTts.speak(QueueVoice.nearTurnMessage(filipino: filipino));
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -78,9 +74,9 @@ class _CustomerSettingsState extends State<CustomerSettings> {
           autofocus: true,
           textCapitalization: TextCapitalization.words,
           maxLength: 80,
-          decoration: const InputDecoration(
-            labelText: 'Full name',
-            prefixIcon: Icon(Icons.person_outline_rounded),
+          decoration: InputDecoration(
+            labelText: appText('Full name'),
+            prefixIcon: const Icon(Icons.person_outline_rounded),
           ),
         ),
         actions: [
@@ -135,9 +131,9 @@ class _CustomerSettingsState extends State<CustomerSettings> {
           controller: controller,
           autofocus: true,
           keyboardType: TextInputType.emailAddress,
-          decoration: const InputDecoration(
-            labelText: 'New email address',
-            prefixIcon: Icon(Icons.email_outlined),
+          decoration: InputDecoration(
+            labelText: appText('New email address'),
+            prefixIcon: const Icon(Icons.email_outlined),
           ),
         ),
         actions: [
@@ -293,7 +289,9 @@ class _CustomerSettingsState extends State<CustomerSettings> {
             valueListenable: customerVoiceLanguageNotifier,
             builder: (context, value, _) => DropdownButtonFormField<String>(
               initialValue: value,
-              decoration: const InputDecoration(labelText: 'Voice language'),
+              decoration: InputDecoration(
+                labelText: appText('Voice language'),
+              ),
               items: const [
                 DropdownMenuItem(value: 'English', child: Text('English')),
                 DropdownMenuItem(value: 'Filipino', child: Text('Filipino')),
@@ -338,7 +336,9 @@ class _CustomerSettingsState extends State<CustomerSettings> {
         valueListenable: customerAppLanguageNotifier,
         builder: (context, value, _) => DropdownButtonFormField<String>(
           initialValue: value,
-          decoration: const InputDecoration(labelText: 'Preferred language'),
+          decoration: InputDecoration(
+            labelText: appText('Preferred language'),
+          ),
           items: const [
             DropdownMenuItem(value: 'English', child: Text('English')),
             DropdownMenuItem(value: 'Filipino', child: Text('Filipino')),

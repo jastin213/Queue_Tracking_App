@@ -1,8 +1,13 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' hide Text;
+import '../widgets/localized_text.dart';
+import '../services/app_language.dart';
 
 import '../theme/app_theme.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import '../services/document_upload_consent.dart';
 
 import 'customer_register.dart';
 import 'customer_home.dart';
@@ -15,6 +20,8 @@ Color get _cardColor => AppColors.activeSurface;
 Color get _borderColor => AppColors.activeBorder;
 Color get _mutedTextColor => AppColors.activeMutedText;
 
+enum _EmailSignInRecoveryAction { google, resetPassword }
+
 class CustomerLogin extends StatefulWidget {
   const CustomerLogin({super.key});
 
@@ -23,12 +30,18 @@ class CustomerLogin extends StatefulWidget {
 }
 
 class _CustomerLoginState extends State<CustomerLogin> {
+  static Future<void>? googleSignInInitialization;
+
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
 
   bool isLoading = false;
+  bool isGoogleSigningIn = false;
   bool isSendingPasswordReset = false;
   bool obscurePassword = true;
+
+  bool get isAuthenticationBusy =>
+      isLoading || isGoogleSigningIn || isSendingPasswordReset;
 
   @override
   void dispose() {
@@ -51,7 +64,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
     }
 
     if (e.code == "invalid-credential") {
-      return "Invalid email or password.";
+      return "The email or app password is incorrect.";
     }
 
     if (e.code == "network-request-failed") {
@@ -59,6 +72,111 @@ class _CustomerLoginState extends State<CustomerLogin> {
     }
 
     return e.message ?? "Login failed.";
+  }
+
+  bool isEmailCredentialFailure(FirebaseAuthException exception) {
+    return exception.code == "invalid-credential" ||
+        exception.code == "wrong-password" ||
+        exception.code == "user-not-found";
+  }
+
+  Future<_EmailSignInRecoveryAction?> showEmailSignInRecovery() {
+    return showDialog<_EmailSignInRecoveryAction>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          icon: Icon(
+            Icons.account_circle_outlined,
+            color: _primaryColor,
+            size: 38,
+          ),
+          title: const Text("Unable to sign in with email"),
+          content: Text(
+            "The email or app password is incorrect. If you created this "
+            "account using Google, select Continue with Google—your Google "
+            "password cannot be entered in this form. You may also request a "
+            "password-reset link to create or replace the separate password "
+            "used by this app.",
+            style: TextStyle(height: 1.45, color: _mutedTextColor),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text("CANCEL"),
+            ),
+            TextButton.icon(
+              onPressed: () => Navigator.pop(
+                dialogContext,
+                _EmailSignInRecoveryAction.resetPassword,
+              ),
+              icon: const Icon(Icons.lock_reset_rounded),
+              label: const Text("RESET APP PASSWORD"),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(
+                dialogContext,
+                _EmailSignInRecoveryAction.google,
+              ),
+              icon: const Icon(Icons.login_rounded),
+              label: const Text("CONTINUE WITH GOOGLE"),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  String getGoogleSignInErrorMessage(FirebaseAuthException e) {
+    if (e.code == "popup-closed-by-user" ||
+        e.code == "web-context-canceled" ||
+        e.code == "canceled" ||
+        e.code == "cancelled") {
+      return "Google sign-in was cancelled.";
+    }
+
+    if (e.code == "popup-blocked") {
+      return "The Google sign-in window was blocked. Allow pop-ups and try again.";
+    }
+
+    if (e.code == "account-exists-with-different-credential") {
+      return "This Google email is already registered with a password. Sign in with your email and password instead.";
+    }
+
+    if (e.code == "operation-not-allowed") {
+      return "Google sign-in is not enabled for this project yet. Please contact the administrator.";
+    }
+
+    if (e.code == "network-request-failed") {
+      return "Network error. Please check your internet connection.";
+    }
+
+    if (e.code == "too-many-requests") {
+      return "Too many sign-in attempts. Please wait before trying again.";
+    }
+
+    return e.message ?? "Google sign-in failed.";
+  }
+
+  String getNativeGoogleSignInErrorMessage(GoogleSignInException e) {
+    switch (e.code) {
+      case GoogleSignInExceptionCode.canceled:
+        return "Google sign-in was cancelled.";
+      case GoogleSignInExceptionCode.interrupted:
+        return "Google sign-in was interrupted. Please try again.";
+      case GoogleSignInExceptionCode.clientConfigurationError:
+      case GoogleSignInExceptionCode.providerConfigurationError:
+        return "Google sign-in is not configured correctly for this app. Please contact the administrator.";
+      case GoogleSignInExceptionCode.uiUnavailable:
+        return "Google sign-in could not open on this device. Please try again.";
+      default:
+        return e.description ?? "Google sign-in failed.";
+    }
+  }
+
+  bool usesGoogleProvider(User user) {
+    return user.providerData.any(
+      (provider) => provider.providerId == "google.com",
+    );
   }
 
   String getPasswordResetErrorMessage(FirebaseAuthException e) {
@@ -98,7 +216,9 @@ class _CustomerLoginState extends State<CustomerLogin> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  "Enter your registered email. We will send a secure link where you can create a new password.",
+                  "Enter your registered email. We will send a secure link "
+                  "where you can create a separate password for this app. "
+                  "Do not enter or reuse your Google password here.",
                   style: TextStyle(height: 1.4, color: _mutedTextColor),
                 ),
                 const SizedBox(height: 18),
@@ -107,9 +227,9 @@ class _CustomerLoginState extends State<CustomerLogin> {
                   autofocus: true,
                   keyboardType: TextInputType.emailAddress,
                   autofillHints: const [AutofillHints.email],
-                  decoration: const InputDecoration(
-                    labelText: "Email",
-                    prefixIcon: Icon(Icons.email_outlined),
+                  decoration: InputDecoration(
+                    labelText: appText("Email"),
+                    prefixIcon: const Icon(Icons.email_outlined),
                     border: OutlineInputBorder(),
                   ),
                   validator: (value) {
@@ -188,6 +308,255 @@ class _CustomerLoginState extends State<CustomerLogin> {
     }
   }
 
+  Future<Map<String, dynamic>?> createGoogleCustomerProfile(
+    User user, {
+    required bool isNewAuthUser,
+  }) async {
+    if (!usesGoogleProvider(user) ||
+        !user.emailVerified ||
+        (user.email?.trim().isEmpty ?? true)) {
+      await FirebaseAuth.instance.signOut();
+      if (!mounted) return null;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Google could not provide a verified email address. Please choose a different Google account.",
+          ),
+        ),
+      );
+      return null;
+    }
+
+    final consentAccepted = await requestDocumentUploadConsent(context);
+    if (!mounted) return null;
+
+    if (!consentAccepted) {
+      if (isNewAuthUser) {
+        try {
+          await user.delete();
+        } catch (_) {
+          await FirebaseAuth.instance.signOut();
+        }
+      } else {
+        await FirebaseAuth.instance.signOut();
+      }
+
+      if (!mounted) return null;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Account was not created. Document upload authorization is required.",
+          ),
+        ),
+      );
+      return null;
+    }
+
+    final String verifiedEmail = user.email!.trim();
+    final String googleName = user.displayName?.trim().isNotEmpty == true
+        ? user.displayName!.trim()
+        : verifiedEmail.split("@").first;
+    final profile = <String, dynamic>{
+      "uid": user.uid,
+      "fullName": googleName,
+      "email": verifiedEmail,
+      "municipality": "",
+      "role": "customer",
+      "authProvider": "google.com",
+      "emailVerified": true,
+      "documentUploadConsent": true,
+      "documentUploadConsentVersion": documentUploadConsentVersion,
+      "documentUploadConsentAcceptedAt": FieldValue.serverTimestamp(),
+      "createdAt": FieldValue.serverTimestamp(),
+      "updatedAt": FieldValue.serverTimestamp(),
+      "lastLoginAt": FieldValue.serverTimestamp(),
+    };
+
+    await FirebaseFirestore.instance
+        .collection("users")
+        .doc(user.uid)
+        .set(profile);
+    return profile;
+  }
+
+  Future<void> routeAuthenticatedUser(
+    User user, {
+    required String loginEmail,
+    bool allowGoogleProfileCreation = false,
+    bool isNewAuthUser = false,
+  }) async {
+    final profileReference = FirebaseFirestore.instance
+        .collection("users")
+        .doc(user.uid);
+    DocumentSnapshot<Map<String, dynamic>> userDoc = await profileReference
+        .get();
+    Map<String, dynamic>? data = userDoc.data();
+
+    if (data == null && allowGoogleProfileCreation) {
+      data = await createGoogleCustomerProfile(
+        user,
+        isNewAuthUser: isNewAuthUser,
+      );
+    }
+
+    if (data == null) {
+      if (FirebaseAuth.instance.currentUser == null) return;
+      await FirebaseAuth.instance.signOut();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Account profile not found. Please contact support."),
+        ),
+      );
+      return;
+    }
+
+    final String role = (data["role"] ?? "").toString().trim().toLowerCase();
+    if (!mounted) return;
+
+    if (role == "admin") {
+      await profileReference.set({
+        "lastLoginAt": FieldValue.serverTimestamp(),
+        "updatedAt": FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const AdminPage()),
+      );
+      return;
+    }
+
+    if (role == "customer" || role == "user") {
+      if (!user.emailVerified) {
+        try {
+          await user.sendEmailVerification();
+        } on FirebaseAuthException {
+          // A previously sent link may still be valid. Login remains blocked
+          // until Firebase confirms that the address has been verified.
+        }
+        await FirebaseAuth.instance.signOut();
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              "Verify your email before signing in. We sent a verification link to your email address.",
+            ),
+          ),
+        );
+        return;
+      }
+
+      final authEmail = user.email?.trim() ?? loginEmail;
+      final updates = <String, dynamic>{
+        "lastLoginAt": FieldValue.serverTimestamp(),
+        "emailVerified": true,
+        "updatedAt": FieldValue.serverTimestamp(),
+      };
+      if (authEmail.isNotEmpty && data["email"]?.toString() != authEmail) {
+        updates.addAll({
+          "email": authEmail,
+          "pendingEmail": FieldValue.delete(),
+          "emailChangeRequestedAt": FieldValue.delete(),
+        });
+      }
+      await profileReference.set(updates, SetOptions(merge: true));
+
+      loggedInCustomerNameNotifier.value =
+          (data["fullName"] ?? user.displayName ?? "").toString();
+      loggedInCustomerEmailNotifier.value = authEmail;
+      loggedInCustomerIdNotifier.value = user.uid;
+
+      if (!mounted) return;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const CustomerHome()),
+      );
+      return;
+    }
+
+    await FirebaseAuth.instance.signOut();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("Access denied. This account has no valid role."),
+      ),
+    );
+  }
+
+  Future<void> signInWithGoogle() async {
+    setState(() {
+      isGoogleSigningIn = true;
+    });
+
+    try {
+      final provider = GoogleAuthProvider()
+        ..setCustomParameters({"prompt": "select_account"});
+      final UserCredential credential;
+      if (kIsWeb) {
+        credential = await FirebaseAuth.instance.signInWithPopup(provider);
+      } else {
+        final GoogleSignIn googleSignIn = GoogleSignIn.instance;
+        await (googleSignInInitialization ??= googleSignIn.initialize());
+
+        final GoogleSignInAccount googleAccount = await googleSignIn
+            .authenticate();
+        final String? idToken = googleAccount.authentication.idToken;
+        if (idToken == null || idToken.isEmpty) {
+          throw FirebaseAuthException(
+            code: "missing-google-id-token",
+            message: "Google did not return a secure ID token.",
+          );
+        }
+
+        final OAuthCredential googleCredential = GoogleAuthProvider.credential(
+          idToken: idToken,
+        );
+        credential = await FirebaseAuth.instance.signInWithCredential(
+          googleCredential,
+        );
+      }
+      final User? user = credential.user;
+
+      if (user == null) {
+        throw FirebaseAuthException(
+          code: "user-not-found",
+          message: "Google account was not returned.",
+        );
+      }
+
+      await routeAuthenticatedUser(
+        user,
+        loginEmail: user.email?.trim() ?? "",
+        allowGoogleProfileCreation: true,
+        isNewAuthUser: credential.additionalUserInfo?.isNewUser ?? false,
+      );
+    } on GoogleSignInException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(getNativeGoogleSignInErrorMessage(e))),
+      );
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(getGoogleSignInErrorMessage(e))));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Google sign-in failed: $e")));
+    } finally {
+      if (mounted) {
+        setState(() {
+          isGoogleSigningIn = false;
+        });
+      }
+    }
+  }
+
   Future<void> login() async {
     final String email = emailController.text.trim();
     final String password = passwordController.text.trim();
@@ -206,7 +575,6 @@ class _CustomerLoginState extends State<CustomerLogin> {
     try {
       final UserCredential credential = await FirebaseAuth.instance
           .signInWithEmailAndPassword(email: email, password: password);
-
       final User? user = credential.user;
 
       if (user == null) {
@@ -216,90 +584,34 @@ class _CustomerLoginState extends State<CustomerLogin> {
         );
       }
 
-      final DocumentSnapshot<Map<String, dynamic>> userDoc =
-          await FirebaseFirestore.instance
-              .collection("users")
-              .doc(user.uid)
-              .get();
-
-      if (!userDoc.exists || userDoc.data() == null) {
-        await FirebaseAuth.instance.signOut();
-
-        if (!mounted) return;
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Account profile not found. Please contact support."),
-          ),
-        );
-        return;
-      }
-
-      final data = userDoc.data()!;
-      final String role = (data["role"] ?? "").toString().trim().toLowerCase();
-
-      if (!mounted) return;
-
-      if (role == "admin") {
-        await FirebaseFirestore.instance.collection("users").doc(user.uid).set({
-          "lastLoginAt": FieldValue.serverTimestamp(),
-          "updatedAt": FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-
-        if (!mounted) return;
-
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const AdminPage()),
-        );
-        return;
-      }
-
-      if (role == "customer" || role == "user") {
-        final authEmail = user.email?.trim() ?? email;
-        if (authEmail.isNotEmpty && data["email"]?.toString() != authEmail) {
-          await FirebaseFirestore.instance
-              .collection("users")
-              .doc(user.uid)
-              .set({
-                "email": authEmail,
-                "pendingEmail": FieldValue.delete(),
-                "emailChangeRequestedAt": FieldValue.delete(),
-                "updatedAt": FieldValue.serverTimestamp(),
-              }, SetOptions(merge: true));
-        }
-
-        loggedInCustomerNameNotifier.value =
-            (data["fullName"] ?? user.displayName ?? "").toString();
-        loggedInCustomerEmailNotifier.value = authEmail;
-        loggedInCustomerIdNotifier.value = user.uid;
-
-        if (!mounted) return;
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const CustomerHome()),
-        );
-        return;
-      }
-
-      await FirebaseAuth.instance.signOut();
-
-      if (!mounted) return;
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Access denied. This account has no valid role."),
-        ),
+      await user.reload();
+      await routeAuthenticatedUser(
+        FirebaseAuth.instance.currentUser ?? user,
+        loginEmail: email,
       );
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(getFirebaseErrorMessage(e))));
+      if (isEmailCredentialFailure(e)) {
+        final recoveryAction = await showEmailSignInRecovery();
+        if (!mounted || recoveryAction == null) return;
+
+        setState(() {
+          isLoading = false;
+        });
+
+        if (recoveryAction == _EmailSignInRecoveryAction.google) {
+          await signInWithGoogle();
+        } else {
+          await resetPassword();
+        }
+      } else {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(getFirebaseErrorMessage(e))));
+      }
     } catch (e) {
       if (!mounted) return;
-
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text("Login failed: $e")));
@@ -319,8 +631,8 @@ class _CustomerLoginState extends State<CustomerLogin> {
     Widget? suffixIcon,
   }) {
     return InputDecoration(
-      labelText: label,
-      hintText: hint,
+      labelText: appText(label),
+      hintText: appText(hint),
       prefixIcon: Icon(icon, color: _primaryColor),
       suffixIcon: suffixIcon,
       labelStyle: TextStyle(
@@ -340,6 +652,16 @@ class _CustomerLoginState extends State<CustomerLogin> {
         borderRadius: BorderRadius.circular(16),
         borderSide: BorderSide(color: _primaryColor, width: 1.5),
       ),
+    );
+  }
+
+  Widget webStaticLogin(Widget child) {
+    if (!kIsWeb) return child;
+
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      alignment: Alignment.center,
+      child: child,
     );
   }
 
@@ -376,345 +698,430 @@ class _CustomerLoginState extends State<CustomerLogin> {
             child: ScrollConfiguration(
               behavior: ScrollConfiguration.of(
                 context,
-              ).copyWith(overscroll: false),
-              child: SingleChildScrollView(
-                physics: const ClampingScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
-                child: Column(
-                  children: [
-                    Container(
-                      height: 92,
-                      width: 92,
-                      decoration: BoxDecoration(
-                        color: _primaryColor,
-                        borderRadius: BorderRadius.circular(28),
-                        boxShadow: [
-                          BoxShadow(
-                            color: _primaryColor.withValues(alpha: 0.16),
-                            blurRadius: 18,
-                          ),
-                        ],
+              ).copyWith(overscroll: false, scrollbars: !kIsWeb),
+              child: webStaticLogin(
+                SingleChildScrollView(
+                  physics: kIsWeb
+                      ? const NeverScrollableScrollPhysics()
+                      : const ClampingScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
+                  child: Column(
+                    children: [
+                      Container(
+                        height: 92,
+                        width: 92,
+                        decoration: BoxDecoration(
+                          color: _primaryColor,
+                          borderRadius: BorderRadius.circular(28),
+                          boxShadow: [
+                            BoxShadow(
+                              color: _primaryColor.withValues(alpha: 0.16),
+                              blurRadius: 18,
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.account_circle_rounded,
+                          color: Colors.white,
+                          size: 50,
+                        ),
                       ),
-                      child: const Icon(
-                        Icons.account_circle_rounded,
-                        color: Colors.white,
-                        size: 50,
+
+                      const SizedBox(height: 22),
+
+                      Text(
+                        "Account Login",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w800,
+                          color: _primaryColor,
+                          letterSpacing: 0.8,
+                        ),
                       ),
-                    ),
 
-                    const SizedBox(height: 22),
+                      const SizedBox(height: 8),
 
-                    Text(
-                      "Account Login",
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w800,
-                        color: _primaryColor,
-                        letterSpacing: 0.8,
+                      Text(
+                        "Continue as a walk-in, or use your registered account.",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 14.5,
+                          height: 1.4,
+                          color: _mutedTextColor,
+                        ),
                       ),
-                    ),
 
-                    const SizedBox(height: 8),
+                      const SizedBox(height: 28),
 
-                    Text(
-                      "Continue as a walk-in, or use your registered account.",
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontSize: 14.5,
-                        height: 1.4,
-                        color: _mutedTextColor,
-                      ),
-                    ),
-
-                    const SizedBox(height: 28),
-
-                    Container(
-                      width: double.infinity,
-                      constraints: const BoxConstraints(maxWidth: 380),
-                      padding: const EdgeInsets.all(18),
-                      decoration: BoxDecoration(
-                        color: _primaryColor,
-                        borderRadius: BorderRadius.circular(24),
-                        boxShadow: [
-                          BoxShadow(
-                            color: _primaryColor.withValues(alpha: 0.16),
-                            blurRadius: 18,
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Row(
-                            children: [
-                              Icon(
-                                Icons.directions_walk_rounded,
-                                color: Colors.white,
-                                size: 30,
-                              ),
-                              SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  "Walk-In Customer",
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w800,
+                      Container(
+                        width: double.infinity,
+                        constraints: const BoxConstraints(maxWidth: 380),
+                        padding: const EdgeInsets.all(18),
+                        decoration: BoxDecoration(
+                          color: _primaryColor,
+                          borderRadius: BorderRadius.circular(24),
+                          boxShadow: [
+                            BoxShadow(
+                              color: _primaryColor.withValues(alpha: 0.16),
+                              blurRadius: 18,
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Row(
+                              children: [
+                                Icon(
+                                  Icons.directions_walk_rounded,
+                                  color: Colors.white,
+                                  size: 30,
+                                ),
+                                SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    "Walk-In Customer",
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w800,
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          const Text(
-                            "Get your queue number at the center, then track your position here without an account.",
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 13.5,
-                              height: 1.4,
-                              fontWeight: FontWeight.w600,
+                              ],
                             ),
-                          ),
-                          const SizedBox(height: 16),
-                          SizedBox(
-                            width: double.infinity,
-                            height: 50,
-                            child: FilledButton.icon(
-                              style: FilledButton.styleFrom(
-                                backgroundColor: Colors.white,
-                                foregroundColor: _primaryColor,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                              ),
-                              onPressed: isLoading || isSendingPasswordReset
-                                  ? null
-                                  : () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (_) => const TrackPage(
-                                            isWalkInTracking: true,
-                                          ),
-                                        ),
-                                      );
-                                    },
-                              icon: const Icon(Icons.search_rounded),
-                              label: const Text(
-                                "CONTINUE AS WALK-IN",
-                                style: TextStyle(fontWeight: FontWeight.w800),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 18),
-
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        SizedBox(
-                          width: 50,
-                          child: Divider(color: _borderColor),
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          child: Text(
-                            "ACCOUNT",
-                            style: TextStyle(
-                              color: _mutedTextColor,
-                              fontSize: 12,
-                              letterSpacing: 1.2,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                        SizedBox(
-                          width: 50,
-                          child: Divider(color: _borderColor),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 18),
-
-                    Container(
-                      width: double.infinity,
-                      constraints: const BoxConstraints(maxWidth: 380),
-                      padding: const EdgeInsets.all(22),
-                      decoration: BoxDecoration(
-                        color: _cardColor,
-                        borderRadius: BorderRadius.circular(26),
-                        border: Border.all(color: _borderColor),
-                        boxShadow: [
-                          BoxShadow(
-                            color: _primaryColor.withValues(alpha: 0.08),
-                            blurRadius: 18,
-                          ),
-                        ],
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: Text(
-                              "Login or Create Account",
+                            const SizedBox(height: 10),
+                            const Text(
+                              "Get your queue number at the center, then track your position here without an account.",
                               style: TextStyle(
-                                color: _primaryColor,
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
+                                color: Colors.white70,
+                                fontSize: 13.5,
+                                height: 1.4,
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
-                          ),
-
-                          const SizedBox(height: 20),
-
-                          TextField(
-                            controller: emailController,
-                            keyboardType: TextInputType.emailAddress,
-                            style: TextStyle(
-                              color: _primaryColor,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            decoration: formDecoration(
-                              label: "Email",
-                              hint: "Enter your email address",
-                              icon: Icons.email_outlined,
-                            ),
-                          ),
-
-                          const SizedBox(height: 16),
-
-                          TextField(
-                            controller: passwordController,
-                            obscureText: obscurePassword,
-                            enableSuggestions: false,
-                            autocorrect: false,
-                            style: TextStyle(
-                              color: _primaryColor,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            decoration: formDecoration(
-                              label: "Password",
-                              hint: "Enter your password",
-                              icon: Icons.lock_outline_rounded,
-                              suffixIcon: IconButton(
-                                tooltip: obscurePassword
-                                    ? "Show password"
-                                    : "Hide password",
-                                onPressed: isLoading
-                                    ? null
-                                    : () {
-                                        setState(() {
-                                          obscurePassword = !obscurePassword;
-                                        });
-                                      },
-                                icon: Icon(
-                                  obscurePassword
-                                      ? Icons.visibility_off_rounded
-                                      : Icons.visibility_rounded,
-                                  color: _primaryColor,
+                            const SizedBox(height: 16),
+                            SizedBox(
+                              width: double.infinity,
+                              height: 50,
+                              child: FilledButton.icon(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: Colors.white,
+                                  foregroundColor: _primaryColor,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
                                 ),
-                              ),
-                            ),
-                          ),
-
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton(
-                              onPressed: isLoading || isSendingPasswordReset
-                                  ? null
-                                  : resetPassword,
-                              child: Text(
-                                isSendingPasswordReset
-                                    ? "Sending reset link..."
-                                    : "Forgot Password?",
-                                style: TextStyle(
-                                  color: _primaryColor,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                          ),
-
-                          const SizedBox(height: 8),
-
-                          SizedBox(
-                            width: double.infinity,
-                            height: 55,
-                            child: ElevatedButton(
-                              onPressed: isLoading || isSendingPasswordReset
-                                  ? null
-                                  : login,
-                              child: isLoading
-                                  ? const SizedBox(
-                                      height: 22,
-                                      width: 22,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2.5,
-                                        color: Colors.white,
-                                      ),
-                                    )
-                                  : const Text("LOGIN"),
-                            ),
-                          ),
-
-                          const SizedBox(height: 14),
-
-                          Wrap(
-                            alignment: WrapAlignment.center,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              Text(
-                                "No account yet?",
-                                style: TextStyle(
-                                  color: _mutedTextColor,
-                                  fontSize: 13.5,
-                                ),
-                              ),
-                              TextButton(
-                                onPressed: isLoading
+                                onPressed: isAuthenticationBusy
                                     ? null
                                     : () {
                                         Navigator.push(
                                           context,
                                           MaterialPageRoute(
-                                            builder: (_) =>
-                                                const CustomerRegister(),
+                                            builder: (_) => const TrackPage(
+                                              isWalkInTracking: true,
+                                            ),
                                           ),
                                         );
                                       },
-                                child: Text(
-                                  "Create Account",
-                                  style: TextStyle(
-                                    color: _primaryColor,
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                                icon: const Icon(Icons.search_rounded),
+                                label: const Text(
+                                  "CONTINUE AS WALK-IN",
+                                  style: TextStyle(fontWeight: FontWeight.w800),
                                 ),
                               ),
-                            ],
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      const SizedBox(height: 18),
+
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 50,
+                            child: Divider(color: _borderColor),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            child: Text(
+                              "ACCOUNT",
+                              style: TextStyle(
+                                color: _mutedTextColor,
+                                fontSize: 12,
+                                letterSpacing: 1.2,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          SizedBox(
+                            width: 50,
+                            child: Divider(color: _borderColor),
                           ),
                         ],
                       ),
-                    ),
 
-                    const SizedBox(height: 24),
+                      const SizedBox(height: 18),
 
-                    Text(
-                      "Queue · Appointment · Tracking",
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: _mutedTextColor,
-                        fontSize: 13.5,
-                        letterSpacing: 1.2,
-                        fontWeight: FontWeight.w600,
+                      Container(
+                        width: double.infinity,
+                        constraints: const BoxConstraints(maxWidth: 380),
+                        padding: const EdgeInsets.all(22),
+                        decoration: BoxDecoration(
+                          color: _cardColor,
+                          borderRadius: BorderRadius.circular(26),
+                          border: Border.all(color: _borderColor),
+                          boxShadow: [
+                            BoxShadow(
+                              color: _primaryColor.withValues(alpha: 0.08),
+                              blurRadius: 18,
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                "Login or Create Account",
+                                style: TextStyle(
+                                  color: _primaryColor,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+
+                            const SizedBox(height: 16),
+
+                            SizedBox(
+                              width: double.infinity,
+                              height: 52,
+                              child: OutlinedButton(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: _primaryColor,
+                                  backgroundColor: _cardColor,
+                                  side: BorderSide(color: _borderColor),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                ),
+                                onPressed: isAuthenticationBusy
+                                    ? null
+                                    : signInWithGoogle,
+                                child: isGoogleSigningIn
+                                    ? SizedBox(
+                                        height: 21,
+                                        width: 21,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2.4,
+                                          color: _primaryColor,
+                                        ),
+                                      )
+                                    : const Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          Text(
+                                            "G",
+                                            style: TextStyle(
+                                              color: Color(0xFF4285F4),
+                                              fontSize: 22,
+                                              fontWeight: FontWeight.w900,
+                                            ),
+                                          ),
+                                          SizedBox(width: 10),
+                                          Flexible(
+                                            child: FittedBox(
+                                              fit: BoxFit.scaleDown,
+                                              child: Text(
+                                                "CONTINUE WITH GOOGLE",
+                                                maxLines: 1,
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.w800,
+                                                  letterSpacing: 0.3,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                              ),
+                            ),
+
+                            const SizedBox(height: 16),
+
+                            Row(
+                              children: [
+                                Expanded(child: Divider(color: _borderColor)),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                  ),
+                                  child: Text(
+                                    "OR SIGN IN WITH EMAIL",
+                                    style: TextStyle(
+                                      color: _mutedTextColor,
+                                      fontSize: 11,
+                                      letterSpacing: 0.8,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(child: Divider(color: _borderColor)),
+                              ],
+                            ),
+
+                            const SizedBox(height: 16),
+
+                            TextField(
+                              controller: emailController,
+                              keyboardType: TextInputType.emailAddress,
+                              style: TextStyle(
+                                color: _primaryColor,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              decoration: formDecoration(
+                                label: "Email",
+                                hint: "Enter your email address",
+                                icon: Icons.email_outlined,
+                              ),
+                            ),
+
+                            const SizedBox(height: 16),
+
+                            TextField(
+                              controller: passwordController,
+                              obscureText: obscurePassword,
+                              enableSuggestions: false,
+                              autocorrect: false,
+                              style: TextStyle(
+                                color: _primaryColor,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              decoration: formDecoration(
+                                label: "Password",
+                                hint: "Enter your password",
+                                icon: Icons.lock_outline_rounded,
+                                suffixIcon: IconButton(
+                                  tooltip: obscurePassword
+                                      ? "Show password"
+                                      : "Hide password",
+                                  onPressed: isAuthenticationBusy
+                                      ? null
+                                      : () {
+                                          setState(() {
+                                            obscurePassword = !obscurePassword;
+                                          });
+                                        },
+                                  icon: Icon(
+                                    obscurePassword
+                                        ? Icons.visibility_off_rounded
+                                        : Icons.visibility_rounded,
+                                    color: _primaryColor,
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton(
+                                onPressed: isAuthenticationBusy
+                                    ? null
+                                    : resetPassword,
+                                child: Text(
+                                  isSendingPasswordReset
+                                      ? "Sending reset link..."
+                                      : "Forgot Password?",
+                                  style: TextStyle(
+                                    color: _primaryColor,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ),
+
+                            const SizedBox(height: 8),
+
+                            SizedBox(
+                              width: double.infinity,
+                              height: 55,
+                              child: ElevatedButton(
+                                onPressed: isAuthenticationBusy ? null : login,
+                                child: isLoading
+                                    ? const SizedBox(
+                                        height: 22,
+                                        width: 22,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2.5,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                    : const Text("LOGIN"),
+                              ),
+                            ),
+
+                            const SizedBox(height: 14),
+
+                            Wrap(
+                              alignment: WrapAlignment.center,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                Text(
+                                  "No account yet?",
+                                  style: TextStyle(
+                                    color: _mutedTextColor,
+                                    fontSize: 13.5,
+                                  ),
+                                ),
+                                TextButton(
+                                  onPressed: isAuthenticationBusy
+                                      ? null
+                                      : () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  const CustomerRegister(),
+                                            ),
+                                          );
+                                        },
+                                  child: Text(
+                                    "Create Account",
+                                    style: TextStyle(
+                                      color: _primaryColor,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
+
+                      const SizedBox(height: 24),
+
+                      Text(
+                        "Queue · Appointment · Tracking",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: _mutedTextColor,
+                          fontSize: 13.5,
+                          letterSpacing: 1.2,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),

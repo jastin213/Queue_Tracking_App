@@ -1,6 +1,8 @@
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' hide Text;
+import 'localized_text.dart';
 
 import '../theme/app_theme.dart';
 import 'app_motion.dart';
@@ -9,7 +11,7 @@ const Color _analyticsAppointmentColor = Color(0xFF8B5CF6);
 
 enum AnalyticsChartType { line, bar }
 
-class AnalyticsLineChart extends StatelessWidget {
+class AnalyticsLineChart extends StatefulWidget {
   const AnalyticsLineChart({
     super.key,
     required this.labels,
@@ -30,10 +32,44 @@ class AnalyticsLineChart extends StatelessWidget {
   final AnalyticsChartType chartType;
 
   @override
+  State<AnalyticsLineChart> createState() => _AnalyticsLineChartState();
+}
+
+class _AnalyticsLineChartState extends State<AnalyticsLineChart> {
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _positionAtLatestMonth();
+  }
+
+  @override
+  void didUpdateWidget(covariant AnalyticsLineChart oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!listEquals(oldWidget.labels, widget.labels)) {
+      _positionAtLatestMonth();
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _positionAtLatestMonth() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Semantics(
       label:
-          "${chartType == AnalyticsChartType.line ? 'Line' : 'Bar'} graph comparing monthly served customers, appointments, walk-ins, passed customers, and failed customers",
+          "${widget.chartType == AnalyticsChartType.line ? 'Line' : 'Bar'} graph comparing monthly served customers, appointments, walk-ins, passed customers, and failed customers",
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.fromLTRB(12, 16, 12, 10),
@@ -60,22 +96,52 @@ class AnalyticsLineChart extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 10),
-            AppChartReveal(
-              key: ValueKey(chartType),
-              child: SizedBox(
-                height: 245,
-                child: CustomPaint(
-                  painter: _AnalyticsLineChartPainter(
-                    labels: labels,
-                    servedValues: servedValues,
-                    appointmentValues: appointmentValues,
-                    walkInValues: walkInValues,
-                    passedValues: passedValues,
-                    failedValues: failedValues,
-                    chartType: chartType,
-                  ),
-                  child: const SizedBox.expand(),
-                ),
+            SizedBox(
+              height: 263,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final monthWidth = math.max(120.0, constraints.maxWidth / 6);
+                  final contentWidth = math.max(
+                    constraints.maxWidth,
+                    widget.labels.length * monthWidth,
+                  );
+                  final canScroll = contentWidth > constraints.maxWidth;
+
+                  return Scrollbar(
+                    controller: _scrollController,
+                    thumbVisibility: canScroll,
+                    trackVisibility: canScroll,
+                    interactive: true,
+                    thickness: 7,
+                    radius: const Radius.circular(8),
+                    scrollbarOrientation: ScrollbarOrientation.bottom,
+                    child: SingleChildScrollView(
+                      controller: _scrollController,
+                      scrollDirection: Axis.horizontal,
+                      physics: const ClampingScrollPhysics(),
+                      padding: const EdgeInsets.only(bottom: 18),
+                      child: SizedBox(
+                        width: contentWidth,
+                        height: 245,
+                        child: AppChartReveal(
+                          key: ValueKey(widget.chartType),
+                          child: CustomPaint(
+                            painter: _AnalyticsLineChartPainter(
+                              labels: widget.labels,
+                              servedValues: widget.servedValues,
+                              appointmentValues: widget.appointmentValues,
+                              walkInValues: widget.walkInValues,
+                              passedValues: widget.passedValues,
+                              failedValues: widget.failedValues,
+                              chartType: widget.chartType,
+                            ),
+                            child: const SizedBox.expand(),
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
           ],
@@ -166,21 +232,23 @@ class _AnalyticsLineChartPainter extends CustomPainter {
       ...failedValues,
     ];
     final rawMax = allValues.isEmpty ? 0 : allValues.reduce(math.max);
-    final maxValue = math.max(4, rawMax);
+    final maxValue = math.max(10, ((rawMax + 9) ~/ 10) * 10);
 
     final gridPaint = Paint()
       ..color = _gridColor
       ..strokeWidth = 1;
 
-    for (int index = 0; index <= 4; index++) {
-      final fraction = index / 4;
+    final gridIntervalCount = maxValue ~/ 10;
+    for (int index = 0; index <= gridIntervalCount; index++) {
+      final gridValue = index * 10;
+      final fraction = gridValue / maxValue;
       final y = chartBottom - (chartHeight * fraction);
 
       canvas.drawLine(Offset(left, y), Offset(left + chartWidth, y), gridPaint);
 
       _paintText(
         canvas,
-        (maxValue * fraction).round().toString(),
+        gridValue.toString(),
         Offset(0, y - 7),
         const Size(32, 16),
         TextAlign.right,
