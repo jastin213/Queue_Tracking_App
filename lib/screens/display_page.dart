@@ -24,6 +24,22 @@ Uri displayPageUri(Uri currentUri) {
   return currentUri.replace(fragment: displayPageRoute);
 }
 
+bool isDisplayPageLaunch(Uri currentUri, {String? initialRouteName}) {
+  String normalizedRoute(String value) {
+    final withoutQuery = value.split('?').first.trim();
+    if (withoutQuery.isEmpty) return '/';
+    return withoutQuery.startsWith('/') ? withoutQuery : '/$withoutQuery';
+  }
+
+  final routeName = normalizedRoute(initialRouteName ?? '');
+  final fragmentRoute = normalizedRoute(currentUri.fragment);
+  final pathRoute = normalizedRoute(currentUri.path);
+
+  return routeName == displayPageRoute ||
+      fragmentRoute == displayPageRoute ||
+      pathRoute == displayPageRoute;
+}
+
 // Used only for display estimate.
 const int _estimatedMinutesPerCustomer = 9;
 const int displayWaitingQueueLimit = 4;

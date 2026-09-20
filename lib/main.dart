@@ -4,7 +4,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'firebase_options.dart';
 import 'screens/display_page.dart';
-import 'screens/home_page.dart';
+import 'screens/splash_screen.dart';
 import 'services/app_language.dart';
 import 'services/customer_preferences.dart';
 import 'theme/app_theme.dart';
@@ -22,6 +22,24 @@ Future<void> main() async {
 
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
+
+  List<Route<dynamic>> _initialRoutes(String initialRouteName) {
+    if (isDisplayPageLaunch(Uri.base, initialRouteName: initialRouteName)) {
+      return [
+        MaterialPageRoute<void>(
+          settings: const RouteSettings(name: displayPageRoute),
+          builder: (_) => const DisplayPage(showBackButton: false),
+        ),
+      ];
+    }
+
+    return [
+      MaterialPageRoute<void>(
+        settings: const RouteSettings(name: '/'),
+        builder: (_) => const SplashScreen(),
+      ),
+    ];
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -45,8 +63,9 @@ class MyApp extends StatelessWidget {
               GlobalWidgetsLocalizations.delegate,
               GlobalCupertinoLocalizations.delegate,
             ],
-            home: const HomePage(),
+            onGenerateInitialRoutes: _initialRoutes,
             routes: {
+              '/': (_) => const SplashScreen(),
               displayPageRoute: (_) => const DisplayPage(showBackButton: false),
             },
           );

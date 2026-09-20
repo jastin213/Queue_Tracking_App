@@ -20,6 +20,7 @@ Future<void> pumpLoginApp(WidgetTester tester) async {
   SharedPreferences.setMockInitialValues({});
   await completeCustomerOnboarding();
   await tester.pumpWidget(const MyApp());
+  await tester.pump(const Duration(milliseconds: 2300));
   await tester.pumpAndSettle();
 }
 
@@ -100,6 +101,32 @@ void main() {
     );
 
     expect(uri.toString(), 'https://npjn-queue-system-jkr.web.app/#/display');
+  });
+
+  test('direct display launches bypass the normal startup flow', () {
+    expect(
+      isDisplayPageLaunch(
+        Uri.parse('https://npjn-queue-system-jkr.web.app/#/display'),
+      ),
+      isTrue,
+    );
+    expect(
+      isDisplayPageLaunch(
+        Uri.parse('https://npjn-queue-system-jkr.web.app/display'),
+      ),
+      isTrue,
+    );
+    expect(
+      isDisplayPageLaunch(
+        Uri.parse('https://npjn-queue-system-jkr.web.app/'),
+        initialRouteName: '/display',
+      ),
+      isTrue,
+    );
+    expect(
+      isDisplayPageLaunch(Uri.parse('https://npjn-queue-system-jkr.web.app/')),
+      isFalse,
+    );
   });
 
   test('public display limits the visible upcoming queue numbers', () {

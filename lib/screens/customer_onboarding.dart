@@ -127,12 +127,26 @@ class _CustomerOnboardingState extends State<CustomerOnboarding> {
                           ],
                         ),
                       ),
-                      Text(
-                        '${_currentPage + 1}/${_pages.length}',
-                        style: TextStyle(
-                          color: muted,
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w800,
+                      AnimatedSwitcher(
+                        duration: AppMotion.standard,
+                        transitionBuilder: (child, animation) => FadeTransition(
+                          opacity: animation,
+                          child: SlideTransition(
+                            position: Tween<Offset>(
+                              begin: const Offset(0, 0.35),
+                              end: Offset.zero,
+                            ).animate(animation),
+                            child: child,
+                          ),
+                        ),
+                        child: Text(
+                          '${_currentPage + 1}/${_pages.length}',
+                          key: ValueKey(_currentPage),
+                          style: TextStyle(
+                            color: muted,
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
                       ),
                     ],
@@ -199,54 +213,59 @@ class _CustomerOnboardingState extends State<CustomerOnboarding> {
                         ),
                       ),
                       const Spacer(),
-                      SizedBox(
-                        width: 158,
-                        height: 50,
-                        child: FilledButton(
-                          onPressed: _isFinishing ? null : _nextPage,
-                          style: FilledButton.styleFrom(
-                            backgroundColor: primary,
-                            foregroundColor: Colors.white,
-                            elevation: 2,
-                            shadowColor: primary.withValues(alpha: 0.22),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
+                      AnimatedScale(
+                        scale: isLastPage ? 1.035 : 1,
+                        duration: const Duration(milliseconds: 380),
+                        curve: Curves.easeOutBack,
+                        child: SizedBox(
+                          width: 158,
+                          height: 50,
+                          child: FilledButton(
+                            onPressed: _isFinishing ? null : _nextPage,
+                            style: FilledButton.styleFrom(
+                              backgroundColor: primary,
+                              foregroundColor: Colors.white,
+                              elevation: 2,
+                              shadowColor: primary.withValues(alpha: 0.22),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
                             ),
-                          ),
-                          child: AnimatedSwitcher(
-                            duration: AppMotion.quick,
-                            child: _isFinishing
-                                ? const SizedBox(
-                                    key: ValueKey('loading'),
-                                    width: 20,
-                                    height: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2.3,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : FittedBox(
-                                    key: ValueKey(isLastPage),
-                                    fit: BoxFit.scaleDown,
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Text(
-                                          isLastPage ? 'Get Started' : 'Next',
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w900,
+                            child: AnimatedSwitcher(
+                              duration: AppMotion.quick,
+                              child: _isFinishing
+                                  ? const SizedBox(
+                                      key: ValueKey('loading'),
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2.3,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : FittedBox(
+                                      key: ValueKey(isLastPage),
+                                      fit: BoxFit.scaleDown,
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            isLastPage ? 'Get Started' : 'Next',
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w900,
+                                            ),
                                           ),
-                                        ),
-                                        const SizedBox(width: 7),
-                                        Icon(
-                                          isLastPage
-                                              ? Icons.check_rounded
-                                              : Icons.arrow_forward_rounded,
-                                          size: 19,
-                                        ),
-                                      ],
+                                          const SizedBox(width: 7),
+                                          Icon(
+                                            isLastPage
+                                                ? Icons.check_rounded
+                                                : Icons.arrow_forward_rounded,
+                                            size: 19,
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                  ),
+                            ),
                           ),
                         ),
                       ),
@@ -276,11 +295,64 @@ class _OnboardingContent {
   final _OnboardingIllustration illustration;
 }
 
-class _OnboardingSlide extends StatelessWidget {
+class _OnboardingSlide extends StatefulWidget {
   const _OnboardingSlide({required this.content, required this.active});
 
   final _OnboardingContent content;
   final bool active;
+
+  @override
+  State<_OnboardingSlide> createState() => _OnboardingSlideState();
+}
+
+class _OnboardingSlideState extends State<_OnboardingSlide>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _entranceController;
+  late final Animation<double> _illustrationEntrance;
+  late final Animation<double> _titleEntrance;
+  late final Animation<double> _descriptionEntrance;
+
+  @override
+  void initState() {
+    super.initState();
+    _entranceController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 820),
+    );
+    _illustrationEntrance = CurvedAnimation(
+      parent: _entranceController,
+      curve: const Interval(0, 0.72, curve: Curves.easeOutBack),
+    );
+    _titleEntrance = CurvedAnimation(
+      parent: _entranceController,
+      curve: const Interval(0.22, 0.82, curve: Curves.easeOutCubic),
+    );
+    _descriptionEntrance = CurvedAnimation(
+      parent: _entranceController,
+      curve: const Interval(0.38, 1, curve: Curves.easeOutCubic),
+    );
+    if (widget.active) _entranceController.forward();
+  }
+
+  @override
+  void didUpdateWidget(covariant _OnboardingSlide oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.active && !oldWidget.active) {
+      _entranceController.forward(from: 0);
+    } else if (!widget.active && oldWidget.active) {
+      _entranceController.animateBack(
+        0,
+        duration: const Duration(milliseconds: 160),
+        curve: Curves.easeInCubic,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _entranceController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -294,67 +366,149 @@ class _OnboardingSlide extends StatelessWidget {
           math.max(220.0, constraints.maxHeight * 0.61),
         );
 
-        return SingleChildScrollView(
-          physics: const ClampingScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(22, 10, 22, 10),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: constraints.maxHeight - 20),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                AnimatedOpacity(
-                  opacity: active ? 1 : 0.45,
-                  duration: AppMotion.standard,
-                  child: AnimatedScale(
-                    scale: active ? 1 : 0.94,
-                    duration: const Duration(milliseconds: 420),
-                    curve: AppMotion.emphasizedCurve,
-                    child: SizedBox(
-                      height: illustrationHeight,
-                      width: double.infinity,
-                      child: _IllustrationFrame(type: content.illustration),
+        return AnimatedBuilder(
+          animation: _entranceController,
+          builder: (context, child) {
+            final illustrationValue = _illustrationEntrance.value;
+            final titleValue = _titleEntrance.value;
+            final descriptionValue = _descriptionEntrance.value;
+
+            return SingleChildScrollView(
+              physics: const ClampingScrollPhysics(),
+              padding: const EdgeInsets.fromLTRB(22, 10, 22, 10),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: constraints.maxHeight - 20,
+                ),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Opacity(
+                      opacity: (0.28 + (illustrationValue * 0.72)).clamp(
+                        0.0,
+                        1.0,
+                      ),
+                      child: Transform.translate(
+                        offset: Offset(0, 28 * (1 - illustrationValue)),
+                        child: Transform.rotate(
+                          angle:
+                              math.sin(_entranceController.value * math.pi) *
+                              0.012,
+                          child: Transform.scale(
+                            scale: 0.9 + (illustrationValue * 0.1),
+                            child: SizedBox(
+                              height: illustrationHeight,
+                              width: double.infinity,
+                              child: _IllustrationFrame(
+                                type: widget.content.illustration,
+                                active: widget.active,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-                const SizedBox(height: 22),
-                Text(
-                  content.title,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: primary,
-                    fontSize: 25,
-                    height: 1.15,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: -0.35,
-                  ),
-                ),
-                const SizedBox(height: 11),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 470),
-                  child: Text(
-                    content.description,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: muted,
-                      fontSize: 15,
-                      height: 1.5,
-                      fontWeight: FontWeight.w600,
+                    const SizedBox(height: 22),
+                    Opacity(
+                      opacity: titleValue.clamp(0.0, 1.0),
+                      child: Transform.translate(
+                        offset: Offset(0, 18 * (1 - titleValue)),
+                        child: Text(
+                          widget.content.title,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: primary,
+                            fontSize: 25,
+                            height: 1.15,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.35,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
+                    const SizedBox(height: 11),
+                    Opacity(
+                      opacity: descriptionValue.clamp(0.0, 1.0),
+                      child: Transform.translate(
+                        offset: Offset(0, 14 * (1 - descriptionValue)),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 470),
+                          child: Text(
+                            widget.content.description,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: muted,
+                              fontSize: 15,
+                              height: 1.5,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         );
       },
     );
   }
 }
 
-class _IllustrationFrame extends StatelessWidget {
-  const _IllustrationFrame({required this.type});
+class _IllustrationFrame extends StatefulWidget {
+  const _IllustrationFrame({required this.type, required this.active});
 
   final _OnboardingIllustration type;
+  final bool active;
+
+  @override
+  State<_IllustrationFrame> createState() => _IllustrationFrameState();
+}
+
+class _IllustrationFrameState extends State<_IllustrationFrame>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _liveController;
+
+  @override
+  void initState() {
+    super.initState();
+    _liveController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 3200),
+    );
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncLiveMotion();
+  }
+
+  @override
+  void didUpdateWidget(covariant _IllustrationFrame oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.active != oldWidget.active) _syncLiveMotion();
+  }
+
+  void _syncLiveMotion() {
+    final reduceMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    if (widget.active && !reduceMotion) {
+      if (!_liveController.isAnimating) _liveController.repeat();
+      return;
+    }
+
+    _liveController.stop();
+    _liveController.value = 0;
+  }
+
+  @override
+  void dispose() {
+    _liveController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -365,7 +519,7 @@ class _IllustrationFrame extends StatelessWidget {
 
     return Semantics(
       image: true,
-      label: switch (type) {
+      label: switch (widget.type) {
         _OnboardingIllustration.queue =>
           'Phone showing a live queue number and progress',
         _OnboardingIllustration.appointment =>
@@ -373,70 +527,110 @@ class _IllustrationFrame extends StatelessWidget {
         _OnboardingIllustration.alert =>
           'Notification, travel route, vehicle, and queue status',
       },
-      child: Container(
-        decoration: BoxDecoration(
-          color: surface,
-          borderRadius: BorderRadius.circular(30),
-          border: Border.all(color: border),
-          boxShadow: AppEffects.cardShadow,
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(29),
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              Positioned(
-                top: -55,
-                right: -35,
-                child: _SoftCircle(size: 165, color: soft),
-              ),
-              Positioned(
-                bottom: -72,
-                left: -48,
-                child: _SoftCircle(
-                  size: 190,
-                  color: primary.withValues(alpha: 0.055),
-                ),
-              ),
-              Positioned(
-                top: 24,
-                left: 28,
-                child: Icon(
-                  Icons.circle,
-                  size: 10,
-                  color: primary.withValues(alpha: 0.16),
-                ),
-              ),
-              Positioned(
-                bottom: 30,
-                right: 30,
-                child: Icon(
-                  Icons.circle_outlined,
-                  size: 20,
-                  color: primary.withValues(alpha: 0.18),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(14),
-                child: FittedBox(
-                  fit: BoxFit.contain,
-                  child: SizedBox(
-                    width: 300,
-                    height: 260,
-                    child: switch (type) {
-                      _OnboardingIllustration.queue =>
-                        const _QueueIllustration(),
-                      _OnboardingIllustration.appointment =>
-                        const _AppointmentIllustration(),
-                      _OnboardingIllustration.alert =>
-                        const _AlertIllustration(),
-                    },
+      child: AnimatedBuilder(
+        animation: _liveController,
+        builder: (context, child) {
+          final motion = _liveController.value;
+          final phase = motion * math.pi * 2;
+          final wave = math.sin(phase);
+          final pulse = (wave + 1) / 2;
+
+          return Container(
+            decoration: BoxDecoration(
+              color: surface,
+              borderRadius: BorderRadius.circular(30),
+              border: Border.all(color: border),
+              boxShadow: AppEffects.cardShadow,
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(29),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Positioned(
+                    top: -55 + (wave * 5),
+                    right: -35 + (wave * 3),
+                    child: Transform.scale(
+                      scale: 0.98 + (pulse * 0.04),
+                      child: _SoftCircle(size: 165, color: soft),
+                    ),
                   ),
-                ),
+                  Positioned(
+                    bottom: -72 - (wave * 4),
+                    left: -48 - (wave * 3),
+                    child: _SoftCircle(
+                      size: 190,
+                      color: primary.withValues(alpha: 0.055),
+                    ),
+                  ),
+                  Center(
+                    child: Transform.scale(
+                      scale: 0.9 + (pulse * 0.12),
+                      child: Container(
+                        width: 230,
+                        height: 190,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: primary.withValues(
+                            alpha: 0.025 + (pulse * 0.025),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    top: 24 + (wave * 3),
+                    left: 28,
+                    child: Icon(
+                      Icons.circle,
+                      size: 10,
+                      color: primary.withValues(alpha: 0.12 + (pulse * 0.1)),
+                    ),
+                  ),
+                  Positioned(
+                    bottom: 30 - (wave * 3),
+                    right: 30,
+                    child: Transform.rotate(
+                      angle: wave * 0.1,
+                      child: Icon(
+                        Icons.circle_outlined,
+                        size: 20,
+                        color: primary.withValues(alpha: 0.18),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Transform.translate(
+                      offset: Offset(0, wave * -4),
+                      child: Transform.rotate(
+                        angle: wave * 0.004,
+                        child: Transform.scale(
+                          scale: 0.995 + (pulse * 0.01),
+                          child: FittedBox(
+                            fit: BoxFit.contain,
+                            child: SizedBox(
+                              width: 300,
+                              height: 260,
+                              child: switch (widget.type) {
+                                _OnboardingIllustration.queue =>
+                                  _QueueIllustration(motion: motion),
+                                _OnboardingIllustration.appointment =>
+                                  _AppointmentIllustration(motion: motion),
+                                _OnboardingIllustration.alert =>
+                                  _AlertIllustration(motion: motion),
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -459,7 +653,9 @@ class _SoftCircle extends StatelessWidget {
 }
 
 class _QueueIllustration extends StatelessWidget {
-  const _QueueIllustration();
+  const _QueueIllustration({required this.motion});
+
+  final double motion;
 
   @override
   Widget build(BuildContext context) {
@@ -467,6 +663,9 @@ class _QueueIllustration extends StatelessWidget {
     final surface = AppColors.activeSurface;
     final border = AppColors.activeBorder;
     final soft = AppColors.activeSoftPrimary;
+    final phase = motion * math.pi * 2;
+    final wave = math.sin(phase);
+    final pulse = (wave + 1) / 2;
 
     return Stack(
       alignment: Alignment.center,
@@ -521,21 +720,26 @@ class _QueueIllustration extends StatelessWidget {
                             ),
                           ),
                           const SizedBox(width: 5),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 7,
-                              vertical: 3,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AppColors.success.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: const Text(
-                              'LIVE',
-                              style: TextStyle(
-                                color: AppColors.success,
-                                fontSize: 8,
-                                fontWeight: FontWeight.w900,
+                          Transform.scale(
+                            scale: 0.96 + (pulse * 0.08),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppColors.success.withValues(
+                                  alpha: 0.1 + (pulse * 0.08),
+                                ),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: const Text(
+                                'LIVE',
+                                style: TextStyle(
+                                  color: AppColors.success,
+                                  fontSize: 8,
+                                  fontWeight: FontWeight.w900,
+                                ),
                               ),
                             ),
                           ),
@@ -564,7 +768,7 @@ class _QueueIllustration extends StatelessWidget {
                       ClipRRect(
                         borderRadius: BorderRadius.circular(10),
                         child: LinearProgressIndicator(
-                          value: 0.68,
+                          value: 0.64 + (pulse * 0.06),
                           minHeight: 7,
                           backgroundColor: soft,
                           valueColor: AlwaysStoppedAnimation(primary),
@@ -606,25 +810,35 @@ class _QueueIllustration extends StatelessWidget {
         Positioned(
           top: 28,
           right: 7,
-          child: _FloatingInfoCard(
-            icon: Icons.format_list_numbered_rounded,
-            label: '4 IN LINE',
-            color: primary,
+          child: Transform.translate(
+            offset: Offset(wave * 2, wave * -3),
+            child: _FloatingInfoCard(
+              icon: Icons.format_list_numbered_rounded,
+              label: '4 IN LINE',
+              color: primary,
+            ),
           ),
         ),
         Positioned(
           left: 5,
           bottom: 34,
-          child: Container(
-            width: 60,
-            height: 60,
-            decoration: BoxDecoration(
-              color: surface,
-              shape: BoxShape.circle,
-              border: Border.all(color: border),
-              boxShadow: AppEffects.cardShadow,
+          child: Transform.translate(
+            offset: Offset(wave * 4, wave * 2),
+            child: Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
+                color: surface,
+                shape: BoxShape.circle,
+                border: Border.all(color: border),
+                boxShadow: AppEffects.cardShadow,
+              ),
+              child: Icon(
+                Icons.directions_car_rounded,
+                color: primary,
+                size: 31,
+              ),
             ),
-            child: Icon(Icons.directions_car_rounded, color: primary, size: 31),
           ),
         ),
       ],
@@ -633,13 +847,18 @@ class _QueueIllustration extends StatelessWidget {
 }
 
 class _AppointmentIllustration extends StatelessWidget {
-  const _AppointmentIllustration();
+  const _AppointmentIllustration({required this.motion});
+
+  final double motion;
 
   @override
   Widget build(BuildContext context) {
     final primary = AppColors.activePrimary;
     final surface = AppColors.activeSurface;
     final border = AppColors.activeBorder;
+    final phase = motion * math.pi * 2;
+    final wave = math.sin(phase);
+    final pulse = (wave + 1) / 2;
 
     return Stack(
       alignment: Alignment.center,
@@ -741,10 +960,13 @@ class _AppointmentIllustration extends StatelessWidget {
                             const SizedBox(height: 9),
                             Row(
                               children: [
-                                const Icon(
-                                  Icons.check_circle_rounded,
-                                  color: AppColors.success,
-                                  size: 18,
+                                Transform.scale(
+                                  scale: 0.94 + (pulse * 0.12),
+                                  child: const Icon(
+                                    Icons.check_circle_rounded,
+                                    color: AppColors.success,
+                                    size: 18,
+                                  ),
                                 ),
                                 const SizedBox(width: 5),
                                 Expanded(
@@ -777,51 +999,67 @@ class _AppointmentIllustration extends StatelessWidget {
         Positioned(
           right: 1,
           bottom: 15,
-          child: Container(
-            width: 84,
-            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 10),
-            decoration: BoxDecoration(
-              color: primary,
-              borderRadius: BorderRadius.circular(15),
-              boxShadow: AppEffects.cardShadow,
-            ),
-            child: const Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'QUEUE',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 8,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 1,
-                  ),
+          child: Transform.translate(
+            offset: Offset(wave * 2, wave * -3),
+            child: Transform.scale(
+              scale: 0.98 + (pulse * 0.04),
+              child: Container(
+                width: 84,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 11,
+                  vertical: 10,
                 ),
-                Text(
-                  'G014',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
-                  ),
+                decoration: BoxDecoration(
+                  color: primary,
+                  borderRadius: BorderRadius.circular(15),
+                  boxShadow: AppEffects.cardShadow,
                 ),
-              ],
+                child: const Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'QUEUE',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 8,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    Text(
+                      'G014',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ),
         ),
         Positioned(
           left: 4,
           bottom: 8,
-          child: Container(
-            width: 72,
-            height: 54,
-            decoration: BoxDecoration(
-              color: surface,
-              borderRadius: BorderRadius.circular(17),
-              border: Border.all(color: border),
-              boxShadow: AppEffects.cardShadow,
+          child: Transform.translate(
+            offset: Offset(wave * 5, wave * 1.5),
+            child: Container(
+              width: 72,
+              height: 54,
+              decoration: BoxDecoration(
+                color: surface,
+                borderRadius: BorderRadius.circular(17),
+                border: Border.all(color: border),
+                boxShadow: AppEffects.cardShadow,
+              ),
+              child: Icon(
+                Icons.directions_car_rounded,
+                color: primary,
+                size: 34,
+              ),
             ),
-            child: Icon(Icons.directions_car_rounded, color: primary, size: 34),
           ),
         ),
       ],
@@ -830,13 +1068,19 @@ class _AppointmentIllustration extends StatelessWidget {
 }
 
 class _AlertIllustration extends StatelessWidget {
-  const _AlertIllustration();
+  const _AlertIllustration({required this.motion});
+
+  final double motion;
 
   @override
   Widget build(BuildContext context) {
     final primary = AppColors.activePrimary;
     final surface = AppColors.activeSurface;
     final border = AppColors.activeBorder;
+    final phase = motion * math.pi * 2;
+    final wave = math.sin(phase);
+    final pulse = (wave + 1) / 2;
+    final bellSwing = math.sin(phase * 2) * 0.075;
 
     return Stack(
       alignment: Alignment.center,
@@ -866,7 +1110,10 @@ class _AlertIllustration extends StatelessWidget {
                       letterSpacing: 0.8,
                     ),
                   ),
-                  Icon(Icons.route_rounded, color: primary, size: 20),
+                  Transform.rotate(
+                    angle: wave * 0.04,
+                    child: Icon(Icons.route_rounded, color: primary, size: 20),
+                  ),
                 ],
               ),
               const Spacer(),
@@ -877,7 +1124,10 @@ class _AlertIllustration extends StatelessWidget {
                     child: SizedBox(
                       height: 24,
                       child: CustomPaint(
-                        painter: _DottedRoutePainter(color: primary),
+                        painter: _DottedRoutePainter(
+                          color: primary,
+                          motion: motion,
+                        ),
                       ),
                     ),
                   ),
@@ -934,61 +1184,77 @@ class _AlertIllustration extends StatelessWidget {
         Positioned(
           top: 5,
           right: 5,
-          child: Container(
-            width: 68,
-            height: 68,
-            decoration: BoxDecoration(
-              color: primary,
-              shape: BoxShape.circle,
-              boxShadow: AppEffects.raisedShadow,
-            ),
-            child: Stack(
-              clipBehavior: Clip.none,
-              alignment: Alignment.center,
-              children: [
-                const Icon(
-                  Icons.notifications_active_rounded,
-                  color: Colors.white,
-                  size: 34,
+          child: Transform.rotate(
+            angle: bellSwing,
+            child: Transform.scale(
+              scale: 0.985 + (pulse * 0.03),
+              child: Container(
+                width: 68,
+                height: 68,
+                decoration: BoxDecoration(
+                  color: primary,
+                  shape: BoxShape.circle,
+                  boxShadow: AppEffects.raisedShadow,
                 ),
-                Positioned(
-                  top: 8,
-                  right: 7,
-                  child: Container(
-                    width: 18,
-                    height: 18,
-                    alignment: Alignment.center,
-                    decoration: const BoxDecoration(
-                      color: AppColors.danger,
-                      shape: BoxShape.circle,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  alignment: Alignment.center,
+                  children: [
+                    const Icon(
+                      Icons.notifications_active_rounded,
+                      color: Colors.white,
+                      size: 34,
                     ),
-                    child: const Text(
-                      '1',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w900,
+                    Positioned(
+                      top: 8,
+                      right: 7,
+                      child: Transform.scale(
+                        scale: 0.9 + (pulse * 0.2),
+                        child: Container(
+                          width: 18,
+                          height: 18,
+                          alignment: Alignment.center,
+                          decoration: const BoxDecoration(
+                            color: AppColors.danger,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Text(
+                            '1',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),
         Positioned(
           left: 1,
           bottom: 8,
-          child: Container(
-            width: 66,
-            height: 54,
-            decoration: BoxDecoration(
-              color: surface,
-              borderRadius: BorderRadius.circular(17),
-              border: Border.all(color: border),
-              boxShadow: AppEffects.cardShadow,
+          child: Transform.translate(
+            offset: Offset(wave * 5, wave * 1.5),
+            child: Container(
+              width: 66,
+              height: 54,
+              decoration: BoxDecoration(
+                color: surface,
+                borderRadius: BorderRadius.circular(17),
+                border: Border.all(color: border),
+                boxShadow: AppEffects.cardShadow,
+              ),
+              child: Icon(
+                Icons.directions_car_rounded,
+                color: primary,
+                size: 33,
+              ),
             ),
-            child: Icon(Icons.directions_car_rounded, color: primary, size: 33),
           ),
         ),
       ],
@@ -1058,9 +1324,10 @@ class _RoutePoint extends StatelessWidget {
 }
 
 class _DottedRoutePainter extends CustomPainter {
-  const _DottedRoutePainter({required this.color});
+  const _DottedRoutePainter({required this.color, required this.motion});
 
   final Color color;
+  final double motion;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1074,9 +1341,19 @@ class _DottedRoutePainter extends CustomPainter {
       final y = (size.height / 2) - math.sin(progress * math.pi) * 5;
       canvas.drawCircle(Offset(x, y), 2.1, paint);
     }
+
+    final travelProgress = Curves.easeInOut.transform(motion);
+    final movingX = 8 + ((size.width - 16) * travelProgress);
+    final movingY = (size.height / 2) - math.sin(travelProgress * math.pi) * 5;
+    canvas.drawCircle(
+      Offset(movingX, movingY),
+      5,
+      Paint()..color = color.withValues(alpha: 0.12),
+    );
+    canvas.drawCircle(Offset(movingX, movingY), 2.8, Paint()..color = color);
   }
 
   @override
   bool shouldRepaint(covariant _DottedRoutePainter oldDelegate) =>
-      color != oldDelegate.color;
+      color != oldDelegate.color || motion != oldDelegate.motion;
 }
