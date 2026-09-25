@@ -33,6 +33,25 @@ Color get _mutedTextColor => AppColors.activeMutedText;
 Color get _softPrimaryColor => AppColors.activeSoftPrimary;
 const int _maxDocumentBytes = 10 * 1024 * 1024;
 const int _firestoreChunkBytes = 650 * 1024;
+const int queueCodesPerSegment = 20;
+
+int queueSegmentIndexForCode(String queueCode) {
+  final match = RegExp(r'^[A-Za-z](\d{3})$').firstMatch(queueCode.trim());
+  final queueNumber = int.tryParse(match?.group(1) ?? '');
+
+  if (queueNumber == null || queueNumber < 1) return 0;
+  return (queueNumber - 1) ~/ queueCodesPerSegment;
+}
+
+List<String> queueCodesForSegment(List<String> codes, int segmentIndex) {
+  if (codes.isEmpty) return const [];
+
+  final segmentCount = (codes.length / queueCodesPerSegment).ceil();
+  final safeIndex = segmentIndex.clamp(0, segmentCount - 1).toInt();
+  final start = safeIndex * queueCodesPerSegment;
+  final end = (start + queueCodesPerSegment).clamp(0, codes.length).toInt();
+  return codes.sublist(start, end);
+}
 
 String normalizePhilippinePlateNumber(String value) {
   return value.trim().toUpperCase();
@@ -120,6 +139,7 @@ class _BookAppointmentState extends State<BookAppointment> {
   bool _appointmentAvailabilityLoaded = false;
   bool _queueAvailabilityLoaded = false;
   Object? _availabilityError;
+  int _queueSegmentIndex = 0;
 
   static const int maxQueueLimit = 80;
 
@@ -280,6 +300,7 @@ class _BookAppointmentState extends State<BookAppointment> {
     if (selectedDate == null) return;
     if (selectedQueueCode.isEmpty || isQueueTaken(selectedQueueCode)) {
       selectedQueueCode = getFirstAvailableQueueCode();
+      _queueSegmentIndex = queueSegmentIndexForCode(selectedQueueCode);
     }
   }
 
@@ -472,6 +493,7 @@ class _BookAppointmentState extends State<BookAppointment> {
         _queueUnavailableCodes = {};
         selectedDate = picked;
         selectedQueueCode = getFirstAvailableQueueCode();
+        _queueSegmentIndex = queueSegmentIndexForCode(selectedQueueCode);
       });
       listenToQueueAvailability();
     }
@@ -1138,6 +1160,7 @@ class _BookAppointmentState extends State<BookAppointment> {
 
       setState(() {
         selectedQueueCode = getFirstAvailableQueueCode();
+        _queueSegmentIndex = queueSegmentIndexForCode(selectedQueueCode);
       });
 
       return;
@@ -1172,6 +1195,7 @@ class _BookAppointmentState extends State<BookAppointment> {
 
         setState(() {
           selectedQueueCode = getFirstAvailableQueueCode();
+          _queueSegmentIndex = queueSegmentIndexForCode(selectedQueueCode);
         });
 
         return;
@@ -1657,10 +1681,197 @@ class _BookAppointmentState extends State<BookAppointment> {
   }
 
   Widget queueCodesView(List<String> codes) {
+    final segmentCount = (codes.length / queueCodesPerSegment).ceil();
+    final safeSegmentIndex = _queueSegmentIndex
+        .clamp(0, segmentCount - 1)
+        .toInt();
+    final visibleCodes = queueCodesForSegment(codes, safeSegmentIndex);
+    final availableInSegment = visibleCodes
+        .where((code) => !isQueueTaken(code))
+        .length;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         liveAvailabilityStatus(),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: List.generate(segmentCount, (index) {
+              final start = (index * queueCodesPerSegment) + 1;
+              final end = ((index + 1) * queueCodesPerSegment).clamp(
+                1,
+                codes.length,
+              );
+              final prefix = codes.first.substring(0, 1);
+              final selected = safeSegmentIndex == index;
+
+              return Padding(
+                padding: EdgeInsets.only(
+                  right: index == segmentCount - 1 ? 0 : 8,
+                ),
+                child: Material(
+                  color: selected ? _primaryColor : _cardColor,
+                  borderRadius: BorderRadius.circular(11),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(11),
+                    onTap: isSubmitting
+                        ? null
+                        : () {
+                            setState(() {
+                              _queueSegmentIndex = index;
+                            });
+                          },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 13,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(11),
+                        border: Border.all(
+                          color: selected ? _primaryColor : _borderColor,
+                        ),
+                      ),
+                      child: Text(
+                        '$prefix${start.toString().padLeft(3, '0')}–'
+                        '$prefix${end.toString().padLeft(3, '0')}',
+                        style: TextStyle(
+                          color: selected ? Colors.white : _primaryColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Icon(Icons.grid_view_rounded, size: 17, color: _mutedTextColor),
+            const SizedBox(width: 7),
+            Expanded(
+              child: Text(
+                '$availableInSegment available in this range',
+                style: TextStyle(
+                  color: _mutedTextColor,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            Text(
+              '${safeSegmentIndex + 1} of $segmentCount',
+              style: TextStyle(
+                color: _mutedTextColor,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 220),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, animation) {
+            return FadeTransition(
+              opacity: animation,
+              child: SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0.025, 0),
+                  end: Offset.zero,
+                ).animate(animation),
+                child: child,
+              ),
+            );
+          },
+          child: GridView.builder(
+            key: ValueKey(safeSegmentIndex),
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: visibleCodes.length,
+            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+              maxCrossAxisExtent: 96,
+              mainAxisExtent: 44,
+              crossAxisSpacing: 8,
+              mainAxisSpacing: 8,
+            ),
+            itemBuilder: (context, index) {
+              final code = visibleCodes[index];
+              final taken = isQueueTaken(code);
+              final selected = selectedQueueCode == code;
+
+              return Semantics(
+                button: true,
+                enabled: !taken && !isSubmitting,
+                selected: selected,
+                label: taken ? '$code, taken' : 'Queue code $code',
+                child: Material(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(12),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: taken || isSubmitting
+                        ? null
+                        : () {
+                            setState(() {
+                              selectedQueueCode = code;
+                            });
+                          },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 160),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: taken
+                            ? const Color(0xFFE3E9EC)
+                            : selected
+                            ? _primaryColor
+                            : _cardColor,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: selected
+                              ? _primaryColor
+                              : taken
+                              ? const Color(0xFFD1DCE1)
+                              : _borderColor,
+                          width: selected ? 1.5 : 1,
+                        ),
+                        boxShadow: selected
+                            ? [
+                                BoxShadow(
+                                  color: _primaryColor.withValues(alpha: 0.18),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 3),
+                                ),
+                              ]
+                            : null,
+                      ),
+                      child: Text(
+                        taken ? 'Taken' : code,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: selected
+                              ? Colors.white
+                              : taken
+                              ? _mutedTextColor
+                              : _primaryColor,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: 14),
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(14),
@@ -1692,58 +1903,6 @@ class _BookAppointmentState extends State<BookAppointment> {
               ),
             ],
           ),
-        ),
-        const SizedBox(height: 14),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: codes.map((code) {
-            bool taken = isQueueTaken(code);
-            bool selected = selectedQueueCode == code;
-
-            return GestureDetector(
-              onTap: taken || isSubmitting
-                  ? null
-                  : () {
-                      setState(() {
-                        selectedQueueCode = code;
-                      });
-                    },
-              child: Container(
-                width: 74,
-                height: 44,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: taken
-                      ? const Color(0xFFE3E9EC)
-                      : selected
-                      ? _primaryColor
-                      : _cardColor,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: selected
-                        ? _primaryColor
-                        : taken
-                        ? const Color(0xFFD1DCE1)
-                        : _borderColor,
-                    width: selected ? 1.5 : 1,
-                  ),
-                ),
-                child: Text(
-                  taken ? "Taken" : code,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: selected
-                        ? Colors.white
-                        : taken
-                        ? _mutedTextColor
-                        : _primaryColor,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            );
-          }).toList(),
         ),
       ],
     );
@@ -2080,6 +2239,9 @@ class _BookAppointmentState extends State<BookAppointment> {
                                         ? "G001"
                                         : "D001";
                                   }
+                                  _queueSegmentIndex = queueSegmentIndexForCode(
+                                    selectedQueueCode,
+                                  );
                                 });
                               },
                       ),

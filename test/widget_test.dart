@@ -5,6 +5,7 @@ import 'package:queue_tracking_app/main.dart';
 import 'package:queue_tracking_app/services/document_upload_consent.dart';
 import 'package:queue_tracking_app/services/firestore_query_fields.dart';
 import 'package:queue_tracking_app/services/customer_onboarding.dart';
+import 'package:queue_tracking_app/screens/admin_page.dart';
 import 'package:queue_tracking_app/screens/admin_settings.dart';
 import 'package:queue_tracking_app/screens/book_appointment.dart';
 import 'package:queue_tracking_app/screens/customer_home.dart';
@@ -200,6 +201,33 @@ void main() {
     expect(validatePhilippinePlateNumber('ABCDEF'), isNotNull);
     expect(validatePhilippinePlateNumber('123456'), isNotNull);
     expect(validatePhilippinePlateNumber('ABC-123'), isNotNull);
+  });
+
+  test('queue codes are divided into four segments of twenty', () {
+    final codes = List.generate(
+      80,
+      (index) => 'G${(index + 1).toString().padLeft(3, '0')}',
+    );
+
+    expect(queueCodesForSegment(codes, 0), hasLength(20));
+    expect(queueCodesForSegment(codes, 0).first, 'G001');
+    expect(queueCodesForSegment(codes, 0).last, 'G020');
+    expect(queueCodesForSegment(codes, 3).first, 'G061');
+    expect(queueCodesForSegment(codes, 3).last, 'G080');
+  });
+
+  test('queue code selection resolves to the correct segment', () {
+    expect(queueSegmentIndexForCode('G001'), 0);
+    expect(queueSegmentIndexForCode('G020'), 0);
+    expect(queueSegmentIndexForCode('G021'), 1);
+    expect(queueSegmentIndexForCode('D060'), 2);
+    expect(queueSegmentIndexForCode('D080'), 3);
+  });
+
+  test('admin summary cards use one row only on narrow mobile web', () {
+    expect(useMobileWebStatsRow(isWeb: true, width: 390), isTrue);
+    expect(useMobileWebStatsRow(isWeb: true, width: 1200), isFalse);
+    expect(useMobileWebStatsRow(isWeb: false, width: 390), isFalse);
   });
 
   test('customer voice queue alerts are enabled by default', () {

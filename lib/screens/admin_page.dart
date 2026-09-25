@@ -35,6 +35,10 @@ Color get _borderColor => AppColors.activeBorder;
 Color get _mutedTextColor => AppColors.activeMutedText;
 Color get _softPrimaryColor => AppColors.activeSoftPrimary;
 
+bool useMobileWebStatsRow({required bool isWeb, required double width}) {
+  return isWeb && width < 600;
+}
+
 // ================= GLOBAL VARIABLES =================
 
 ValueNotifier<Map<String, List<Map<String, dynamic>>>>
@@ -2666,6 +2670,28 @@ class _AdminPageState extends State<AdminPage> {
       );
     }
 
+    if (useMobileWebStatsRow(
+      isWeb: kIsWeb,
+      width: MediaQuery.sizeOf(context).width,
+    )) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          mobileWebStatCard(
+            text("Total Queue", "Kabuuang Queue"),
+            issuedCountForSelectedDate().toString(),
+          ),
+          const SizedBox(width: 7),
+          mobileWebStatCard(
+            text("Waiting Queue", "Naghihintay"),
+            selectedDateQueue.length.toString(),
+          ),
+          const SizedBox(width: 7),
+          mobileWebStatCard(text("Completed", "Tapos Na"), completedForDate),
+        ],
+      );
+    }
+
     return Wrap(
       spacing: 10,
       runSpacing: 10,
@@ -3149,13 +3175,17 @@ class _AdminPageState extends State<AdminPage> {
 
   // ================= CARD =================
 
-  Widget cardContainer({required Widget child}) {
+  Widget cardContainer({
+    required Widget child,
+    EdgeInsetsGeometry padding = const EdgeInsets.all(16),
+    double borderRadius = 22,
+  }) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: padding,
       decoration: BoxDecoration(
         color: _cardColor,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(borderRadius),
         border: Border.all(color: _borderColor),
         boxShadow: [
           BoxShadow(color: _primaryColor.withOpacity(0.06), blurRadius: 14),
@@ -3216,7 +3246,20 @@ class _AdminPageState extends State<AdminPage> {
     return SizedBox(width: 160, child: statContent(title, value));
   }
 
-  Widget statContent(String title, String value) {
+  Widget mobileWebStatCard(String title, String value) {
+    return Expanded(
+      child: SizedBox(
+        height: 134,
+        child: statContent(title, value, compactMobileWeb: true),
+      ),
+    );
+  }
+
+  Widget statContent(
+    String title,
+    String value, {
+    bool compactMobileWeb = false,
+  }) {
     IconData icon = Icons.confirmation_number_rounded;
     Color accentColor = _primaryColor;
 
@@ -3229,34 +3272,50 @@ class _AdminPageState extends State<AdminPage> {
     }
 
     return cardContainer(
+      padding: compactMobileWeb
+          ? const EdgeInsets.symmetric(horizontal: 7, vertical: 10)
+          : const EdgeInsets.all(16),
+      borderRadius: compactMobileWeb ? 16 : 22,
       child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            height: 42,
-            width: 42,
+            height: compactMobileWeb ? 34 : 42,
+            width: compactMobileWeb ? 34 : 42,
             decoration: BoxDecoration(
               color: accentColor.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.circular(compactMobileWeb ? 11 : 14),
             ),
-            child: Icon(icon, color: accentColor, size: 24),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontWeight: FontWeight.w800,
-              color: _primaryColor,
-              fontSize: 13,
+            child: Icon(
+              icon,
+              color: accentColor,
+              size: compactMobileWeb ? 20 : 24,
             ),
           ),
-          const SizedBox(height: 8),
+          SizedBox(height: compactMobileWeb ? 7 : 10),
+          SizedBox(
+            height: compactMobileWeb ? 18 : null,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(
+                title,
+                maxLines: 1,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  color: _primaryColor,
+                  fontSize: compactMobileWeb ? 11 : 13,
+                ),
+              ),
+            ),
+          ),
+          SizedBox(height: compactMobileWeb ? 5 : 8),
           FittedBox(
             fit: BoxFit.scaleDown,
             child: Text(
               value,
               style: TextStyle(
-                fontSize: 28,
+                fontSize: compactMobileWeb ? 23 : 28,
                 fontWeight: FontWeight.w900,
                 color: _primaryColor,
               ),
