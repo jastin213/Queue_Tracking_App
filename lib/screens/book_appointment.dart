@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
@@ -1341,6 +1342,9 @@ class _BookAppointmentState extends State<BookAppointment> {
             idFileBytes!.lengthInBytes +
             orFileBytes!.lengthInBytes +
             crFileBytes!.lengthInBytes,
+        "idDocumentHash": sha256.convert(idFileBytes!).toString(),
+        "orDocumentHash": sha256.convert(orFileBytes!).toString(),
+        "crDocumentHash": sha256.convert(crFileBytes!).toString(),
 
         "source": "Appointment",
         "createdAt": FieldValue.serverTimestamp(),

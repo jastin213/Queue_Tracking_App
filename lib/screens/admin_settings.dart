@@ -1,8 +1,12 @@
+import 'dart:async';
+
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart' hide Text;
 import '../widgets/localized_text.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
 import '../services/app_language.dart';
+import '../services/appointment_approval_settings.dart';
 import '../services/queue_voice.dart';
 import '../theme/app_theme.dart';
 import 'document_cleanup.dart';
@@ -54,15 +58,40 @@ class AdminSettings extends StatefulWidget {
 class _AdminSettingsState extends State<AdminSettings> {
   final FlutterTts flutterTts = FlutterTts();
   final TextEditingController announcementController = TextEditingController();
+  StreamSubscription<AppointmentApprovalSettings>?
+  _appointmentApprovalSettingsSubscription;
+  bool _conditionalAutoApprovalEnabled = false;
+  bool _appointmentApprovalSettingsLoading = true;
+  bool _appointmentApprovalSettingsSaving = false;
 
   @override
   void initState() {
     super.initState();
     announcementController.text = displayAnnouncementNotifier.value;
+    if (Firebase.apps.isEmpty) {
+      _appointmentApprovalSettingsLoading = false;
+      return;
+    }
+    _appointmentApprovalSettingsSubscription =
+        AppointmentApprovalSettings.watch().listen(
+          (settings) {
+            if (!mounted) return;
+            setState(() {
+              _conditionalAutoApprovalEnabled =
+                  settings.conditionalAutoApprovalEnabled;
+              _appointmentApprovalSettingsLoading = false;
+            });
+          },
+          onError: (_) {
+            if (!mounted) return;
+            setState(() => _appointmentApprovalSettingsLoading = false);
+          },
+        );
   }
 
   @override
   void dispose() {
+    _appointmentApprovalSettingsSubscription?.cancel();
     announcementController.dispose();
     super.dispose();
   }
@@ -237,12 +266,130 @@ class _AdminSettingsState extends State<AdminSettings> {
         const SizedBox(height: 16),
         buildQueueSettings(),
         const SizedBox(height: 16),
+        buildAppointmentApprovalSettings(),
+        const SizedBox(height: 16),
         buildDisplaySettings(),
         const SizedBox(height: 16),
         buildDocumentRetentionSettings(),
         const SizedBox(height: 16),
         buildAdminReminders(),
       ],
+    );
+  }
+
+  Future<bool> confirmConditionalAutoApproval() async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Enable Conditional Auto-Approval?'),
+            content: const Text(
+              'Only appointments that pass every supported document, name, '
+              'plate, duplicate, and queue-slot check with a score of at '
+              'least 95 will be approved automatically. Uncertain '
+              'appointments will remain pending and will never be '
+              'automatically rejected. This checks consistency but does not '
+              'prove LTO authenticity without an official verification API.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Enable'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  Future<void> updateConditionalAutoApproval(bool enabled) async {
+    if (_appointmentApprovalSettingsSaving) return;
+    if (enabled && !await confirmConditionalAutoApproval()) return;
+
+    setState(() => _appointmentApprovalSettingsSaving = true);
+    try {
+      await AppointmentApprovalSettings.setConditionalAutoApprovalEnabled(
+        enabled,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            enabled
+                ? 'Conditional auto-approval enabled.'
+                : 'Manual appointment approval restored.',
+          ),
+        ),
+      );
+    } on FirebaseException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not update appointment approval setting: ${error.message ?? error.code}',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _appointmentApprovalSettingsSaving = false);
+      }
+    }
+  }
+
+  Widget buildAppointmentApprovalSettings() {
+    return settingsCard(
+      icon: Icons.fact_check_outlined,
+      title: 'Appointment Approval',
+      subtitle: 'Manual approval is the safe default.',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          settingTile(
+            icon: Icons.auto_awesome_rounded,
+            title: 'Conditional Auto-Approval',
+            subtitle:
+                'Auto-approve only when every supported check passes at 95% or higher.',
+            trailing:
+                _appointmentApprovalSettingsLoading ||
+                    _appointmentApprovalSettingsSaving
+                ? const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2.5),
+                  )
+                : Switch(
+                    value: _conditionalAutoApprovalEnabled,
+                    activeThumbColor: _primaryColor,
+                    onChanged: updateConditionalAutoApproval,
+                  ),
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(13),
+            decoration: BoxDecoration(
+              color: _softPrimaryColor,
+              borderRadius: BorderRadius.circular(13),
+              border: Border.all(color: _borderColor),
+            ),
+            child: Text(
+              _conditionalAutoApprovalEnabled
+                  ? 'Active: new pending appointments are checked in the Admin Appointment Dashboard. Mismatches stay pending for manual review.'
+                  : 'Manual mode: every appointment stays pending until an administrator approves or rejects it.',
+              style: TextStyle(
+                color: _mutedTextColor,
+                fontSize: 12.5,
+                height: 1.4,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

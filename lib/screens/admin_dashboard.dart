@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:crypto/crypto.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' hide Text;
 import '../widgets/localized_text.dart';
@@ -10,8 +12,10 @@ import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../services/app_language.dart';
+import '../services/appointment_approval_settings.dart';
 import '../theme/app_theme.dart';
 import '../services/appointment_lifecycle.dart';
+import '../services/conditional_auto_approval.dart';
 import '../services/document_review_analyzer.dart';
 import '../services/document_text_recognition.dart';
 import '../services/firestore_query_fields.dart';
@@ -29,6 +33,16 @@ Color get _borderColor => AppColors.activeBorder;
 Color get _mutedTextColor => AppColors.activeMutedText;
 Color get _softPrimaryColor => AppColors.activeSoftPrimary;
 
+class _AppointmentDocumentAnalysis {
+  const _AppointmentDocumentAnalysis({
+    required this.review,
+    required this.documentHashes,
+  });
+
+  final DocumentReviewResult review;
+  final Map<String, String> documentHashes;
+}
+
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key, this.initialAppointmentId});
 
@@ -44,6 +58,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
   final List<StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>
   _monthSubscriptions = [];
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _pendingSubscription;
+  StreamSubscription<AppointmentApprovalSettings>?
+  _appointmentApprovalSettingsSubscription;
   final Map<int, List<Map<String, dynamic>>> _monthAppointmentChunks = {};
   List<Map<String, dynamic>> _pendingAppointments = [];
   int _monthListenGeneration = 0;
@@ -52,17 +68,24 @@ class _AdminDashboardState extends State<AdminDashboard> {
   Object? _appointmentsError;
   String? _expandedOverviewStatus;
   bool _openedInitialAppointment = false;
+  bool _conditionalAutoApprovalEnabled = false;
+  int _autoApprovalMinimumScore =
+      AppointmentApprovalSettings.defaultMinimumScore;
+  bool _autoApprovalBatchRunning = false;
+  bool _autoApprovalBatchQueued = false;
 
   @override
   void initState() {
     super.initState();
     _listenToPendingAppointments();
     _listenToAppointmentMonth();
+    _listenToAppointmentApprovalSettings();
   }
 
   @override
   void dispose() {
     _pendingSubscription?.cancel();
+    _appointmentApprovalSettingsSubscription?.cancel();
     for (final subscription in _monthSubscriptions) {
       subscription.cancel();
     }
@@ -145,6 +168,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
             });
             pendingBookings.value = records;
             _openInitialAppointmentIfAvailable(records);
+            _scheduleConditionalAutoApproval();
           },
           onError: (Object error) {
             if (!mounted) return;
@@ -327,6 +351,223 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
   }
 
+  Future<void> _processPendingAppointmentsForConditionalAutoApproval() async {
+    if (_autoApprovalBatchRunning || !_conditionalAutoApprovalEnabled) return;
+    _autoApprovalBatchRunning = true;
+
+    try {
+      do {
+        _autoApprovalBatchQueued = false;
+        final candidates = List<Map<String, dynamic>>.from(
+          _pendingAppointments,
+        ).where(_needsConditionalAutoApproval).toList();
+
+        for (final booking in candidates) {
+          if (!_conditionalAutoApprovalEnabled || !mounted) break;
+          await _processOneConditionalAutoApproval(booking);
+        }
+      } while (_autoApprovalBatchQueued &&
+          _conditionalAutoApprovalEnabled &&
+          mounted);
+    } finally {
+      _autoApprovalBatchRunning = false;
+    }
+  }
+
+  bool _needsConditionalAutoApproval(Map<String, dynamic> booking) {
+    if (booking['status']?.toString() != 'Pending') return false;
+    final review = booking['autoApprovalReview'];
+    if (review is Map) {
+      final outcome = review['outcome']?.toString() ?? '';
+      if (outcome.isNotEmpty && outcome != 'processing') return false;
+      if (outcome == 'processing' && !_processingClaimIsStale(booking)) {
+        return false;
+      }
+    }
+    return booking['appointmentId']?.toString().trim().isNotEmpty == true;
+  }
+
+  bool _processingClaimIsStale(Map<String, dynamic> booking) {
+    final reviewedAt = booking['autoApprovalReviewedAt'];
+    if (reviewedAt is! Timestamp) return true;
+    return DateTime.now().difference(reviewedAt.toDate()) >
+        const Duration(minutes: 10);
+  }
+
+  Future<bool> _claimAppointmentForAutoReview(
+    DocumentReference<Map<String, dynamic>> appointmentRef,
+  ) async {
+    final processorId = FirebaseAuth.instance.currentUser?.uid ?? 'admin';
+    return FirebaseFirestore.instance.runTransaction((transaction) async {
+      final snapshot = await transaction.get(appointmentRef);
+      final data = snapshot.data();
+      if (data == null || data['status']?.toString() != 'Pending') return false;
+
+      final existingReview = data['autoApprovalReview'];
+      if (existingReview is Map) {
+        final outcome = existingReview['outcome']?.toString() ?? '';
+        if (outcome.isNotEmpty && outcome != 'processing') return false;
+        if (outcome == 'processing' && !_processingClaimIsStale(data)) {
+          return false;
+        }
+      }
+
+      transaction.update(appointmentRef, {
+        'autoApprovalReview': {
+          'outcome': 'processing',
+          'processorId': processorId,
+          'minimumScore': _autoApprovalMinimumScore,
+        },
+        'autoApprovalReviewedAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      return true;
+    });
+  }
+
+  Future<void> _processOneConditionalAutoApproval(
+    Map<String, dynamic> booking,
+  ) async {
+    final appointmentId = booking['appointmentId']?.toString().trim() ?? '';
+    if (appointmentId.isEmpty) return;
+    final appointmentRef = FirebaseFirestore.instance
+        .collection('appointments')
+        .doc(appointmentId);
+
+    try {
+      if (!await _claimAppointmentForAutoReview(appointmentRef)) return;
+
+      final analysis = await analyzeBookingDocumentsDetailed(
+        booking,
+        onProgress: (_) {},
+      );
+      final suspiciousDuplicate = await _hasSuspiciousDocumentDuplicate(
+        booking: booking,
+        documentHashes: analysis.documentHashes,
+      );
+      final queue = booking['queue']?.toString() ?? '';
+      final date = booking['date']?.toString() ?? '';
+      final queueSlotAvailable =
+          queue.isNotEmpty &&
+          date.isNotEmpty &&
+          !isQueueAlreadyUsedLocally(booking) &&
+          !await isQueueAlreadyUsedInApprovedAppointments(booking) &&
+          !await isQueueAlreadyUsedInFirestoreQueue(date: date, queue: queue);
+      final allDocumentsPresent =
+          booking['idFileUploaded'] == true &&
+          booking['orFileUploaded'] == true &&
+          booking['crFileUploaded'] == true;
+      final decision = ConditionalAutoApproval.evaluate(
+        review: analysis.review,
+        allRequiredDocumentsPresent: allDocumentsPresent,
+        queueSlotAvailable: queueSlotAvailable,
+        suspiciousDuplicateDetected: suspiciousDuplicate,
+        minimumScore: _autoApprovalMinimumScore,
+      );
+      final reviewMetadata = <String, dynamic>{
+        'outcome': _autoApprovalOutcome(decision.action),
+        'reason': decision.reason,
+        'score': analysis.review.score,
+        'minimumScore': _autoApprovalMinimumScore,
+        'suspiciousDuplicateDetected': suspiciousDuplicate,
+        'queueSlotAvailable': queueSlotAvailable,
+        'checks': [
+          for (final check in analysis.review.checks)
+            {
+              'title': check.title,
+              'state': check.state.name,
+              'detail': check.detail,
+            },
+        ],
+      };
+
+      if (decision.canApprove) {
+        final approved = await approveBooking(
+          booking,
+          silent: true,
+          automaticReview: reviewMetadata,
+          automaticDocumentHashes: analysis.documentHashes,
+        );
+        if (approved) return;
+        reviewMetadata['outcome'] = 'manual_review';
+        reviewMetadata['reason'] =
+            'The appointment changed while it was being reviewed. Administrator review is required.';
+      }
+
+      await appointmentRef.update({
+        'autoApprovalReview': reviewMetadata,
+        'autoApprovalReviewedAt': FieldValue.serverTimestamp(),
+        'idDocumentHash': analysis.documentHashes['ID'],
+        'orDocumentHash': analysis.documentHashes['OR'],
+        'crDocumentHash': analysis.documentHashes['CR'],
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (error) {
+      await appointmentRef.set({
+        'autoApprovalReview': {
+          'outcome': 'manual_review',
+          'reason':
+              'Automatic review could not be completed. Administrator review is required.',
+          'errorType': error.runtimeType.toString(),
+        },
+        'autoApprovalReviewedAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    }
+  }
+
+  String _autoApprovalOutcome(ConditionalAutoApprovalAction action) {
+    return switch (action) {
+      ConditionalAutoApprovalAction.approve => 'auto_approved',
+      ConditionalAutoApprovalAction.manualReview => 'manual_review',
+      ConditionalAutoApprovalAction.requestResubmission =>
+        'resubmission_recommended',
+    };
+  }
+
+  Future<bool> _hasSuspiciousDocumentDuplicate({
+    required Map<String, dynamic> booking,
+    required Map<String, String> documentHashes,
+  }) async {
+    final appointmentId = booking['appointmentId']?.toString() ?? '';
+    final customerId = booking['customerId']?.toString() ?? '';
+    final normalizedPlate = _normalizedPlate(booking['plate']);
+    const hashFields = <String, String>{
+      'ID': 'idDocumentHash',
+      'OR': 'orDocumentHash',
+      'CR': 'crDocumentHash',
+    };
+
+    for (final entry in hashFields.entries) {
+      final hash = documentHashes[entry.key];
+      if (hash == null || hash.isEmpty) continue;
+      final matches = await FirebaseFirestore.instance
+          .collection('appointments')
+          .where(entry.value, isEqualTo: hash)
+          .limit(10)
+          .get();
+      for (final match in matches.docs) {
+        if (match.id == appointmentId) continue;
+        final other = match.data();
+        final differentCustomer =
+            customerId.isNotEmpty &&
+            other['customerId']?.toString().isNotEmpty == true &&
+            other['customerId']?.toString() != customerId;
+        final otherPlate = _normalizedPlate(other['plate']);
+        final differentPlate =
+            normalizedPlate.isNotEmpty &&
+            otherPlate.isNotEmpty &&
+            otherPlate != normalizedPlate;
+        if (differentCustomer || differentPlate) return true;
+      }
+    }
+    return false;
+  }
+
+  String _normalizedPlate(Object? value) {
+    return value.toString().toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+  }
+
   // ================= CHECK IF QUEUE IS ALREADY USED =================
 
   bool isQueueAlreadyUsedLocally(Map<String, dynamic> booking) {
@@ -489,35 +730,46 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   // ================= APPROVE APPOINTMENT =================
 
-  Future<bool> approveBooking(Map<String, dynamic> booking) async {
+  Future<bool> approveBooking(
+    Map<String, dynamic> booking, {
+    bool silent = false,
+    Map<String, dynamic>? automaticReview,
+    Map<String, String>? automaticDocumentHashes,
+  }) async {
     final String appointmentId = booking["appointmentId"]?.toString() ?? "";
     final String queue = booking["queue"]?.toString() ?? "";
     final String date = booking["date"]?.toString() ?? "";
 
     if (appointmentId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Appointment ID is missing.")),
-      );
+      if (!silent) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Appointment ID is missing.")),
+        );
+      }
       return false;
     }
 
     if (queue.isEmpty || date.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Queue code or appointment date is missing."),
-        ),
-      );
+      if (!silent) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Queue code or appointment date is missing."),
+          ),
+        );
+      }
       return false;
     }
 
     if (isQueueAlreadyUsedLocally(booking)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            "$queue is already taken on $date. Please reject this appointment or choose another slot.",
+      if (!silent) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              "$queue is already taken on $date. Please reject this appointment or choose another slot.",
+            ),
           ),
-        ),
-      );
+        );
+      }
       return false;
     }
 
@@ -527,9 +779,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
     if (usedInApprovedAppointments) {
       if (!mounted) return false;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("$queue is already approved online for $date.")),
-      );
+      if (!silent) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("$queue is already approved online for $date."),
+          ),
+        );
+      }
       return false;
     }
 
@@ -541,11 +797,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
     if (usedInQueue) {
       if (!mounted) return false;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("$queue already exists in the live queue for $date."),
-        ),
-      );
+      if (!silent) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("$queue already exists in the live queue for $date."),
+          ),
+        );
+      }
       return false;
     }
 
@@ -567,6 +825,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
       batch.update(appointmentRef, {
         "status": "Approved",
+        "approvalMethod": automaticReview == null
+            ? "manual"
+            : "conditional_auto_approval",
+        if (automaticReview != null) "autoApprovalReview": automaticReview,
+        if (automaticReview != null)
+          "autoApprovalReviewedAt": FieldValue.serverTimestamp(),
+        if (automaticDocumentHashes != null)
+          "idDocumentHash": automaticDocumentHashes['ID'],
+        if (automaticDocumentHashes != null)
+          "orDocumentHash": automaticDocumentHashes['OR'],
+        if (automaticDocumentHashes != null)
+          "crDocumentHash": automaticDocumentHashes['CR'],
         ...firestoreQueryFields(
           date: date,
           plate: booking["plate"],
@@ -614,19 +884,23 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
       if (!mounted) return true;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("$queue approved and added to live queue for $date"),
-        ),
-      );
+      if (!silent) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("$queue approved and added to live queue for $date"),
+          ),
+        );
+      }
 
       return true;
     } catch (e) {
       if (!mounted) return false;
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Approval failed: $e")));
+      if (!silent) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Approval failed: $e")));
+      }
 
       return false;
     }
@@ -917,6 +1191,15 @@ class _AdminDashboardState extends State<AdminDashboard> {
                                 ],
                               ),
                             ),
+
+                            if (booking['autoApprovalReview'] is Map) ...[
+                              const SizedBox(height: 14),
+                              _savedAutoApprovalReview(
+                                Map<String, dynamic>.from(
+                                  booking['autoApprovalReview'] as Map,
+                                ),
+                              ),
+                            ],
 
                             const SizedBox(height: 22),
 
@@ -1233,6 +1516,36 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
+  void _listenToAppointmentApprovalSettings() {
+    _appointmentApprovalSettingsSubscription =
+        AppointmentApprovalSettings.watch().listen(
+          (settings) {
+            _conditionalAutoApprovalEnabled =
+                settings.conditionalAutoApprovalEnabled;
+            _autoApprovalMinimumScore = settings.minimumScore;
+            if (_conditionalAutoApprovalEnabled) {
+              _scheduleConditionalAutoApproval();
+            }
+          },
+          onError: (_) {
+            _conditionalAutoApprovalEnabled = false;
+          },
+        );
+  }
+
+  void _scheduleConditionalAutoApproval() {
+    if (!_conditionalAutoApprovalEnabled || !mounted) return;
+    if (_autoApprovalBatchRunning) {
+      _autoApprovalBatchQueued = true;
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_conditionalAutoApprovalEnabled) return;
+      unawaited(_processPendingAppointmentsForConditionalAutoApproval());
+    });
+  }
+
   Future<({Uint8List bytes, String fileName})> loadDocumentBytesForReview({
     required Map<String, dynamic> booking,
     required String documentType,
@@ -1289,6 +1602,17 @@ class _AdminDashboardState extends State<AdminDashboard> {
     Map<String, dynamic> booking, {
     required void Function(String message) onProgress,
   }) async {
+    final analysis = await analyzeBookingDocumentsDetailed(
+      booking,
+      onProgress: onProgress,
+    );
+    return analysis.review;
+  }
+
+  Future<_AppointmentDocumentAnalysis> analyzeBookingDocumentsDetailed(
+    Map<String, dynamic> booking, {
+    required void Function(String message) onProgress,
+  }) async {
     final recognizer = DocumentTextRecognizer();
     if (!recognizer.isSupported) {
       throw UnsupportedError(
@@ -1298,6 +1622,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
     final texts = <String, String>{};
     final errors = <String, String>{};
+    final documentHashes = <String, String>{};
 
     Future<void> recognizeOne(String documentType, String label) async {
       onProgress('Loading $label...');
@@ -1306,6 +1631,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
           booking: booking,
           documentType: documentType,
         );
+        documentHashes[documentType] = sha256
+            .convert(document.bytes)
+            .toString();
 
         if (document.fileName.toLowerCase().endsWith('.pdf')) {
           errors[documentType] =
@@ -1340,13 +1668,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
 
     onProgress('Comparing extracted details...');
-    return DocumentReviewAnalyzer.analyze(
-      customerName: booking['fullName']?.toString().trim() ?? '',
-      enteredPlate: booking['plate']?.toString().trim() ?? '',
-      idText: texts['ID'] ?? '',
-      orText: texts['OR'] ?? '',
-      crText: texts['CR'] ?? '',
-      errors: errors,
+    return _AppointmentDocumentAnalysis(
+      review: DocumentReviewAnalyzer.analyze(
+        customerName: booking['fullName']?.toString().trim() ?? '',
+        enteredPlate: booking['plate']?.toString().trim() ?? '',
+        idText: texts['ID'] ?? '',
+        orText: texts['OR'] ?? '',
+        crText: texts['CR'] ?? '',
+        errors: errors,
+      ),
+      documentHashes: documentHashes,
     );
   }
 
@@ -1377,6 +1708,74 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 fontWeight: FontWeight.w600,
                 height: 1.35,
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _savedAutoApprovalReview(Map<String, dynamic> review) {
+    final outcome = review['outcome']?.toString() ?? '';
+    final score = review['score'];
+    final reason = review['reason']?.toString().trim() ?? '';
+    final (icon, color, label) = switch (outcome) {
+      'auto_approved' => (
+        Icons.verified_rounded,
+        AppColors.success,
+        'Conditionally auto-approved',
+      ),
+      'resubmission_recommended' => (
+        Icons.upload_file_rounded,
+        AppColors.danger,
+        'Clearer or corrected upload recommended',
+      ),
+      'processing' => (
+        Icons.hourglass_top_rounded,
+        Colors.blue,
+        'Automatic document review in progress',
+      ),
+      _ => (
+        Icons.person_search_rounded,
+        AppColors.warning,
+        'Kept pending for manual review',
+      ),
+    };
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: color, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  score is num ? '$label • Score ${score.round()}/100' : label,
+                  style: TextStyle(color: color, fontWeight: FontWeight.w900),
+                ),
+                if (reason.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    reason,
+                    style: TextStyle(
+                      color: _mutedTextColor,
+                      fontSize: 12.5,
+                      height: 1.35,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ],
