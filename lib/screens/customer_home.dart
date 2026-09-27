@@ -988,30 +988,30 @@ class _ActionCard extends StatelessWidget {
     final Color subtitleColor = isFilled ? Colors.white70 : _mutedTextColor;
     final Color iconBackgroundColor = isFilled
         ? Colors.white.withOpacity(0.14)
-        : _primaryColor.withOpacity(0.08);
+        : AppColors.activeSoftPrimary;
     final Color iconColor = isFilled ? Colors.white : _primaryColor;
     final Color arrowColor = isFilled
         ? Colors.white70
         : _primaryColor.withOpacity(0.45);
 
     return AppHoverLift(
-      borderRadius: 24,
+      borderRadius: AppRadii.card,
       child: Material(
         color: backgroundColor,
-        borderRadius: BorderRadius.circular(24),
-        elevation: isFilled ? 4 : 2,
-        shadowColor: _primaryColor.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        elevation: isFilled ? 2 : 0,
+        shadowColor: _primaryColor.withOpacity(0.10),
         child: InkWell(
-          borderRadius: BorderRadius.circular(24),
+          borderRadius: BorderRadius.circular(AppRadii.card),
           onTap: onTap,
           child: Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(AppRadii.card),
               border: Border.all(
-                color: isFilled ? _primaryColor : _primaryColor,
-                width: isFilled ? 0 : 1.5,
+                color: isFilled ? _primaryColor : AppColors.activeBorder,
+                width: isFilled ? 0 : 1,
               ),
             ),
             child: Row(
@@ -1021,7 +1021,7 @@ class _ActionCard extends StatelessWidget {
                   width: 52,
                   decoration: BoxDecoration(
                     color: iconBackgroundColor,
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(AppRadii.control),
                   ),
                   child: Icon(icon, color: iconColor, size: 28),
                 ),

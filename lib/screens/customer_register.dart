@@ -259,10 +259,10 @@ class _CustomerRegisterState extends State<CustomerRegister> {
           style: ElevatedButton.styleFrom(
             backgroundColor: _primaryColor,
             foregroundColor: Colors.white,
-            elevation: 3,
-            shadowColor: _primaryColor.withValues(alpha: 0.18),
+            elevation: 0,
+            shadowColor: Colors.transparent,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(AppRadii.control),
             ),
             textStyle: const TextStyle(
               fontWeight: FontWeight.bold,
@@ -286,14 +286,9 @@ class _CustomerRegisterState extends State<CustomerRegister> {
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
                       color: _cardColor,
-                      borderRadius: BorderRadius.circular(26),
+                      borderRadius: BorderRadius.circular(AppRadii.card),
                       border: Border.all(color: _borderColor),
-                      boxShadow: [
-                        BoxShadow(
-                          color: _primaryColor.withValues(alpha: 0.08),
-                          blurRadius: 18,
-                        ),
-                      ],
+                      boxShadow: AppEffects.cardShadow,
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -303,7 +298,9 @@ class _CustomerRegisterState extends State<CustomerRegister> {
                           width: 58,
                           decoration: BoxDecoration(
                             color: _primaryColor,
-                            borderRadius: BorderRadius.circular(18),
+                            borderRadius: BorderRadius.circular(
+                              AppRadii.control,
+                            ),
                           ),
                           child: const Icon(
                             Icons.person_add_alt_1_rounded,
@@ -353,14 +350,9 @@ class _CustomerRegisterState extends State<CustomerRegister> {
                     padding: const EdgeInsets.all(18),
                     decoration: BoxDecoration(
                       color: _cardColor,
-                      borderRadius: BorderRadius.circular(24),
+                      borderRadius: BorderRadius.circular(AppRadii.card),
                       border: Border.all(color: _borderColor),
-                      boxShadow: [
-                        BoxShadow(
-                          color: _primaryColor.withValues(alpha: 0.06),
-                          blurRadius: 14,
-                        ),
-                      ],
+                      boxShadow: AppEffects.cardShadow,
                     ),
                     child: Column(
                       children: [
@@ -469,7 +461,7 @@ class _CustomerRegisterState extends State<CustomerRegister> {
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: _softPrimaryColor,
-                      borderRadius: BorderRadius.circular(18),
+                      borderRadius: BorderRadius.circular(AppRadii.control),
                       border: Border.all(color: _borderColor),
                     ),
                     child: Row(

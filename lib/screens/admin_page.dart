@@ -1005,37 +1005,6 @@ class _AdminPageState extends State<AdminPage> {
     );
   }
 
-  // ================= PICK QUEUE DATE =================
-
-  Future<void> pickQueueDate() async {
-    final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
-    DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: today,
-      firstDate: today,
-      lastDate: DateTime(today.year + 5, 12, 31),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: ColorScheme.light(
-              primary: _primaryColor,
-              onPrimary: Colors.white,
-              surface: _cardColor,
-              onSurface: _primaryColor,
-            ),
-          ),
-          child: child!,
-        );
-      },
-    );
-
-    if (picked != null) {
-      selectedQueueDateNotifier.value = formatDate(picked);
-      setState(() {});
-    }
-  }
-
   // ================= FILTER QUEUE BY SELECTED DATE =================
 
   List<Map<String, dynamic>> getQueueForSelectedDate() {
@@ -2341,6 +2310,13 @@ class _AdminPageState extends State<AdminPage> {
                 ? getDisplayedNowServing()
                 : (onlineNowServing.isEmpty ? null : onlineNowServing.last);
 
+            final bool desktopShell =
+                kIsWeb && MediaQuery.sizeOf(context).width >= 1000;
+            final queuePanelBody = buildQueuePanelBody(
+              selectedDateQueue: selectedDateQueue,
+              displayedNowServing: displayedNowServing,
+            );
+
             return Theme(
               data: Theme.of(context).copyWith(
                 scaffoldBackgroundColor: _backgroundColor,
@@ -2378,101 +2354,395 @@ class _AdminPageState extends State<AdminPage> {
                   ),
                 ),
               ),
-              child: Scaffold(
-                backgroundColor: _backgroundColor,
-                drawer: buildDrawer(),
-                appBar: AppBar(
-                  title: Text(
-                    text("Admin Control Panel", "Admin Control Panel"),
-                  ),
-                  actions: [
-                    _buildThemeModeButton(),
-                    _buildAppointmentNotificationButton(),
-                    buildRefreshControl(context),
-                    const SizedBox(width: 12),
-                  ],
-                ),
-                body: SafeArea(
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final bool wide = isWideScreen(constraints.maxWidth);
-                      final bool tablet = isTabletScreen(constraints.maxWidth);
-                      final double pagePadding = wide ? 20 : 12;
-
-                      final double waitingListHeight = wide || tablet
-                          ? (constraints.maxHeight - 420).clamp(360.0, 720.0)
-                          : 430.0;
-
-                      return AppResponsiveContent(
-                        maxWidth: 1400,
-                        child: AppRefreshIndicator(
-                          onRefresh: refreshQueue,
-                          child: SingleChildScrollView(
-                            physics: const AlwaysScrollableScrollPhysics(),
-                            padding: EdgeInsets.all(pagePadding),
-                            child: ConstrainedBox(
-                              constraints: BoxConstraints(
-                                minHeight:
-                                    constraints.maxHeight - (pagePadding * 2),
-                              ),
-                              child: Column(
-                                children: [
-                                  buildDateSelector(),
-                                  const SizedBox(height: 14),
-                                  buildStatsSection(
-                                    selectedDateQueue: selectedDateQueue,
-                                    compact: !wide,
-                                  ),
-                                  const SizedBox(height: 18),
-                                  if (wide || tablet)
-                                    Row(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        SizedBox(
-                                          width: wide ? 245 : 215,
-                                          child: buildLeftPanel(),
-                                        ),
-                                        const SizedBox(width: 18),
-                                        Expanded(
-                                          child: buildRightPanel(
-                                            selectedDateQueue:
-                                                selectedDateQueue,
-                                            displayedNowServing:
-                                                displayedNowServing,
-                                            waitingListHeight:
-                                                waitingListHeight,
-                                          ),
-                                        ),
-                                      ],
-                                    )
-                                  else
-                                    Column(
-                                      children: [
-                                        buildLeftPanel(),
-                                        const SizedBox(height: 16),
-                                        buildRightPanel(
-                                          selectedDateQueue: selectedDateQueue,
-                                          displayedNowServing:
-                                              displayedNowServing,
-                                          waitingListHeight: waitingListHeight,
-                                        ),
-                                      ],
-                                    ),
-                                ],
-                              ),
+              child: desktopShell
+                  ? Scaffold(
+                      backgroundColor: _backgroundColor,
+                      body: Row(
+                        children: [
+                          buildDesktopSidebar(),
+                          Expanded(
+                            child: Column(
+                              children: [
+                                buildDesktopHeader(),
+                                Expanded(child: queuePanelBody),
+                              ],
                             ),
                           ),
+                        ],
+                      ),
+                    )
+                  : Scaffold(
+                      backgroundColor: _backgroundColor,
+                      drawer: buildDrawer(),
+                      appBar: AppBar(
+                        title: Text(
+                          text("Admin Control Panel", "Admin Control Panel"),
                         ),
-                      );
-                    },
-                  ),
-                ),
-              ),
+                        actions: [
+                          _buildThemeModeButton(),
+                          _buildAppointmentNotificationButton(),
+                          buildRefreshControl(context),
+                          const SizedBox(width: 12),
+                        ],
+                      ),
+                      body: queuePanelBody,
+                    ),
             );
           },
         );
       },
+    );
+  }
+
+  Widget buildQueuePanelBody({
+    required List<Map<String, dynamic>> selectedDateQueue,
+    required Map<String, dynamic>? displayedNowServing,
+  }) {
+    return SafeArea(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final bool wide = isWideScreen(constraints.maxWidth);
+          final bool tablet = isTabletScreen(constraints.maxWidth);
+          final double pagePadding = wide ? 20 : 12;
+          final double waitingListHeight = wide || tablet
+              ? (constraints.maxHeight - 420).clamp(360.0, 720.0)
+              : 430.0;
+
+          return AppResponsiveContent(
+            maxWidth: 1400,
+            child: AppRefreshIndicator(
+              onRefresh: refreshQueue,
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: EdgeInsets.all(pagePadding),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: constraints.maxHeight - (pagePadding * 2),
+                  ),
+                  child: Column(
+                    children: [
+                      buildStatsSection(
+                        selectedDateQueue: selectedDateQueue,
+                        compact: !wide,
+                      ),
+                      const SizedBox(height: 18),
+                      if (wide)
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(flex: 4, child: buildLeftPanel()),
+                            const SizedBox(width: 20),
+                            Expanded(
+                              flex: 8,
+                              child: buildNowServingCard(displayedNowServing),
+                            ),
+                          ],
+                        )
+                      else if (tablet)
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            SizedBox(width: 230, child: buildLeftPanel()),
+                            const SizedBox(width: 18),
+                            Expanded(
+                              child: buildNowServingCard(displayedNowServing),
+                            ),
+                          ],
+                        )
+                      else
+                        Column(
+                          children: [
+                            buildNowServingCard(displayedNowServing),
+                            const SizedBox(height: 16),
+                            buildLeftPanel(),
+                          ],
+                        ),
+                      const SizedBox(height: 18),
+                      SizedBox(
+                        height: waitingListHeight,
+                        child: buildWaitingQueueCard(
+                          selectedDateQueue,
+                          canCallCustomer:
+                              displayedNowServing == null &&
+                              !_isCallingCustomer,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget buildDesktopHeader() {
+    final user = FirebaseAuth.instance.currentUser;
+    final rawName = user?.displayName?.trim().isNotEmpty == true
+        ? user!.displayName!.trim()
+        : (user?.email?.split('@').first ?? 'Admin');
+    final displayName = rawName.isEmpty ? 'Admin' : rawName;
+    final initials = displayName
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .take(2)
+        .map((part) => part[0].toUpperCase())
+        .join();
+
+    return Container(
+      height: 66,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      decoration: BoxDecoration(
+        color: _cardColor,
+        border: Border(bottom: BorderSide(color: _borderColor)),
+      ),
+      child: Row(
+        children: [
+          Text(
+            text('Admin Control Panel', 'Admin Control Panel'),
+            style: TextStyle(
+              color: _primaryColor,
+              fontSize: 20,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -0.2,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: AppColors.success.withValues(alpha: 0.11),
+              borderRadius: BorderRadius.circular(30),
+              border: Border.all(
+                color: AppColors.success.withValues(alpha: 0.22),
+              ),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.circle, size: 8, color: AppColors.success),
+                SizedBox(width: 6),
+                Text(
+                  'LIVE OPERATIONAL DAY',
+                  style: TextStyle(
+                    color: AppColors.success,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Spacer(),
+          _buildThemeModeButton(),
+          _buildAppointmentNotificationButton(),
+          buildRefreshControl(context),
+          const SizedBox(width: 12),
+          Container(width: 1, height: 30, color: _borderColor),
+          const SizedBox(width: 12),
+          CircleAvatar(
+            radius: 18,
+            backgroundColor: _primaryColor,
+            child: Text(
+              initials.isEmpty ? 'A' : initials,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          const SizedBox(width: 9),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 150),
+            child: Text(
+              '$displayName (Admin)',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: _primaryColor,
+                fontSize: 12.5,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget buildDesktopSidebar() {
+    return Container(
+      width: 220,
+      color: AppColors.primary,
+      padding: const EdgeInsets.fromLTRB(14, 18, 14, 16),
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.admin_panel_settings_rounded,
+                      color: AppColors.primary,
+                      size: 23,
+                    ),
+                  ),
+                  const SizedBox(width: 11),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Admin Suite',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          'Emission Testing',
+                          style: TextStyle(
+                            color: Color(0xFFB9C8D8),
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 18),
+            const Divider(color: Color(0xFF29445F), height: 1),
+            const SizedBox(height: 18),
+            desktopSidebarItem(
+              icon: Icons.format_list_numbered_rounded,
+              title: text('Queue Panel', 'Queue Panel'),
+              selected: true,
+              onTap: () {},
+            ),
+            desktopSidebarItem(
+              icon: Icons.calendar_month_rounded,
+              title: text('Appointment', 'Appointment'),
+              onTap: _openAppointmentDashboard,
+            ),
+            desktopSidebarItem(
+              icon: Icons.description_rounded,
+              title: text('Reports', 'Reports'),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const DailyReport()),
+                );
+              },
+            ),
+            desktopSidebarItem(
+              icon: Icons.bar_chart_rounded,
+              title: text('Analytics', 'Analytics'),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AnalyticsPage()),
+                );
+              },
+            ),
+            desktopSidebarItem(
+              icon: Icons.settings_rounded,
+              title: text('Settings', 'Settings'),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AdminSettings()),
+                ).then((_) {
+                  if (mounted) setState(() {});
+                });
+              },
+            ),
+            const Spacer(),
+            const Divider(color: Color(0xFF29445F), height: 1),
+            const SizedBox(height: 10),
+            desktopSidebarItem(
+              icon: Icons.logout_rounded,
+              title: text('Logout', 'Logout'),
+              isLogout: true,
+              onTap: _logoutAdmin,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget desktopSidebarItem({
+    required IconData icon,
+    required String title,
+    required VoidCallback onTap,
+    bool selected = false,
+    bool isLogout = false,
+  }) {
+    final foreground = isLogout
+        ? const Color(0xFFFF7B83)
+        : selected
+        ? AppColors.primary
+        : const Color(0xFFD7E2ED);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 7),
+      child: Material(
+        color: selected ? Colors.white : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          hoverColor: Colors.white.withValues(alpha: 0.08),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 12),
+            child: Row(
+              children: [
+                Icon(icon, size: 19, color: foreground),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      color: foreground,
+                      fontSize: 13,
+                      fontWeight: selected ? FontWeight.w900 : FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _logoutAdmin() async {
+    await _saveReadAdminAppointmentNotifications();
+    await FirebaseAuth.instance.signOut();
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const HomePage()),
+      (route) => false,
     );
   }
 
@@ -2570,18 +2840,7 @@ class _AdminPageState extends State<AdminPage> {
             icon: Icons.logout_rounded,
             title: text("Logout", "Logout"),
             isLogout: true,
-            onTap: () async {
-              await _saveReadAdminAppointmentNotifications();
-              await FirebaseAuth.instance.signOut();
-
-              if (!context.mounted) return;
-
-              Navigator.pushAndRemoveUntil(
-                context,
-                MaterialPageRoute(builder: (_) => const HomePage()),
-                (route) => false,
-              );
-            },
+            onTap: _logoutAdmin,
           ),
         ],
       ),
@@ -2608,38 +2867,6 @@ class _AdminPageState extends State<AdminPage> {
           ),
         ),
         onTap: onTap,
-      ),
-    );
-  }
-
-  // ================= DATE SELECTOR =================
-
-  Widget buildDateSelector() {
-    return cardContainer(
-      child: Row(
-        children: [
-          iconBox(Icons.calendar_month_rounded),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              text(
-                "Date: ${selectedQueueDateNotifier.value}",
-                "Petsa: ${selectedQueueDateNotifier.value}",
-              ),
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontWeight: FontWeight.w800,
-                color: _primaryColor,
-                fontSize: 15,
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          ElevatedButton(
-            onPressed: pickQueueDate,
-            child: Text(text("Change Date", "Palitan")),
-          ),
-        ],
       ),
     );
   }
@@ -2721,7 +2948,7 @@ class _AdminPageState extends State<AdminPage> {
             children: [
               sectionHeader(
                 icon: Icons.confirmation_number_rounded,
-                title: text("Generate Queue", "Gumawa ng Queue"),
+                title: text("GENERATE QUEUE TICKET", "GUMAWA NG QUEUE TICKET"),
               ),
               const SizedBox(height: 15),
               SizedBox(
@@ -2765,6 +2992,12 @@ class _AdminPageState extends State<AdminPage> {
                 child: ElevatedButton.icon(
                   icon: const Icon(Icons.tv_rounded),
                   label: Text(text("DISPLAY PAGE", "DISPLAY PAGE")),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _softPrimaryColor,
+                    foregroundColor: _primaryColor,
+                    side: BorderSide(color: _borderColor),
+                    elevation: 0,
+                  ),
                   onPressed: _openDisplayPage,
                 ),
               ),
@@ -2789,101 +3022,90 @@ class _AdminPageState extends State<AdminPage> {
     );
   }
 
-  // ================= RIGHT PANEL =================
-
-  Widget buildRightPanel({
-    required List<Map<String, dynamic>> selectedDateQueue,
-    required Map<String, dynamic>? displayedNowServing,
-    required double waitingListHeight,
-  }) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        buildNowServingCard(displayedNowServing),
-        const SizedBox(height: 18),
-        SizedBox(
-          height: waitingListHeight,
-          child: buildWaitingQueueCard(
-            selectedDateQueue,
-            canCallCustomer: displayedNowServing == null && !_isCallingCustomer,
-          ),
-        ),
-      ],
-    );
-  }
-
   // ================= NOW SERVING CARD =================
 
   Widget buildNowServingCard(Map<String, dynamic>? displayedNowServing) {
+    final bool desktop = kIsWeb && MediaQuery.sizeOf(context).width >= 1000;
     return cardContainer(
-      child: Column(
-        children: [
-          sectionHeader(
-            icon: Icons.campaign_rounded,
-            title: text("NOW SERVING", "KASALUKUYANG TINATAWAG"),
-            centered: true,
-          ),
-          const SizedBox(height: 16),
-          AppStatusPulse(
-            active: displayedNowServing != null,
-            color: AppColors.danger,
-            borderRadius: 20,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
-              decoration: BoxDecoration(
-                color: _softPrimaryColor,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: _borderColor),
-              ),
-              child: Column(
-                children: [
-                  FittedBox(
-                    fit: BoxFit.scaleDown,
-                    child: Text(
-                      displayedNowServing == null
-                          ? "-"
-                          : displayedNowServing['queue'],
-                      style: const TextStyle(
-                        fontSize: 54,
-                        fontWeight: FontWeight.w900,
-                        color: Colors.red,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(minHeight: desktop ? 314 : 0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            sectionHeader(
+              icon: Icons.campaign_rounded,
+              title: text("NOW SERVING", "KASALUKUYANG TINATAWAG"),
+              centered: true,
+            ),
+            const SizedBox(height: 16),
+            AppStatusPulse(
+              active: displayedNowServing != null,
+              color: AppColors.danger,
+              borderRadius: 20,
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  vertical: 18,
+                  horizontal: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: _softPrimaryColor,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: _borderColor),
+                ),
+                child: Column(
+                  children: [
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        displayedNowServing == null
+                            ? "-"
+                            : displayedNowServing['queue'],
+                        style: const TextStyle(
+                          fontSize: 54,
+                          fontWeight: FontWeight.w900,
+                          color: Colors.red,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    displayedNowServing == null
-                        ? text(
-                            "No customer currently called",
-                            "Walang tinatawag",
-                          )
-                        : displayedNowServing['name'],
-                    textAlign: TextAlign.center,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      color: _primaryColor,
+                    const SizedBox(height: 6),
+                    Text(
+                      displayedNowServing == null
+                          ? text(
+                              "No customer currently called",
+                              "Walang tinatawag",
+                            )
+                          : displayedNowServing['name'],
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w700,
+                        color: _primaryColor,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 18),
-          Wrap(
-            alignment: WrapAlignment.center,
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              miniButton(Icons.volume_up_rounded, Colors.blue, callAgain),
-              miniButton(Icons.skip_next_rounded, Colors.orange, skipCustomer),
-              miniButton(Icons.check_rounded, Colors.green, markPassed),
-              miniButton(Icons.close_rounded, Colors.red, markFailed),
-            ],
-          ),
-        ],
+            const SizedBox(height: 18),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 10,
+              runSpacing: 10,
+              children: [
+                miniButton(Icons.volume_up_rounded, Colors.blue, callAgain),
+                miniButton(
+                  Icons.skip_next_rounded,
+                  Colors.orange,
+                  skipCustomer,
+                ),
+                miniButton(Icons.check_rounded, Colors.green, markPassed),
+                miniButton(Icons.close_rounded, Colors.red, markFailed),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2898,12 +3120,48 @@ class _AdminPageState extends State<AdminPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          sectionHeader(
-            icon: Icons.groups_rounded,
-            title: text(
-              "Waiting Queue - ${selectedQueueDateNotifier.value}",
-              "Waiting Queue - ${selectedQueueDateNotifier.value}",
-            ),
+          Row(
+            children: [
+              Icon(Icons.format_list_numbered_rounded, color: _primaryColor),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  text('WAITING QUEUE DETAILS', 'WAITING QUEUE DETAILS'),
+                  style: TextStyle(
+                    color: _primaryColor,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: _softPrimaryColor,
+                  borderRadius: BorderRadius.circular(30),
+                  border: Border.all(color: _borderColor),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.circle, size: 7, color: AppColors.success),
+                    const SizedBox(width: 5),
+                    Text(
+                      'Live Sync Active',
+                      style: TextStyle(
+                        color: _mutedTextColor,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 15),
           Expanded(
@@ -2935,6 +3193,19 @@ class _AdminPageState extends State<AdminPage> {
                             style: TextStyle(
                               color: _primaryColor,
                               fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            text(
+                              'Generate a ticket above to start serving',
+                              'Gumawa ng ticket sa itaas upang magsimula',
+                            ),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: _mutedTextColor,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
                         ],
@@ -3178,7 +3449,7 @@ class _AdminPageState extends State<AdminPage> {
   Widget cardContainer({
     required Widget child,
     EdgeInsetsGeometry padding = const EdgeInsets.all(16),
-    double borderRadius = 22,
+    double borderRadius = AppRadii.card,
   }) {
     return Container(
       width: double.infinity,
@@ -3187,9 +3458,7 @@ class _AdminPageState extends State<AdminPage> {
         color: _cardColor,
         borderRadius: BorderRadius.circular(borderRadius),
         border: Border.all(color: _borderColor),
-        boxShadow: [
-          BoxShadow(color: _primaryColor.withOpacity(0.06), blurRadius: 14),
-        ],
+        boxShadow: AppEffects.cardShadow,
       ),
       child: child,
     );
@@ -3200,11 +3469,14 @@ class _AdminPageState extends State<AdminPage> {
       height: 42,
       width: 42,
       decoration: BoxDecoration(
-        color: _softPrimaryColor,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _borderColor),
+        color: _primaryColor,
+        borderRadius: BorderRadius.circular(AppRadii.control),
       ),
-      child: Icon(icon, color: _primaryColor, size: 23),
+      child: Icon(
+        icon,
+        color: isAppDarkMode ? AppColors.darkBackground : Colors.white,
+        size: 22,
+      ),
     );
   }
 
@@ -3239,7 +3511,7 @@ class _AdminPageState extends State<AdminPage> {
   // ================= STAT CARD =================
 
   Widget statCard(String title, String value) {
-    return Expanded(child: statContent(title, value));
+    return Expanded(child: statContent(title, value, wideDesktop: true));
   }
 
   Widget statBox(String title, String value) {
@@ -3259,6 +3531,7 @@ class _AdminPageState extends State<AdminPage> {
     String title,
     String value, {
     bool compactMobileWeb = false,
+    bool wideDesktop = false,
   }) {
     IconData icon = Icons.confirmation_number_rounded;
     Color accentColor = _primaryColor;
@@ -3269,6 +3542,60 @@ class _AdminPageState extends State<AdminPage> {
     } else if (title.contains("Completed") || title.contains("Tapos")) {
       icon = Icons.check_circle_outline_rounded;
       accentColor = Colors.green;
+    }
+
+    if (wideDesktop) {
+      return AppHoverLift(
+        enabled: kIsWeb,
+        borderRadius: 20,
+        lift: 2,
+        child: cardContainer(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+          borderRadius: 20,
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title.toUpperCase(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: _mutedTextColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.1,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      value,
+                      style: TextStyle(
+                        color: _primaryColor,
+                        fontSize: 30,
+                        fontWeight: FontWeight.w900,
+                        height: 1,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Container(
+                height: 50,
+                width: 50,
+                decoration: BoxDecoration(
+                  color: accentColor.withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(icon, color: accentColor, size: 25),
+              ),
+            ],
+          ),
+        ),
+      );
     }
 
     return cardContainer(

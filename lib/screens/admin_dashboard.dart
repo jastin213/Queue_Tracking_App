@@ -701,9 +701,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                       maxLines: 5,
                       maxLength: 300,
                       decoration: InputDecoration(
-                        labelText: appText(
-                          "Message / feedback for customer",
-                        ),
+                        labelText: appText("Message / feedback for customer"),
                         hintText: appText(
                           "Example: This slot was already taken. Please choose another available queue code.",
                         ),
@@ -1947,13 +1945,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
     if (title == "Pending") {
       icon = Icons.pending_actions_rounded;
-      accentColor = Colors.orange;
+      accentColor = AppColors.warning;
     } else if (title == "Approved") {
       icon = Icons.check_circle_outline_rounded;
-      accentColor = Colors.green;
+      accentColor = AppColors.success;
     } else {
       icon = Icons.cancel_outlined;
-      accentColor = Colors.red;
+      accentColor = AppColors.danger;
     }
 
     final bool isExpanded = _expandedOverviewStatus == title;
@@ -1961,9 +1959,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return Expanded(
       child: Material(
         color: Colors.transparent,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(AppRadii.card),
         child: InkWell(
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(AppRadii.card),
           onTap: () {
             setState(() {
               _expandedOverviewStatus = isExpanded ? null : title;
@@ -1976,17 +1974,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
               color: isExpanded
                   ? accentColor.withValues(alpha: 0.06)
                   : _cardColor,
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(AppRadii.card),
               border: Border.all(
                 color: isExpanded ? accentColor : _borderColor,
                 width: isExpanded ? 1.6 : 1,
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: _primaryColor.withValues(alpha: 0.06),
-                  blurRadius: 14,
-                ),
-              ],
+              boxShadow: AppEffects.cardShadow,
             ),
             child: Column(
               children: [
@@ -1995,7 +1988,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   width: 42,
                   decoration: BoxDecoration(
                     color: accentColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(AppRadii.control),
                   ),
                   child: Icon(icon, color: accentColor, size: 24),
                 ),
@@ -3122,16 +3115,29 @@ class _AdminDashboardState extends State<AdminDashboard> {
                         width: double.infinity,
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: _softPrimaryColor,
-                          borderRadius: BorderRadius.circular(22),
+                          color: _cardColor,
+                          borderRadius: BorderRadius.circular(AppRadii.card),
                           border: Border.all(color: _borderColor),
+                          boxShadow: AppEffects.cardShadow,
                         ),
                         child: Row(
                           children: [
-                            Icon(
-                              Icons.dashboard_customize_rounded,
-                              color: _primaryColor,
-                              size: 24,
+                            Container(
+                              width: 40,
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: _primaryColor,
+                                borderRadius: BorderRadius.circular(
+                                  AppRadii.control,
+                                ),
+                              ),
+                              child: Icon(
+                                Icons.dashboard_customize_rounded,
+                                color: isAppDarkMode
+                                    ? AppColors.darkBackground
+                                    : Colors.white,
+                                size: 22,
+                              ),
                             ),
                             const SizedBox(width: 10),
                             Expanded(
@@ -3209,14 +3215,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                           padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
                             color: _cardColor,
-                            borderRadius: BorderRadius.circular(24),
+                            borderRadius: BorderRadius.circular(AppRadii.card),
                             border: Border.all(color: _borderColor),
-                            boxShadow: [
-                              BoxShadow(
-                                color: _primaryColor.withValues(alpha: 0.06),
-                                blurRadius: 14,
-                              ),
-                            ],
+                            boxShadow: AppEffects.cardShadow,
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,

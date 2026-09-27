@@ -675,14 +675,9 @@ class _AdminSettingsState extends State<AdminSettings> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: _cardColor,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(AppRadii.card),
         border: Border.all(color: _borderColor),
-        boxShadow: [
-          BoxShadow(
-            color: _primaryColor.withValues(alpha: 0.06),
-            blurRadius: 14,
-          ),
-        ],
+        boxShadow: AppEffects.cardShadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -739,7 +734,7 @@ class _AdminSettingsState extends State<AdminSettings> {
           width: 42,
           decoration: BoxDecoration(
             color: _softPrimaryColor,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(AppRadii.control),
             border: Border.all(color: _borderColor),
           ),
           child: Icon(icon, color: _primaryColor, size: 22),
@@ -799,9 +794,13 @@ class _AdminSettingsState extends State<AdminSettings> {
       width: 42,
       decoration: BoxDecoration(
         color: _primaryColor,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppRadii.control),
       ),
-      child: Icon(icon, color: Colors.white, size: 22),
+      child: Icon(
+        icon,
+        color: isAppDarkMode ? AppColors.darkBackground : Colors.white,
+        size: 22,
+      ),
     );
   }
 }

@@ -37,26 +37,27 @@ bool get isAppDarkMode => appThemeModeNotifier.value == ThemeMode.dark;
 /// consistent without touching authentication, queue, appointment, or report
 /// logic.
 abstract final class AppColors {
-  // Light mode uses a cool slate canvas so white content surfaces remain
-  // clearly separated without making the interface feel heavy.
-  static const Color background = Color(0xFFE7F0F4);
-  static const Color primary = Color(0xFF082B45);
+  // Shared visual language: crisp slate canvas, deep service-industry navy,
+  // clean white surfaces, and restrained status accents.
+  static const Color background = Color(0xFFF1F5F8);
+  static const Color primary = Color(0xFF0F2B48);
   static const Color surface = Colors.white;
-  static const Color border = Color(0xFFB9CDD7);
-  static const Color mutedText = Color(0xFF536B78);
-  static const Color softPrimary = Color(0xFFDCEAF0);
-  static const Color success = Color(0xFF16835B);
-  static const Color warning = Color(0xFFD98200);
-  static const Color danger = Color(0xFFD63830);
+  static const Color border = Color(0xFFD3DEE7);
+  static const Color mutedText = Color(0xFF607487);
+  static const Color softPrimary = Color(0xFFEDF3F7);
+  static const Color accent = Color(0xFF2563EB);
+  static const Color success = Color(0xFF0D9568);
+  static const Color warning = Color(0xFFF59E0B);
+  static const Color danger = Color(0xFFE5484D);
 
   // Dark mode keeps the same brand character while increasing the depth
   // between the page canvas, cards, and inset controls.
-  static const Color darkBackground = Color(0xFF07141F);
-  static const Color darkPrimary = Color(0xFF67B9E1);
-  static const Color darkSurface = Color(0xFF122838);
-  static const Color darkBorder = Color(0xFF3A5B6E);
-  static const Color darkMutedText = Color(0xFFBDD0DB);
-  static const Color darkSoftPrimary = Color(0xFF1D3A4D);
+  static const Color darkBackground = Color(0xFF07111D);
+  static const Color darkPrimary = Color(0xFF7CC5E8);
+  static const Color darkSurface = Color(0xFF0F2233);
+  static const Color darkBorder = Color(0xFF294158);
+  static const Color darkMutedText = Color(0xFFB8C7D5);
+  static const Color darkSoftPrimary = Color(0xFF172F43);
 
   static Color get activeBackground =>
       isAppDarkMode ? darkBackground : background;
@@ -79,9 +80,9 @@ abstract final class AppSpacing {
 }
 
 abstract final class AppRadii {
-  static const double control = 14;
-  static const double card = 22;
-  static const double dialog = 26;
+  static const double control = 12;
+  static const double card = 18;
+  static const double dialog = 22;
 }
 
 abstract final class AppMotion {
@@ -131,9 +132,9 @@ abstract final class AppEffects {
     BoxShadow(
       color: isAppDarkMode
           ? Colors.black.withValues(alpha: 0.26)
-          : AppColors.primary.withValues(alpha: 0.10),
-      blurRadius: 20,
-      offset: const Offset(0, 6),
+          : const Color(0xFF16324F).withValues(alpha: 0.075),
+      blurRadius: 18,
+      offset: const Offset(0, 5),
     ),
   ];
 
@@ -141,9 +142,9 @@ abstract final class AppEffects {
     BoxShadow(
       color: isAppDarkMode
           ? Colors.black.withValues(alpha: 0.34)
-          : AppColors.primary.withValues(alpha: 0.15),
-      blurRadius: 28,
-      offset: const Offset(0, 10),
+          : const Color(0xFF16324F).withValues(alpha: 0.12),
+      blurRadius: 26,
+      offset: const Offset(0, 9),
     ),
   ];
 }
@@ -172,14 +173,18 @@ abstract final class AppTheme {
           error: AppColors.danger,
           onError: Colors.white,
           outline: AppColors.border,
-          surfaceContainerLow: const Color(0xFFF7FAFB),
+          surfaceContainerLow: const Color(0xFFF8FAFC),
           surfaceContainer: AppColors.softPrimary,
-          surfaceContainerHigh: const Color(0xFFD2E3EA),
+          surfaceContainerHigh: const Color(0xFFE1E9EF),
         );
 
     return ThemeData(
       useMaterial3: true,
       colorScheme: colorScheme,
+      textTheme: ThemeData.light().textTheme.apply(
+        bodyColor: AppColors.primary,
+        displayColor: AppColors.primary,
+      ),
       scaffoldBackgroundColor: AppColors.background,
       dividerColor: AppColors.border,
       hoverColor: AppColors.primary.withValues(alpha: 0.055),
@@ -201,6 +206,7 @@ abstract final class AppTheme {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
+        toolbarHeight: 64,
         centerTitle: false,
         titleTextStyle: TextStyle(
           color: AppColors.primary,
@@ -214,7 +220,7 @@ abstract final class AppTheme {
         color: AppColors.surface,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
-        shadowColor: AppColors.primary.withValues(alpha: 0.12),
+        shadowColor: AppColors.primary.withValues(alpha: 0.08),
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppRadii.card),
@@ -280,7 +286,7 @@ abstract final class AppTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: AppColors.softPrimary,
+        fillColor: const Color(0xFFF6F9FB),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: AppSpacing.lg,
           vertical: AppSpacing.lg,
@@ -310,7 +316,7 @@ abstract final class AppTheme {
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          minimumSize: const Size(0, 48),
+          minimumSize: const Size(0, 50),
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.xl,
             vertical: AppSpacing.md,
@@ -319,8 +325,8 @@ abstract final class AppTheme {
           foregroundColor: Colors.white,
           disabledBackgroundColor: AppColors.primary.withValues(alpha: 0.42),
           disabledForegroundColor: Colors.white70,
-          elevation: 2,
-          shadowColor: AppColors.primary.withValues(alpha: 0.24),
+          elevation: 0,
+          shadowColor: Colors.transparent,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadii.control),
           ),
@@ -332,7 +338,7 @@ abstract final class AppTheme {
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          minimumSize: const Size(0, 48),
+          minimumSize: const Size(0, 50),
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.xl,
             vertical: AppSpacing.md,
@@ -350,7 +356,7 @@ abstract final class AppTheme {
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          minimumSize: const Size(0, 48),
+          minimumSize: const Size(0, 50),
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.xl,
             vertical: AppSpacing.md,
@@ -375,7 +381,87 @@ abstract final class AppTheme {
         ),
       ),
       progressIndicatorTheme: const ProgressIndicatorThemeData(
-        color: AppColors.primary,
+        color: AppColors.accent,
+      ),
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith((states) {
+          return states.contains(WidgetState.selected)
+              ? Colors.white
+              : AppColors.mutedText;
+        }),
+        trackColor: WidgetStateProperty.resolveWith((states) {
+          return states.contains(WidgetState.selected)
+              ? AppColors.primary
+              : AppColors.border;
+        }),
+        trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
+      ),
+      checkboxTheme: CheckboxThemeData(
+        fillColor: WidgetStateProperty.resolveWith((states) {
+          return states.contains(WidgetState.selected)
+              ? AppColors.primary
+              : Colors.transparent;
+        }),
+        checkColor: const WidgetStatePropertyAll(Colors.white),
+        side: const BorderSide(color: AppColors.border, width: 1.4),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
+      ),
+      radioTheme: RadioThemeData(
+        fillColor: WidgetStateProperty.resolveWith((states) {
+          return states.contains(WidgetState.selected)
+              ? AppColors.primary
+              : AppColors.mutedText;
+        }),
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor: AppColors.softPrimary,
+        selectedColor: AppColors.primary,
+        disabledColor: AppColors.softPrimary.withValues(alpha: 0.55),
+        side: const BorderSide(color: AppColors.border),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.control),
+        ),
+        labelStyle: const TextStyle(
+          color: AppColors.primary,
+          fontWeight: FontWeight.w700,
+        ),
+        secondaryLabelStyle: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      navigationBarTheme: const NavigationBarThemeData(
+        backgroundColor: AppColors.surface,
+        indicatorColor: AppColors.softPrimary,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        labelTextStyle: WidgetStatePropertyAll(
+          TextStyle(color: AppColors.primary, fontWeight: FontWeight.w700),
+        ),
+      ),
+      drawerTheme: const DrawerThemeData(
+        backgroundColor: AppColors.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.only(
+            topRight: Radius.circular(AppRadii.dialog),
+            bottomRight: Radius.circular(AppRadii.dialog),
+          ),
+        ),
+      ),
+      dataTableTheme: DataTableThemeData(
+        headingRowColor: const WidgetStatePropertyAll(AppColors.softPrimary),
+        headingTextStyle: const TextStyle(
+          color: AppColors.primary,
+          fontWeight: FontWeight.w800,
+        ),
+        dataTextStyle: const TextStyle(color: AppColors.primary),
+        dividerThickness: 0.8,
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadii.card),
+          border: Border.all(color: AppColors.border),
+        ),
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
@@ -441,6 +527,7 @@ abstract final class AppTheme {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         scrolledUnderElevation: 0,
+        toolbarHeight: 64,
         centerTitle: false,
         titleTextStyle: TextStyle(
           color: Color(0xFFE8F2F7),
@@ -543,12 +630,15 @@ abstract final class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadii.control),
-          borderSide: const BorderSide(color: AppColors.darkPrimary, width: 1.5),
+          borderSide: const BorderSide(
+            color: AppColors.darkPrimary,
+            width: 1.5,
+          ),
         ),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          minimumSize: const Size(0, 48),
+          minimumSize: const Size(0, 50),
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.xl,
             vertical: AppSpacing.md,
@@ -557,7 +647,7 @@ abstract final class AppTheme {
           foregroundColor: AppColors.darkBackground,
           disabledBackgroundColor: AppColors.darkPrimary.withValues(alpha: 0.4),
           disabledForegroundColor: Colors.white60,
-          elevation: 2,
+          elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadii.control),
           ),
@@ -569,7 +659,7 @@ abstract final class AppTheme {
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          minimumSize: const Size(0, 48),
+          minimumSize: const Size(0, 50),
           backgroundColor: AppColors.darkPrimary,
           foregroundColor: AppColors.darkBackground,
           shape: RoundedRectangleBorder(
@@ -579,7 +669,7 @@ abstract final class AppTheme {
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          minimumSize: const Size(0, 48),
+          minimumSize: const Size(0, 50),
           foregroundColor: const Color(0xFFE8F2F7),
           backgroundColor: AppColors.darkSurface,
           side: const BorderSide(color: AppColors.darkBorder, width: 1.15),
@@ -596,6 +686,88 @@ abstract final class AppTheme {
       ),
       progressIndicatorTheme: const ProgressIndicatorThemeData(
         color: AppColors.darkPrimary,
+      ),
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith((states) {
+          return states.contains(WidgetState.selected)
+              ? AppColors.darkBackground
+              : AppColors.darkMutedText;
+        }),
+        trackColor: WidgetStateProperty.resolveWith((states) {
+          return states.contains(WidgetState.selected)
+              ? AppColors.darkPrimary
+              : AppColors.darkBorder;
+        }),
+        trackOutlineColor: const WidgetStatePropertyAll(Colors.transparent),
+      ),
+      checkboxTheme: CheckboxThemeData(
+        fillColor: WidgetStateProperty.resolveWith((states) {
+          return states.contains(WidgetState.selected)
+              ? AppColors.darkPrimary
+              : Colors.transparent;
+        }),
+        checkColor: const WidgetStatePropertyAll(AppColors.darkBackground),
+        side: const BorderSide(color: AppColors.darkBorder, width: 1.4),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
+      ),
+      radioTheme: RadioThemeData(
+        fillColor: WidgetStateProperty.resolveWith((states) {
+          return states.contains(WidgetState.selected)
+              ? AppColors.darkPrimary
+              : AppColors.darkMutedText;
+        }),
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor: AppColors.darkSoftPrimary,
+        selectedColor: AppColors.darkPrimary,
+        disabledColor: AppColors.darkSoftPrimary.withValues(alpha: 0.55),
+        side: const BorderSide(color: AppColors.darkBorder),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.control),
+        ),
+        labelStyle: const TextStyle(
+          color: Color(0xFFF4F8FB),
+          fontWeight: FontWeight.w700,
+        ),
+        secondaryLabelStyle: const TextStyle(
+          color: AppColors.darkBackground,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      navigationBarTheme: const NavigationBarThemeData(
+        backgroundColor: AppColors.darkSurface,
+        indicatorColor: AppColors.darkSoftPrimary,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        labelTextStyle: WidgetStatePropertyAll(
+          TextStyle(color: Color(0xFFF4F8FB), fontWeight: FontWeight.w700),
+        ),
+      ),
+      drawerTheme: const DrawerThemeData(
+        backgroundColor: AppColors.darkSurface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.only(
+            topRight: Radius.circular(AppRadii.dialog),
+            bottomRight: Radius.circular(AppRadii.dialog),
+          ),
+        ),
+      ),
+      dataTableTheme: DataTableThemeData(
+        headingRowColor: const WidgetStatePropertyAll(
+          AppColors.darkSoftPrimary,
+        ),
+        headingTextStyle: const TextStyle(
+          color: Color(0xFFF4F8FB),
+          fontWeight: FontWeight.w800,
+        ),
+        dataTextStyle: const TextStyle(color: Color(0xFFF4F8FB)),
+        dividerThickness: 0.8,
+        decoration: BoxDecoration(
+          color: AppColors.darkSurface,
+          borderRadius: BorderRadius.circular(AppRadii.card),
+          border: Border.all(color: AppColors.darkBorder),
+        ),
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,

@@ -199,11 +199,9 @@ class BookingStatusPage extends StatelessWidget {
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: _cardColor,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(AppRadii.card),
         border: Border.all(color: _borderColor),
-        boxShadow: [
-          BoxShadow(color: _primaryColor.withOpacity(0.06), blurRadius: 14),
-        ],
+        boxShadow: AppEffects.cardShadow,
       ),
       child: Row(
         children: [
@@ -212,7 +210,7 @@ class BookingStatusPage extends StatelessWidget {
             width: 54,
             decoration: BoxDecoration(
               color: _primaryColor,
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: BorderRadius.circular(AppRadii.control),
             ),
             child: const Icon(
               Icons.notifications_active_rounded,
@@ -258,8 +256,9 @@ class BookingStatusPage extends StatelessWidget {
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
         color: _cardColor,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(AppRadii.card),
         border: Border.all(color: _borderColor),
+        boxShadow: AppEffects.cardShadow,
       ),
       child: Column(
         children: [
@@ -284,8 +283,9 @@ class BookingStatusPage extends StatelessWidget {
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
         color: _cardColor,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(AppRadii.card),
         border: Border.all(color: Colors.red.withOpacity(0.35)),
+        boxShadow: AppEffects.cardShadow,
       ),
       child: Column(
         children: [
@@ -317,8 +317,9 @@ class BookingStatusPage extends StatelessWidget {
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
         color: _cardColor,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(AppRadii.card),
         border: Border.all(color: _borderColor),
+        boxShadow: AppEffects.cardShadow,
       ),
       child: Column(
         children: [
@@ -357,11 +358,9 @@ class BookingStatusPage extends StatelessWidget {
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: _cardColor,
-        borderRadius: BorderRadius.circular(24),
+        borderRadius: BorderRadius.circular(AppRadii.card),
         border: Border.all(color: _borderColor),
-        boxShadow: [
-          BoxShadow(color: _primaryColor.withOpacity(0.05), blurRadius: 12),
-        ],
+        boxShadow: AppEffects.cardShadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

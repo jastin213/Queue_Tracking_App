@@ -10,13 +10,16 @@ import 'admin_settings.dart';
 // THEME COLORS
 // ============================================================================
 
-Color get _backgroundColor => AppColors.activeBackground;
 Color get _primaryColor => AppColors.activePrimary;
-Color get _cardColor => AppColors.activeSurface;
-Color get _borderColor => AppColors.activeBorder;
 Color get _mutedTextColor => AppColors.activeMutedText;
-Color get _softPrimaryColor => AppColors.activeSoftPrimary;
 Color _dangerColor = AppColors.danger;
+
+const Color _displayBackdropColor = Color(0xFF0B1426);
+const Color _displayFrameColor = Color(0xFFEAF1F5);
+const Color _displayNavyColor = Color(0xFF0F2B48);
+const Color _displayDeepNavyColor = Color(0xFF0B1B2B);
+const Color _displayAmberColor = Color(0xFFF59E0B);
+const Color _displayGreenColor = Color(0xFF10B981);
 
 const String displayPageRoute = '/display';
 
@@ -66,6 +69,32 @@ class DisplayPage extends StatelessWidget {
   String todayDate() {
     final now = DateTime.now();
     return "${now.month}/${now.day}/${now.year}";
+  }
+
+  String displayTime(DateTime value) {
+    final hour = value.hour % 12 == 0 ? 12 : value.hour % 12;
+    final minute = value.minute.toString().padLeft(2, '0');
+    final second = value.second.toString().padLeft(2, '0');
+    final period = value.hour >= 12 ? 'PM' : 'AM';
+    return '${hour.toString().padLeft(2, '0')}:$minute:$second $period';
+  }
+
+  String displayLongDate(DateTime value) {
+    const months = <String>[
+      'JANUARY',
+      'FEBRUARY',
+      'MARCH',
+      'APRIL',
+      'MAY',
+      'JUNE',
+      'JULY',
+      'AUGUST',
+      'SEPTEMBER',
+      'OCTOBER',
+      'NOVEMBER',
+      'DECEMBER',
+    ];
+    return '${months[value.month - 1]} ${value.day}, ${value.year}';
   }
 
   String queueDateId(String date) {
@@ -128,16 +157,16 @@ class DisplayPage extends StatelessWidget {
 
     return Theme(
       data: Theme.of(context).copyWith(
-        scaffoldBackgroundColor: _backgroundColor,
+        scaffoldBackgroundColor: _displayBackdropColor,
         colorScheme: Theme.of(context).colorScheme.copyWith(
-          primary: _primaryColor,
+          primary: _displayNavyColor,
           onPrimary: Colors.white,
-          surface: _cardColor,
-          onSurface: _primaryColor,
+          surface: _displayFrameColor,
+          onSurface: _displayDeepNavyColor,
         ),
       ),
       child: Scaffold(
-        backgroundColor: _backgroundColor,
+        backgroundColor: _displayBackdropColor,
         body: SafeArea(
           child: StreamBuilder<List<Map<String, dynamic>>>(
             stream: todayQueueStream(),
@@ -157,51 +186,81 @@ class DisplayPage extends StatelessWidget {
                   final bool isWide = constraints.maxWidth >= 900;
                   final bool isShort = constraints.maxHeight < 700;
 
-                  final double pagePadding = isWide ? 32 : 16;
-                  final double titleSize = isWide ? 30 : 22;
-                  final double queueFontSize = isWide ? 110 : 76;
+                  final double pagePadding = isWide ? 24 : 10;
+                  final double framePadding = isWide ? 22 : 12;
+                  final double titleSize = isWide ? 28 : 19;
+                  final double queueFontSize = isWide ? 128 : 72;
 
                   return SingleChildScrollView(
                     padding: EdgeInsets.all(pagePadding),
-                    child: Column(
-                      children: [
-                        buildHeader(
-                          today: today,
-                          titleSize: titleSize,
-                          isShort: isShort,
-                          showBackButton: showBackButton,
-                          onBack: () => Navigator.maybePop(context),
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 1260),
+                        child: Container(
+                          constraints: BoxConstraints(
+                            minHeight:
+                                constraints.maxHeight - (pagePadding * 2),
+                          ),
+                          padding: EdgeInsets.all(framePadding),
+                          decoration: BoxDecoration(
+                            color: _displayFrameColor,
+                            borderRadius: BorderRadius.circular(
+                              isWide ? 24 : 20,
+                            ),
+                            border: Border.all(
+                              color: const Color(0xFF24364A),
+                              width: isWide ? 6 : 4,
+                            ),
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Color(0x66000000),
+                                blurRadius: 34,
+                                offset: Offset(0, 16),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            children: [
+                              buildHeader(
+                                titleSize: titleSize,
+                                isWide: isWide,
+                                isShort: isShort,
+                                showBackButton: showBackButton,
+                                onBack: () => Navigator.maybePop(context),
+                              ),
+
+                              SizedBox(height: isShort ? 14 : 20),
+
+                              if (snapshot.connectionState ==
+                                      ConnectionState.waiting &&
+                                  !snapshot.hasData)
+                                buildLoadingCard()
+                              else if (snapshot.hasError)
+                                buildErrorCard(snapshot.error.toString())
+                              else ...[
+                                buildNowServingCard(
+                                  nowServing: nowServing,
+                                  queueFontSize: queueFontSize,
+                                  isShort: isShort,
+                                ),
+
+                                SizedBox(height: isShort ? 14 : 20),
+
+                                buildNextInLineCard(
+                                  today: today,
+                                  waitingQueue: waitingQueue,
+                                  isWide: isWide,
+                                  isShort: isShort,
+                                ),
+
+                                SizedBox(height: isShort ? 12 : 16),
+
+                                buildAnnouncement(),
+                              ],
+                            ],
+                          ),
                         ),
-
-                        SizedBox(height: isShort ? 18 : 24),
-
-                        if (snapshot.connectionState ==
-                                ConnectionState.waiting &&
-                            !snapshot.hasData)
-                          buildLoadingCard()
-                        else if (snapshot.hasError)
-                          buildErrorCard(snapshot.error.toString())
-                        else ...[
-                          buildNowServingCard(
-                            nowServing: nowServing,
-                            queueFontSize: queueFontSize,
-                            isShort: isShort,
-                          ),
-
-                          SizedBox(height: isShort ? 18 : 24),
-
-                          buildNextInLineCard(
-                            today: today,
-                            waitingQueue: waitingQueue,
-                            isWide: isWide,
-                            isShort: isShort,
-                          ),
-
-                          SizedBox(height: isShort ? 14 : 20),
-
-                          buildAnnouncement(),
-                        ],
-                      ],
+                      ),
                     ),
                   );
                 },
@@ -218,8 +277,8 @@ class DisplayPage extends StatelessWidget {
   // ==========================================================================
 
   Widget buildHeader({
-    required String today,
     required double titleSize,
+    required bool isWide,
     required bool isShort,
     required bool showBackButton,
     required VoidCallback onBack,
@@ -227,10 +286,21 @@ class DisplayPage extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: EdgeInsets.symmetric(
-        horizontal: 22,
-        vertical: isShort ? 16 : 20,
+        horizontal: isShort ? 14 : 18,
+        vertical: isShort ? 13 : 16,
       ),
-      decoration: cardDecoration(),
+      decoration: BoxDecoration(
+        color: _displayNavyColor,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFF334155)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x330B1B2B),
+            blurRadius: 16,
+            offset: Offset(0, 6),
+          ),
+        ],
+      ),
       child: Row(
         children: [
           if (showBackButton)
@@ -238,30 +308,33 @@ class DisplayPage extends StatelessWidget {
               tooltip: "Back",
               onPressed: onBack,
               style: IconButton.styleFrom(
-                foregroundColor: _primaryColor,
-                backgroundColor: _softPrimaryColor,
-                minimumSize: const Size(48, 48),
+                foregroundColor: Colors.white,
+                backgroundColor: _displayDeepNavyColor,
+                minimumSize: const Size(44, 44),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(14),
                 ),
               ),
               icon: const Icon(Icons.arrow_back_rounded),
             ),
-          if (showBackButton) const SizedBox(width: 12),
+          if (showBackButton) const SizedBox(width: 10),
           Container(
-            height: 58,
-            width: 58,
+            height: isShort ? 46 : 54,
+            width: isShort ? 46 : 54,
             decoration: BoxDecoration(
-              color: _primaryColor,
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: const Icon(
-              Icons.directions_car_rounded,
               color: Colors.white,
-              size: 32,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: const [
+                BoxShadow(color: Color(0x33000000), blurRadius: 8),
+              ],
+            ),
+            child: Icon(
+              Icons.directions_car_rounded,
+              color: _displayNavyColor,
+              size: isShort ? 27 : 31,
             ),
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 13),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -272,25 +345,87 @@ class DisplayPage extends StatelessWidget {
                   child: Text(
                     "NPJN EMISSION CENTER",
                     style: TextStyle(
-                      color: _primaryColor,
+                      color: Colors.white,
                       fontSize: titleSize,
                       fontWeight: FontWeight.w900,
-                      letterSpacing: 2,
+                      letterSpacing: 1.2,
                     ),
                   ),
                 ),
-                const SizedBox(height: 5),
-                Text(
-                  "Queue Display • $today",
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: _mutedTextColor,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                  ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: _displayGreenColor,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        "Onsite Display Monitor  •  Counter 1 Active",
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _displayGreenColor,
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
+          ),
+          SizedBox(width: isWide ? 16 : 8),
+          StreamBuilder<int>(
+            stream: Stream<int>.periodic(
+              const Duration(seconds: 1),
+              (value) => value,
+            ),
+            builder: (context, snapshot) {
+              final now = DateTime.now();
+              return Container(
+                padding: EdgeInsets.symmetric(
+                  horizontal: isWide ? 17 : 9,
+                  vertical: isShort ? 7 : 10,
+                ),
+                decoration: BoxDecoration(
+                  color: _displayDeepNavyColor,
+                  borderRadius: BorderRadius.circular(13),
+                  border: Border.all(color: const Color(0xFF334155)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      displayTime(now),
+                      style: TextStyle(
+                        color: _displayAmberColor,
+                        fontSize: isWide ? 20 : 11,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.7,
+                      ),
+                    ),
+                    if (isWide) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        displayLongDate(now),
+                        style: const TextStyle(
+                          color: Color(0xFFCBD5E1),
+                          fontSize: 9,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.7,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              );
+            },
           ),
         ],
       ),
@@ -362,54 +497,98 @@ class DisplayPage extends StatelessWidget {
   }) {
     return Container(
       width: double.infinity,
-      padding: EdgeInsets.all(isShort ? 18 : 24),
+      padding: EdgeInsets.all(isShort ? 18 : 28),
       decoration: BoxDecoration(
-        color: _cardColor,
-        borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: _dangerColor.withOpacity(0.30), width: 2),
-        boxShadow: [
-          BoxShadow(color: _primaryColor.withOpacity(0.08), blurRadius: 18),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF0E3B64), Color(0xFF0B3155)],
+        ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFF274F73), width: 2),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x550B1B2B),
+            blurRadius: 24,
+            offset: Offset(0, 10),
+          ),
         ],
       ),
       child: Column(
         children: [
-          Text(
-            "NOW SERVING",
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: _primaryColor,
-              fontSize: 22,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 2,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Flexible(
+                child: Container(height: 1, color: const Color(0x66F59E0B)),
+              ),
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 15,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  color: _displayAmberColor.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(30),
+                  border: Border.all(
+                    color: _displayAmberColor.withValues(alpha: 0.42),
+                  ),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.campaign_rounded,
+                      color: _displayAmberColor,
+                      size: 21,
+                    ),
+                    SizedBox(width: 8),
+                    Text(
+                      "NOW SERVING",
+                      style: TextStyle(
+                        color: Color(0xFFFCD34D),
+                        fontSize: 15,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 2,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Flexible(
+                child: Container(height: 1, color: const Color(0x66F59E0B)),
+              ),
+            ],
           ),
 
-          SizedBox(height: isShort ? 14 : 20),
+          SizedBox(height: isShort ? 10 : 14),
 
           AppStatusPulse(
             active: nowServing != null,
-            color: _dangerColor,
-            borderRadius: 26,
+            color: _displayAmberColor,
+            borderRadius: 24,
             child: Container(
-              width: double.infinity,
               padding: EdgeInsets.symmetric(
-                horizontal: 18,
-                vertical: isShort ? 18 : 26,
-              ),
-              decoration: BoxDecoration(
-                color: _dangerColor.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(26),
-                border: Border.all(color: _dangerColor, width: 3),
+                horizontal: 16,
+                vertical: isShort ? 6 : 10,
               ),
               child: FittedBox(
                 fit: BoxFit.scaleDown,
                 child: Text(
                   nowServing == null ? "-" : nowServing["queue"] ?? "-",
                   style: TextStyle(
-                    color: _dangerColor,
+                    color: Colors.white,
                     fontSize: queueFontSize,
                     fontWeight: FontWeight.w900,
                     letterSpacing: 4,
+                    shadows: const [
+                      Shadow(
+                        color: Color(0x88000000),
+                        blurRadius: 12,
+                        offset: Offset(0, 7),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -417,47 +596,75 @@ class DisplayPage extends StatelessWidget {
           ),
 
           const SizedBox(height: 14),
-
           ValueListenableBuilder<bool>(
             valueListenable: showCustomerNameNotifier,
             builder: (context, showName, _) {
-              if (!showName) {
-                return const SizedBox.shrink();
-              }
+              return ValueListenableBuilder<bool>(
+                valueListenable: showVehicleTypeNotifier,
+                builder: (context, showVehicle, _) {
+                  final showVehicleDetails = showVehicle && nowServing != null;
+                  if (!showName && !showVehicleDetails) {
+                    return const SizedBox.shrink();
+                  }
 
-              return Text(
-                nowServing == null
-                    ? "Please wait for today's queue number"
-                    : nowServing["name"] ?? "",
-                textAlign: TextAlign.center,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: _primaryColor,
-                  fontSize: 22,
-                  fontWeight: FontWeight.w800,
-                ),
-              );
-            },
-          ),
-
-          ValueListenableBuilder<bool>(
-            valueListenable: showVehicleTypeNotifier,
-            builder: (context, showVehicle, _) {
-              if (!showVehicle || nowServing == null) {
-                return const SizedBox.shrink();
-              }
-
-              return Padding(
-                padding: const EdgeInsets.only(top: 6),
-                child: Text(
-                  nowServing["type"] ?? "",
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: _mutedTextColor,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+                  return Container(
+                    constraints: const BoxConstraints(maxWidth: 560),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: 18,
+                      vertical: isShort ? 12 : 16,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _displayDeepNavyColor.withValues(alpha: 0.78),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: const Color(0xFF334155)),
+                    ),
+                    child: Column(
+                      children: [
+                        if (showName)
+                          Text(
+                            nowServing == null
+                                ? "Please wait for today's queue number"
+                                : nowServing["name"] ?? "",
+                            textAlign: TextAlign.center,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: _displayAmberColor,
+                              fontSize: 22,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        if (showName && showVehicleDetails)
+                          const SizedBox(height: 7),
+                        if (showVehicleDetails)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(
+                                0xFF1D4ED8,
+                              ).withValues(alpha: 0.30),
+                              borderRadius: BorderRadius.circular(9),
+                              border: Border.all(
+                                color: const Color(
+                                  0xFF60A5FA,
+                                ).withValues(alpha: 0.36),
+                              ),
+                            ),
+                            child: Text(
+                              "${nowServing["type"] ?? ""} Vehicle",
+                              style: const TextStyle(
+                                color: Color(0xFFBFDBFE),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  );
+                },
               );
             },
           ),
@@ -481,8 +688,19 @@ class DisplayPage extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: EdgeInsets.all(isShort ? 16 : 22),
-      decoration: cardDecoration(),
+      padding: EdgeInsets.all(isShort ? 15 : 20),
+      decoration: BoxDecoration(
+        color: _displayNavyColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF27435F)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x220F2B48),
+            blurRadius: 15,
+            offset: Offset(0, 5),
+          ),
+        ],
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -496,22 +714,38 @@ class DisplayPage extends StatelessWidget {
 
           if (waitingQueue.isEmpty)
             emptyQueueBox()
+          else if (isWide)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (int index = 0; index < visibleQueue.length; index++) ...[
+                  if (index > 0) const SizedBox(width: 14),
+                  Expanded(
+                    child: queueTile(
+                      customer: visibleQueue[index],
+                      index: index,
+                    ),
+                  ),
+                ],
+              ],
+            )
           else
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              itemCount: visibleQueue.length,
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: isWide ? 4 : 2,
-                crossAxisSpacing: isWide ? 18 : 12,
-                mainAxisSpacing: 12,
-                childAspectRatio: isWide ? 2.45 : 2.1,
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (int index = 0; index < visibleQueue.length; index++) ...[
+                    if (index > 0) const SizedBox(width: 10),
+                    SizedBox(
+                      width: 155,
+                      child: queueTile(
+                        customer: visibleQueue[index],
+                        index: index,
+                      ),
+                    ),
+                  ],
+                ],
               ),
-              itemBuilder: (context, index) {
-                final customer = visibleQueue[index];
-
-                return queueTile(customer: customer, index: index);
-              },
             ),
           if (hiddenQueueCount > 0) ...[
             const SizedBox(height: 14),
@@ -522,14 +756,14 @@ class DisplayPage extends StatelessWidget {
                   vertical: 8,
                 ),
                 decoration: BoxDecoration(
-                  color: _softPrimaryColor,
+                  color: _displayDeepNavyColor,
                   borderRadius: BorderRadius.circular(30),
-                  border: Border.all(color: _borderColor),
+                  border: Border.all(color: const Color(0xFF29445F)),
                 ),
                 child: Text(
                   "+$hiddenQueueCount more waiting",
-                  style: TextStyle(
-                    color: _mutedTextColor,
+                  style: const TextStyle(
+                    color: Color(0xFFCBD5E1),
                     fontSize: 13,
                     fontWeight: FontWeight.w800,
                   ),
@@ -547,22 +781,36 @@ class DisplayPage extends StatelessWidget {
     required int index,
   }) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      constraints: const BoxConstraints(minHeight: 120),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
       decoration: BoxDecoration(
-        color: _softPrimaryColor,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: _borderColor),
+        color: _displayDeepNavyColor.withValues(alpha: 0.88),
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(
+          color: index == 0 ? _displayAmberColor : const Color(0xFF29445F),
+          width: index == 0 ? 1.5 : 1,
+        ),
       ),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
+          Text(
+            "NEXT #${index + 1}",
+            style: const TextStyle(
+              color: Color(0xFF9FB4C8),
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.2,
+            ),
+          ),
+          const SizedBox(height: 2),
           FittedBox(
             fit: BoxFit.scaleDown,
             child: Text(
               customer["queue"] ?? "-",
               style: TextStyle(
-                color: _primaryColor,
-                fontSize: 42,
+                color: index == 0 ? _displayAmberColor : Colors.white,
+                fontSize: 34,
                 fontWeight: FontWeight.w900,
                 letterSpacing: 1.5,
               ),
@@ -582,7 +830,7 @@ class DisplayPage extends StatelessWidget {
                   customer["type"] ?? "",
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: _mutedTextColor,
+                    color: const Color(0xFFCBD5E1),
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                   ),
@@ -604,7 +852,7 @@ class DisplayPage extends StatelessWidget {
                   estimateWaitingTime(index),
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    color: _mutedTextColor,
+                    color: const Color(0xFF9FB4C8),
                     fontSize: 11.5,
                     fontWeight: FontWeight.w700,
                   ),
@@ -631,23 +879,59 @@ class DisplayPage extends StatelessWidget {
 
         return Container(
           width: double.infinity,
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            color: _softPrimaryColor,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: _borderColor),
+            color: _displayDeepNavyColor,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFF334155)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x33000000),
+                blurRadius: 10,
+                offset: Offset(0, 4),
+              ),
+            ],
           ),
           child: Row(
             children: [
-              Icon(Icons.campaign_rounded, color: _primaryColor, size: 24),
-              const SizedBox(width: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 11,
+                  vertical: 7,
+                ),
+                decoration: BoxDecoration(
+                  color: _displayAmberColor,
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.campaign_rounded,
+                      color: _displayDeepNavyColor,
+                      size: 18,
+                    ),
+                    SizedBox(width: 6),
+                    Text(
+                      "ANNOUNCEMENT",
+                      style: TextStyle(
+                        color: _displayDeepNavyColor,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.8,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
               Expanded(
                 child: Text(
                   message,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: _primaryColor,
-                    fontSize: 15,
+                  textAlign: TextAlign.start,
+                  style: const TextStyle(
+                    color: Color(0xFFE2E8F0),
+                    fontSize: 14,
                     fontWeight: FontWeight.w800,
                     height: 1.3,
                   ),
@@ -671,27 +955,35 @@ class DisplayPage extends StatelessWidget {
   }) {
     return Row(
       children: [
-        Icon(icon, color: _primaryColor, size: 24),
+        Icon(icon, color: _displayAmberColor, size: 21),
         const SizedBox(width: 10),
         Expanded(
           child: Text(
             title,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              color: _primaryColor,
-              fontSize: 19,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
               fontWeight: FontWeight.w900,
               letterSpacing: 1,
             ),
           ),
         ),
         if (trailing != null)
-          Text(
-            trailing,
-            style: TextStyle(
-              color: _mutedTextColor,
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: _displayDeepNavyColor,
+              borderRadius: BorderRadius.circular(30),
+              border: Border.all(color: const Color(0xFF29445F)),
+            ),
+            child: Text(
+              trailing,
+              style: const TextStyle(
+                color: Color(0xFFCBD5E1),
+                fontSize: 11.5,
+                fontWeight: FontWeight.w800,
+              ),
             ),
           ),
       ],
@@ -703,20 +995,20 @@ class DisplayPage extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(28),
       decoration: BoxDecoration(
-        color: _softPrimaryColor,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: _borderColor),
+        color: _displayDeepNavyColor.withValues(alpha: 0.88),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF29445F)),
       ),
       child: Column(
         children: [
-          Icon(Icons.inbox_rounded, color: _primaryColor, size: 44),
+          const Icon(Icons.inbox_rounded, color: Color(0xFF94A3B8), size: 42),
           const SizedBox(height: 10),
           Text(
             "No waiting queue for today",
             textAlign: TextAlign.center,
-            style: TextStyle(
-              color: _primaryColor,
-              fontSize: 20,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 17,
               fontWeight: FontWeight.w800,
             ),
           ),
@@ -727,11 +1019,15 @@ class DisplayPage extends StatelessWidget {
 
   BoxDecoration cardDecoration() {
     return BoxDecoration(
-      color: _cardColor,
-      borderRadius: BorderRadius.circular(28),
-      border: Border.all(color: _borderColor),
-      boxShadow: [
-        BoxShadow(color: _primaryColor.withOpacity(0.08), blurRadius: 18),
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: const Color(0xFFCBD5E1)),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x220F2B48),
+          blurRadius: 16,
+          offset: Offset(0, 5),
+        ),
       ],
     );
   }

@@ -1098,7 +1098,11 @@ class _TrackPageState extends State<TrackPage> {
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(20),
-        decoration: cardDecoration(),
+        decoration: BoxDecoration(
+          color: isAppDarkMode ? AppColors.darkSoftPrimary : AppColors.primary,
+          borderRadius: BorderRadius.circular(AppRadii.card),
+          boxShadow: AppEffects.raisedShadow,
+        ),
         child: Column(
           children: [
             Text(
@@ -1106,7 +1110,7 @@ class _TrackPageState extends State<TrackPage> {
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 15,
-                color: AppColors.activeMutedText,
+                color: Colors.white70,
                 letterSpacing: 1,
               ),
             ),
@@ -1116,7 +1120,7 @@ class _TrackPageState extends State<TrackPage> {
               child: Text(
                 customer == null ? "-" : customer['queue'] ?? "-",
                 style: const TextStyle(
-                  color: Colors.red,
+                  color: AppColors.warning,
                   fontSize: 44,
                   fontWeight: FontWeight.w900,
                 ),
@@ -1546,11 +1550,9 @@ class _TrackPageState extends State<TrackPage> {
   BoxDecoration cardDecoration() {
     return BoxDecoration(
       color: AppColors.activeSurface,
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(AppRadii.card),
       border: Border.all(color: AppColors.activeBorder),
-      boxShadow: [
-        BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 10),
-      ],
+      boxShadow: AppEffects.cardShadow,
     );
   }
 }

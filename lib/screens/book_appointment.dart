@@ -1479,10 +1479,8 @@ class _BookAppointmentState extends State<BookAppointment> {
       decoration: BoxDecoration(
         color: _cardColor,
         border: Border.all(color: _borderColor),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(color: _primaryColor.withOpacity(0.06), blurRadius: 14),
-        ],
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        boxShadow: AppEffects.cardShadow,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1532,10 +1530,8 @@ class _BookAppointmentState extends State<BookAppointment> {
       decoration: BoxDecoration(
         color: _cardColor,
         border: Border.all(color: _borderColor),
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(color: _primaryColor.withOpacity(0.05), blurRadius: 12),
-        ],
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        boxShadow: AppEffects.cardShadow,
       ),
       child: Row(
         children: [
@@ -1544,10 +1540,13 @@ class _BookAppointmentState extends State<BookAppointment> {
             height: 42,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: _softPrimaryColor,
-              borderRadius: BorderRadius.circular(14),
+              color: _primaryColor,
+              borderRadius: BorderRadius.circular(AppRadii.control),
             ),
-            child: Icon(Icons.policy_outlined, color: _primaryColor),
+            child: Icon(
+              Icons.policy_outlined,
+              color: isAppDarkMode ? AppColors.darkBackground : Colors.white,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -1928,8 +1927,8 @@ class _BookAppointmentState extends State<BookAppointment> {
           color: hasFile ? _primaryColor : _borderColor,
           width: hasFile ? 1.3 : 1,
         ),
-        borderRadius: BorderRadius.circular(16),
-        color: hasFile ? _softPrimaryColor : _backgroundColor,
+        borderRadius: BorderRadius.circular(AppRadii.control),
+        color: hasFile ? _softPrimaryColor : _cardColor,
       ),
       child: Column(
         children: [
@@ -1941,7 +1940,7 @@ class _BookAppointmentState extends State<BookAppointment> {
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: _cardColor,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadii.control),
                   border: Border.all(color: _borderColor),
                 ),
                 child: Icon(

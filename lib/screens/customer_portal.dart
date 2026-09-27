@@ -71,13 +71,8 @@ class CustomerPortal extends StatelessWidget {
                     width: 90,
                     decoration: BoxDecoration(
                       color: _primaryColor,
-                      borderRadius: BorderRadius.circular(28),
-                      boxShadow: [
-                        BoxShadow(
-                          color: _primaryColor.withValues(alpha: 0.16),
-                          blurRadius: 18,
-                        ),
-                      ],
+                      borderRadius: BorderRadius.circular(AppRadii.card),
+                      boxShadow: AppEffects.raisedShadow,
                     ),
                     child: const Icon(
                       Icons.person_outline_rounded,
@@ -114,14 +109,9 @@ class CustomerPortal extends StatelessWidget {
                     padding: const EdgeInsets.all(22),
                     decoration: BoxDecoration(
                       color: _cardColor,
-                      borderRadius: BorderRadius.circular(28),
+                      borderRadius: BorderRadius.circular(AppRadii.card),
                       border: Border.all(color: _borderColor),
-                      boxShadow: [
-                        BoxShadow(
-                          color: _primaryColor.withValues(alpha: 0.08),
-                          blurRadius: 18,
-                        ),
-                      ],
+                      boxShadow: AppEffects.cardShadow,
                     ),
                     child: Column(
                       children: [
@@ -203,23 +193,23 @@ class _PortalButton extends StatelessWidget {
         : _softPrimaryColor;
 
     return AppHoverLift(
-      borderRadius: 22,
+      borderRadius: AppRadii.card,
       child: Material(
         color: backgroundColor,
-        borderRadius: BorderRadius.circular(22),
-        elevation: isFilled ? 4 : 1,
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        elevation: isFilled ? 2 : 0,
         shadowColor: _primaryColor.withValues(alpha: 0.12),
         child: InkWell(
-          borderRadius: BorderRadius.circular(22),
+          borderRadius: BorderRadius.circular(AppRadii.card),
           onTap: onPressed,
           child: Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(22),
+              borderRadius: BorderRadius.circular(AppRadii.card),
               border: Border.all(
-                color: _primaryColor,
-                width: isFilled ? 0 : 1.5,
+                color: isFilled ? _primaryColor : _borderColor,
+                width: isFilled ? 0 : 1,
               ),
             ),
             child: Row(
@@ -229,7 +219,7 @@ class _PortalButton extends StatelessWidget {
                   width: 48,
                   decoration: BoxDecoration(
                     color: iconBackgroundColor,
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(AppRadii.control),
                   ),
                   child: Icon(icon, color: textColor, size: 26),
                 ),

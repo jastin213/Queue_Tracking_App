@@ -53,11 +53,16 @@ class AppSectionCard extends StatelessWidget {
                     width: 40,
                     height: 40,
                     decoration: BoxDecoration(
-                      color: AppColors.activeSoftPrimary,
+                      color: AppColors.activePrimary,
                       borderRadius: BorderRadius.circular(AppRadii.control),
-                      border: Border.all(color: AppColors.activeBorder),
                     ),
-                    child: Icon(icon, color: AppColors.activePrimary, size: 22),
+                    child: Icon(
+                      icon,
+                      color: isAppDarkMode
+                          ? AppColors.darkBackground
+                          : Colors.white,
+                      size: 21,
+                    ),
                   ),
                   const SizedBox(width: AppSpacing.md),
                 ],

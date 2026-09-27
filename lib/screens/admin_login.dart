@@ -178,7 +178,9 @@ class _AdminLoginState extends State<AdminLogin> {
         borderRadius: BorderRadius.circular(16),
         borderSide: BorderSide(color: _primaryColor, width: 1.6),
       ),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(AppRadii.control),
+      ),
     );
   }
 
@@ -234,13 +236,8 @@ class _AdminLoginState extends State<AdminLogin> {
                   width: 90,
                   decoration: BoxDecoration(
                     color: _primaryColor,
-                    borderRadius: BorderRadius.circular(28),
-                    boxShadow: [
-                      BoxShadow(
-                        color: _primaryColor.withOpacity(0.16),
-                        blurRadius: 18,
-                      ),
-                    ],
+                    borderRadius: BorderRadius.circular(AppRadii.card),
+                    boxShadow: AppEffects.raisedShadow,
                   ),
                   child: const Icon(
                     Icons.admin_panel_settings_rounded,
@@ -277,14 +274,9 @@ class _AdminLoginState extends State<AdminLogin> {
                   padding: const EdgeInsets.all(22),
                   decoration: BoxDecoration(
                     color: _cardColor,
-                    borderRadius: BorderRadius.circular(28),
+                    borderRadius: BorderRadius.circular(AppRadii.card),
                     border: Border.all(color: _borderColor),
-                    boxShadow: [
-                      BoxShadow(
-                        color: _primaryColor.withOpacity(0.08),
-                        blurRadius: 18,
-                      ),
-                    ],
+                    boxShadow: AppEffects.cardShadow,
                   ),
                   child: Column(
                     children: [
@@ -293,7 +285,7 @@ class _AdminLoginState extends State<AdminLogin> {
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
                           color: _softPrimaryColor,
-                          borderRadius: BorderRadius.circular(18),
+                          borderRadius: BorderRadius.circular(AppRadii.control),
                           border: Border.all(color: _borderColor),
                         ),
                         child: Row(

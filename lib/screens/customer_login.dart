@@ -680,10 +680,10 @@ class _CustomerLoginState extends State<CustomerLogin> {
           style: ElevatedButton.styleFrom(
             backgroundColor: _primaryColor,
             foregroundColor: Colors.white,
-            elevation: 3,
-            shadowColor: _primaryColor.withValues(alpha: 0.18),
+            elevation: 0,
+            shadowColor: Colors.transparent,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(AppRadii.control),
             ),
             textStyle: const TextStyle(
               fontWeight: FontWeight.bold,
@@ -712,13 +712,8 @@ class _CustomerLoginState extends State<CustomerLogin> {
                         width: 92,
                         decoration: BoxDecoration(
                           color: _primaryColor,
-                          borderRadius: BorderRadius.circular(28),
-                          boxShadow: [
-                            BoxShadow(
-                              color: _primaryColor.withValues(alpha: 0.16),
-                              blurRadius: 18,
-                            ),
-                          ],
+                          borderRadius: BorderRadius.circular(AppRadii.card),
+                          boxShadow: AppEffects.raisedShadow,
                         ),
                         child: const Icon(
                           Icons.account_circle_rounded,
@@ -760,13 +755,8 @@ class _CustomerLoginState extends State<CustomerLogin> {
                         padding: const EdgeInsets.all(18),
                         decoration: BoxDecoration(
                           color: _primaryColor,
-                          borderRadius: BorderRadius.circular(24),
-                          boxShadow: [
-                            BoxShadow(
-                              color: _primaryColor.withValues(alpha: 0.16),
-                              blurRadius: 18,
-                            ),
-                          ],
+                          borderRadius: BorderRadius.circular(AppRadii.card),
+                          boxShadow: AppEffects.raisedShadow,
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -810,7 +800,9 @@ class _CustomerLoginState extends State<CustomerLogin> {
                                   backgroundColor: Colors.white,
                                   foregroundColor: _primaryColor,
                                   shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(14),
+                                    borderRadius: BorderRadius.circular(
+                                      AppRadii.control,
+                                    ),
                                   ),
                                 ),
                                 onPressed: isAuthenticationBusy
@@ -872,14 +864,9 @@ class _CustomerLoginState extends State<CustomerLogin> {
                         padding: const EdgeInsets.all(22),
                         decoration: BoxDecoration(
                           color: _cardColor,
-                          borderRadius: BorderRadius.circular(26),
+                          borderRadius: BorderRadius.circular(AppRadii.card),
                           border: Border.all(color: _borderColor),
-                          boxShadow: [
-                            BoxShadow(
-                              color: _primaryColor.withValues(alpha: 0.08),
-                              blurRadius: 18,
-                            ),
-                          ],
+                          boxShadow: AppEffects.cardShadow,
                         ),
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
@@ -910,7 +897,9 @@ class _CustomerLoginState extends State<CustomerLogin> {
                                     horizontal: 12,
                                   ),
                                   shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(14),
+                                    borderRadius: BorderRadius.circular(
+                                      AppRadii.control,
+                                    ),
                                   ),
                                 ),
                                 onPressed: isAuthenticationBusy

@@ -4025,11 +4025,9 @@ class _DailyReportState extends State<DailyReport> {
   BoxDecoration cardDecoration() {
     return BoxDecoration(
       color: _cardColor,
-      borderRadius: BorderRadius.circular(22),
+      borderRadius: BorderRadius.circular(AppRadii.card),
       border: Border.all(color: _borderColor),
-      boxShadow: [
-        BoxShadow(color: _primaryColor.withOpacity(0.06), blurRadius: 14),
-      ],
+      boxShadow: AppEffects.cardShadow,
     );
   }
 
@@ -4038,11 +4036,14 @@ class _DailyReportState extends State<DailyReport> {
       height: 42,
       width: 42,
       decoration: BoxDecoration(
-        color: _softPrimaryColor,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: _borderColor),
+        color: _primaryColor,
+        borderRadius: BorderRadius.circular(AppRadii.control),
       ),
-      child: Icon(icon, color: _primaryColor, size: 23),
+      child: Icon(
+        icon,
+        color: isAppDarkMode ? AppColors.darkBackground : Colors.white,
+        size: 22,
+      ),
     );
   }
 

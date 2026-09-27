@@ -558,14 +558,8 @@ class _DocumentCleanupPageState extends State<DocumentCleanupPage> {
       padding: EdgeInsets.all(wide ? 22 : 18),
       decoration: BoxDecoration(
         color: _primaryColor,
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: _primaryColor.withValues(alpha: 0.14),
-            blurRadius: 22,
-            offset: const Offset(0, 8),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        boxShadow: AppEffects.raisedShadow,
       ),
       child: wide
           ? Row(
@@ -609,7 +603,7 @@ class _DocumentCleanupPageState extends State<DocumentCleanupPage> {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.10),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AppRadii.control),
         border: Border.all(color: Colors.white.withValues(alpha: 0.16)),
       ),
       child: Column(
@@ -709,8 +703,9 @@ class _DocumentCleanupPageState extends State<DocumentCleanupPage> {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: _cardColor,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(AppRadii.card),
         border: Border.all(color: Colors.red.withValues(alpha: 0.28)),
+        boxShadow: AppEffects.cardShadow,
       ),
       child: wide
           ? Row(
@@ -736,8 +731,9 @@ class _DocumentCleanupPageState extends State<DocumentCleanupPage> {
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: _cardColor,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(AppRadii.card),
         border: Border.all(color: _borderColor),
+        boxShadow: AppEffects.cardShadow,
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -746,10 +742,13 @@ class _DocumentCleanupPageState extends State<DocumentCleanupPage> {
             width: 46,
             height: 46,
             decoration: BoxDecoration(
-              color: _softPrimaryColor,
-              borderRadius: BorderRadius.circular(14),
+              color: _primaryColor,
+              borderRadius: BorderRadius.circular(AppRadii.control),
             ),
-            child: Icon(Icons.inventory_2_outlined, color: _primaryColor),
+            child: Icon(
+              Icons.inventory_2_outlined,
+              color: isAppDarkMode ? AppColors.darkBackground : Colors.white,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -840,8 +839,9 @@ class _DocumentCleanupPageState extends State<DocumentCleanupPage> {
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         color: _cardColor,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(AppRadii.card),
         border: Border.all(color: _borderColor),
+        boxShadow: AppEffects.cardShadow,
       ),
       child: Center(child: child),
     );
@@ -893,11 +893,12 @@ class _DocumentCleanupPageState extends State<DocumentCleanupPage> {
       padding: const EdgeInsets.fromLTRB(10, 12, 14, 12),
       decoration: BoxDecoration(
         color: selected ? _softPrimaryColor : _cardColor,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(AppRadii.card),
         border: Border.all(
           color: selected ? _primaryColor : _borderColor,
           width: selected ? 1.5 : 1,
         ),
+        boxShadow: AppEffects.cardShadow,
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
