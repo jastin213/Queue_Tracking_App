@@ -112,6 +112,12 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Public lobby display configuration. Only administrators can change it.
+    match /system_config/display_settings {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     // Operational status for automated retention. The Admin SDK bypasses rules.
     match /system_config/{configId} {
       allow read, write: if isAdmin();

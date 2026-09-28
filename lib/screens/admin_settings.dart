@@ -7,6 +7,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 
 import '../services/app_language.dart';
 import '../services/appointment_approval_settings.dart';
+import '../services/public_display_settings.dart';
 import '../services/queue_voice.dart';
 import '../theme/app_theme.dart';
 import 'document_cleanup.dart';
@@ -36,10 +37,6 @@ ValueNotifier<String> voiceSpeedNotifier = ValueNotifier("Normal");
 ValueNotifier<bool> requireResetConfirmationNotifier = ValueNotifier(true);
 ValueNotifier<int> dailyQueueLimitNotifier = ValueNotifier(80);
 
-ValueNotifier<String> displayAnnouncementNotifier = ValueNotifier(
-  "Please wait for your queue number to be called.",
-);
-
 ValueNotifier<bool> showCustomerNameNotifier = ValueNotifier(true);
 ValueNotifier<bool> showVehicleTypeNotifier = ValueNotifier(true);
 ValueNotifier<bool> showEstimatedWaitingTimeNotifier = ValueNotifier(true);
@@ -60,6 +57,7 @@ class _AdminSettingsState extends State<AdminSettings> {
   final TextEditingController announcementController = TextEditingController();
   StreamSubscription<AppointmentApprovalSettings>?
   _appointmentApprovalSettingsSubscription;
+  StreamSubscription<String>? _displayAnnouncementSubscription;
   bool _conditionalAutoApprovalEnabled = false;
   bool _appointmentApprovalSettingsLoading = true;
   bool _appointmentApprovalSettingsSaving = false;
@@ -72,6 +70,13 @@ class _AdminSettingsState extends State<AdminSettings> {
       _appointmentApprovalSettingsLoading = false;
       return;
     }
+    _displayAnnouncementSubscription = PublicDisplaySettings.watchAnnouncement()
+        .listen((announcement) {
+          if (!mounted) return;
+          if (announcementController.text != announcement) {
+            announcementController.text = announcement;
+          }
+        }, onError: (_) {});
     _appointmentApprovalSettingsSubscription =
         AppointmentApprovalSettings.watch().listen(
           (settings) {
@@ -92,6 +97,7 @@ class _AdminSettingsState extends State<AdminSettings> {
   @override
   void dispose() {
     _appointmentApprovalSettingsSubscription?.cancel();
+    _displayAnnouncementSubscription?.cancel();
     announcementController.dispose();
     super.dispose();
   }
@@ -122,14 +128,22 @@ class _AdminSettingsState extends State<AdminSettings> {
   // SAVE FUNCTIONS
   // ==========================================================================
 
-  void saveAnnouncement() {
-    displayAnnouncementNotifier.value = announcementController.text.trim();
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Display announcement saved.")),
-    );
-
-    setState(() {});
+  Future<void> saveAnnouncement() async {
+    try {
+      await PublicDisplaySettings.saveAnnouncement(announcementController.text);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Display announcement saved.")),
+      );
+      setState(() {});
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Unable to save the display announcement."),
+        ),
+      );
+    }
   }
 
   void updateQueueLimit(int value) {
@@ -285,7 +299,7 @@ class _AdminSettingsState extends State<AdminSettings> {
             content: const Text(
               'Only appointments that pass every supported document, name, '
               'plate, duplicate, and queue-slot check with a score of at '
-              'least 95 will be approved automatically. Uncertain '
+              'least 85 will be approved automatically. Uncertain '
               'appointments will remain pending and will never be '
               'automatically rejected. This checks consistency but does not '
               'prove LTO authenticity without an official verification API.',
@@ -352,7 +366,7 @@ class _AdminSettingsState extends State<AdminSettings> {
             icon: Icons.auto_awesome_rounded,
             title: 'Conditional Auto-Approval',
             subtitle:
-                'Auto-approve only when every supported check passes at 95% or higher.',
+                'Auto-approve only when every supported check passes at 85% or higher.',
             trailing:
                 _appointmentApprovalSettingsLoading ||
                     _appointmentApprovalSettingsSaving

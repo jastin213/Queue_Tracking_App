@@ -343,10 +343,36 @@ class DocumentReviewAnalyzer {
       ) {
         candidate += textTokens[start + tokenCount - 1];
         if ((candidate.length - normalizedPlate.length).abs() > 1) continue;
-        if (_levenshteinDistance(candidate, normalizedPlate) <= 1) return true;
+        if (_platesApproximatelyEqual(normalizedPlate, candidate)) return true;
       }
     }
     return false;
+  }
+
+  static bool _platesApproximatelyEqual(String expected, String candidate) {
+    if (expected == candidate) return true;
+    if ((expected.length - candidate.length).abs() > 1) return false;
+    if (_levenshteinDistance(expected, candidate) <= 1) return true;
+    if (expected.length != candidate.length) return false;
+
+    var confusableDifferences = 0;
+    for (var index = 0; index < expected.length; index++) {
+      final expectedCharacter = expected[index];
+      final candidateCharacter = candidate[index];
+      if (expectedCharacter == candidateCharacter) continue;
+      if (!_areOcrConfusable(expectedCharacter, candidateCharacter)) {
+        return false;
+      }
+      confusableDifferences++;
+    }
+    return confusableDifferences > 0 && confusableDifferences <= 2;
+  }
+
+  static bool _areOcrConfusable(String first, String second) {
+    const groups = <String>['0OQ', '1IL', '2Z', '3E', '5S', '6G', '8B'];
+    return groups.any(
+      (group) => group.contains(first) && group.contains(second),
+    );
   }
 
   static bool _containsApproximatePhrase(String text, String phrase) {

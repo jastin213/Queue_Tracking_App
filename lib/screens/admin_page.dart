@@ -131,10 +131,13 @@ class AdminPage extends StatefulWidget {
 class _AdminPageState extends State<AdminPage> {
   final FlutterTts flutterTts = FlutterTts();
   final GlobalKey _adminNotificationButtonKey = GlobalKey();
+  final GlobalKey<ScaffoldState> _mobileScaffoldKey =
+      GlobalKey<ScaffoldState>();
   String _lastScheduledQueueSignature = "";
   bool _isGeneratingQueue = false;
   bool _isRefreshingQueue = false;
   bool _isCallingCustomer = false;
+  bool _desktopSidebarVisible = true;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
   _pendingAppointmentSubscription;
   List<Map<String, dynamic>> _pendingAppointments = [];
@@ -2359,7 +2362,7 @@ class _AdminPageState extends State<AdminPage> {
                       backgroundColor: _backgroundColor,
                       body: Row(
                         children: [
-                          buildDesktopSidebar(),
+                          if (_desktopSidebarVisible) buildDesktopSidebar(),
                           Expanded(
                             child: Column(
                               children: [
@@ -2372,9 +2375,18 @@ class _AdminPageState extends State<AdminPage> {
                       ),
                     )
                   : Scaffold(
+                      key: _mobileScaffoldKey,
                       backgroundColor: _backgroundColor,
                       drawer: buildDrawer(),
                       appBar: AppBar(
+                        leading: IconButton(
+                          key: const Key('mobile-navigation-toggle'),
+                          tooltip: 'Open navigation menu',
+                          onPressed: () {
+                            _mobileScaffoldKey.currentState?.openDrawer();
+                          },
+                          icon: const Icon(Icons.menu_rounded),
+                        ),
                         title: Text(
                           text("Admin Control Panel", "Admin Control Panel"),
                         ),
@@ -2427,27 +2439,31 @@ class _AdminPageState extends State<AdminPage> {
                       ),
                       const SizedBox(height: 18),
                       if (wide)
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(flex: 4, child: buildLeftPanel()),
-                            const SizedBox(width: 20),
-                            Expanded(
-                              flex: 8,
-                              child: buildNowServingCard(displayedNowServing),
-                            ),
-                          ],
+                        IntrinsicHeight(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Expanded(flex: 4, child: buildLeftPanel()),
+                              const SizedBox(width: 20),
+                              Expanded(
+                                flex: 8,
+                                child: buildNowServingCard(displayedNowServing),
+                              ),
+                            ],
+                          ),
                         )
                       else if (tablet)
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            SizedBox(width: 230, child: buildLeftPanel()),
-                            const SizedBox(width: 18),
-                            Expanded(
-                              child: buildNowServingCard(displayedNowServing),
-                            ),
-                          ],
+                        IntrinsicHeight(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              SizedBox(width: 230, child: buildLeftPanel()),
+                              const SizedBox(width: 18),
+                              Expanded(
+                                child: buildNowServingCard(displayedNowServing),
+                              ),
+                            ],
+                          ),
                         )
                       else
                         Column(
@@ -2479,27 +2495,51 @@ class _AdminPageState extends State<AdminPage> {
   }
 
   Widget buildDesktopHeader() {
-    final user = FirebaseAuth.instance.currentUser;
-    final rawName = user?.displayName?.trim().isNotEmpty == true
-        ? user!.displayName!.trim()
-        : (user?.email?.split('@').first ?? 'Admin');
-    final displayName = rawName.isEmpty ? 'Admin' : rawName;
-    final initials = displayName
-        .split(RegExp(r'\s+'))
-        .where((part) => part.isNotEmpty)
-        .take(2)
-        .map((part) => part[0].toUpperCase())
-        .join();
+    final viewportWidth = MediaQuery.sizeOf(context).width;
+    final showLiveBadge = viewportWidth >= 1250;
 
     return Container(
       height: 66,
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.fromLTRB(8, 0, 20, 0),
       decoration: BoxDecoration(
         color: _cardColor,
         border: Border(bottom: BorderSide(color: _borderColor)),
       ),
       child: Row(
         children: [
+          Tooltip(
+            message: _desktopSidebarVisible
+                ? 'Hide navigation menu'
+                : 'Show navigation menu',
+            child: IconButton(
+              key: const Key('desktop-sidebar-toggle'),
+              onPressed: () {
+                setState(() {
+                  _desktopSidebarVisible = !_desktopSidebarVisible;
+                });
+              },
+              style: IconButton.styleFrom(
+                foregroundColor: _primaryColor,
+                backgroundColor: _softPrimaryColor,
+                side: BorderSide(color: _borderColor),
+                minimumSize: const Size(40, 40),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              icon: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                child: Icon(
+                  _desktopSidebarVisible
+                      ? Icons.menu_open_rounded
+                      : Icons.menu_rounded,
+                  key: ValueKey(_desktopSidebarVisible),
+                  size: 22,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
           Text(
             text('Admin Control Panel', 'Admin Control Panel'),
             style: TextStyle(
@@ -2509,66 +2549,39 @@ class _AdminPageState extends State<AdminPage> {
               letterSpacing: -0.2,
             ),
           ),
-          const SizedBox(width: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: AppColors.success.withValues(alpha: 0.11),
-              borderRadius: BorderRadius.circular(30),
-              border: Border.all(
-                color: AppColors.success.withValues(alpha: 0.22),
+          if (showLiveBadge) ...[
+            const SizedBox(width: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: AppColors.success.withValues(alpha: 0.11),
+                borderRadius: BorderRadius.circular(30),
+                border: Border.all(
+                  color: AppColors.success.withValues(alpha: 0.22),
+                ),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.circle, size: 8, color: AppColors.success),
+                  SizedBox(width: 6),
+                  Text(
+                    'LIVE OPERATIONAL DAY',
+                    style: TextStyle(
+                      color: AppColors.success,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ],
               ),
             ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.circle, size: 8, color: AppColors.success),
-                SizedBox(width: 6),
-                Text(
-                  'LIVE OPERATIONAL DAY',
-                  style: TextStyle(
-                    color: AppColors.success,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-              ],
-            ),
-          ),
+          ],
           const Spacer(),
           _buildThemeModeButton(),
           _buildAppointmentNotificationButton(),
           buildRefreshControl(context),
-          const SizedBox(width: 12),
-          Container(width: 1, height: 30, color: _borderColor),
-          const SizedBox(width: 12),
-          CircleAvatar(
-            radius: 18,
-            backgroundColor: _primaryColor,
-            child: Text(
-              initials.isEmpty ? 'A' : initials,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 11,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-          ),
-          const SizedBox(width: 9),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 150),
-            child: Text(
-              '$displayName (Admin)',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: _primaryColor,
-                fontSize: 12.5,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
         ],
       ),
     );
@@ -2756,30 +2769,51 @@ class _AdminPageState extends State<AdminPage> {
         children: [
           DrawerHeader(
             decoration: BoxDecoration(color: _primaryColor),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.end,
+            child: Stack(
               children: [
-                Container(
-                  height: 56,
-                  width: 56,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.14),
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: const Icon(
-                    Icons.admin_panel_settings_rounded,
-                    color: Colors.white,
-                    size: 34,
+                Positioned(
+                  top: 0,
+                  right: 0,
+                  child: IconButton(
+                    key: const Key('mobile-navigation-close'),
+                    tooltip: 'Close navigation menu',
+                    onPressed: () => Navigator.pop(context),
+                    style: IconButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      backgroundColor: Colors.white.withValues(alpha: 0.12),
+                    ),
+                    icon: const Icon(Icons.close_rounded),
                   ),
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  text("Admin Panel", "Admin Panel"),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
+                Align(
+                  alignment: Alignment.bottomLeft,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        height: 56,
+                        width: 56,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: const Icon(
+                          Icons.admin_panel_settings_rounded,
+                          color: Colors.white,
+                          size: 34,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        text("Admin Panel", "Admin Panel"),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],

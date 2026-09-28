@@ -3,6 +3,7 @@ import 'package:flutter/material.dart' hide Text;
 import '../widgets/localized_text.dart';
 
 import '../theme/app_theme.dart';
+import '../services/public_display_settings.dart';
 import '../widgets/app_motion.dart';
 import 'admin_settings.dart';
 
@@ -870,11 +871,13 @@ class DisplayPage extends StatelessWidget {
   // ==========================================================================
 
   Widget buildAnnouncement() {
-    return ValueListenableBuilder<String>(
-      valueListenable: displayAnnouncementNotifier,
-      builder: (context, announcement, _) {
+    return StreamBuilder<String>(
+      stream: PublicDisplaySettings.watchAnnouncement(),
+      initialData: displayAnnouncementNotifier.value,
+      builder: (context, snapshot) {
+        final announcement = snapshot.data ?? displayAnnouncementNotifier.value;
         final message = announcement.trim().isEmpty
-            ? "Please stay alert and proceed when your queue number is called."
+            ? defaultDisplayAnnouncement
             : announcement.trim();
 
         return Container(

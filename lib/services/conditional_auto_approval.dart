@@ -19,7 +19,7 @@ class ConditionalAutoApprovalDecision {
 }
 
 class ConditionalAutoApproval {
-  static const int defaultMinimumScore = 95;
+  static const int defaultMinimumScore = 85;
 
   static ConditionalAutoApprovalDecision evaluate({
     required DocumentReviewResult review,

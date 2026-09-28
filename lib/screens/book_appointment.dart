@@ -14,6 +14,7 @@ import 'package:printing/printing.dart';
 
 import '../theme/app_theme.dart';
 import '../services/document_image_optimizer.dart';
+import '../services/document_image_quality.dart';
 import '../services/document_upload_consent.dart';
 import '../services/firestore_query_fields.dart';
 import '../services/platform_storage_upload.dart';
@@ -509,6 +510,71 @@ class _BookAppointmentState extends State<BookAppointment> {
     return accepted;
   }
 
+  Future<bool> confirmDocumentImageQuality({
+    required Uint8List bytes,
+    required String fileName,
+  }) async {
+    final assessment = await assessDocumentImageQuality(
+      bytes: bytes,
+      fileName: fileName,
+    );
+    if (!mounted || !assessment.shouldWarn) return mounted;
+
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            icon: const Icon(Icons.document_scanner_outlined),
+            title: const Text('Photo quality warning'),
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'The system may have difficulty reading this document:',
+                  ),
+                  const SizedBox(height: 12),
+                  for (final message in assessment.messages) ...[
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Padding(
+                          padding: EdgeInsets.only(top: 2),
+                          child: Icon(
+                            Icons.warning_amber_rounded,
+                            size: 19,
+                            color: Colors.orange,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(message)),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  const SizedBox(height: 4),
+                  const Text(
+                    'For faster approval, keep the full document visible and make all text clear.',
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('CHOOSE ANOTHER'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('USE ANYWAY'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
   Future<void> pickDocument(String type) async {
     if (!await confirmDocumentUploadConsent()) return;
 
@@ -531,6 +597,13 @@ class _BookAppointmentState extends State<BookAppointment> {
             content: Text("Unable to read selected file. Please try again."),
           ),
         );
+        return;
+      }
+
+      if (!await confirmDocumentImageQuality(
+        bytes: bytes,
+        fileName: file.name,
+      )) {
         return;
       }
 
@@ -608,6 +681,12 @@ class _BookAppointmentState extends State<BookAppointment> {
       if (photo == null) return;
 
       final Uint8List originalBytes = await photo.readAsBytes();
+      if (!await confirmDocumentImageQuality(
+        bytes: originalBytes,
+        fileName: photo.name,
+      )) {
+        return;
+      }
       final optimizedImage = await optimizeDocumentImage(
         bytes: originalBytes,
         fileName: photo.name,
@@ -646,6 +725,7 @@ class _BookAppointmentState extends State<BookAppointment> {
         }
       });
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(

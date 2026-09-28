@@ -86,6 +86,42 @@ void main() {
       );
     });
 
+    test('matches plate characters commonly confused by OCR', () {
+      final result = DocumentReviewAnalyzer.analyze(
+        customerName: 'Julie Rebadavia',
+        enteredPlate: '624EJH',
+        idText: 'PHILSYS NATIONAL ID JULIE REBADAVIA DATE OF BIRTH',
+        orText: 'OFFICIAL RECEIPT PLATE NO G24EJH AMOUNT PAID',
+        crText: 'CERTIFICATE OF REGISTRATION PLATE NO 624EJH',
+      );
+
+      expect(result.title, 'Likely consistent');
+      expect(result.score, 100);
+      expect(
+        result.checks
+            .firstWhere((check) => check.title == 'Plate number on OR')
+            .state,
+        DocumentReviewCheckState.passed,
+      );
+    });
+
+    test('does not accept a plate with non-confusable character changes', () {
+      final result = DocumentReviewAnalyzer.analyze(
+        customerName: 'Julie Rebadavia',
+        enteredPlate: '624EJH',
+        idText: 'PHILSYS NATIONAL ID JULIE REBADAVIA DATE OF BIRTH',
+        orText: 'OFFICIAL RECEIPT PLATE NO A24XJH AMOUNT PAID',
+        crText: 'CERTIFICATE OF REGISTRATION PLATE NO 624EJH',
+      );
+
+      expect(
+        result.checks
+            .firstWhere((check) => check.title == 'Plate number on OR')
+            .state,
+        DocumentReviewCheckState.warning,
+      );
+    });
+
     test('gives unrelated readable images a zero consistency score', () {
       final result = DocumentReviewAnalyzer.analyze(
         customerName: 'Kehn Rebadavia',

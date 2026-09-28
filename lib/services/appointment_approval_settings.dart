@@ -8,7 +8,7 @@ class AppointmentApprovalSettings {
   });
 
   static const bool defaultEnabled = false;
-  static const int defaultMinimumScore = 95;
+  static const int defaultMinimumScore = 85;
   static const String documentPath = 'system_config/appointment_approval';
 
   final bool conditionalAutoApprovalEnabled;
@@ -18,13 +18,12 @@ class AppointmentApprovalSettings {
     DocumentSnapshot<Map<String, dynamic>> snapshot,
   ) {
     final data = snapshot.data();
-    final configuredScore = data?['minimumScore'];
     return AppointmentApprovalSettings(
       conditionalAutoApprovalEnabled:
           data?['conditionalAutoApprovalEnabled'] == true,
-      minimumScore: configuredScore is num
-          ? configuredScore.round().clamp(90, 100)
-          : defaultMinimumScore,
+      // The current policy has one fixed threshold. Ignoring an older stored
+      // value also migrates installations that previously saved 95 percent.
+      minimumScore: defaultMinimumScore,
     );
   }
 

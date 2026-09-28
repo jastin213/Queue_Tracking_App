@@ -609,20 +609,30 @@ class _CustomerHomeState extends State<CustomerHome> {
           valueListenable: customerAppLanguageNotifier,
           builder: (context, language, _) {
             final filipino = language == 'Filipino';
+            final isCompactHeader = MediaQuery.sizeOf(context).width < 600;
+            final homeTitle = Text(
+              filipino ? "Tahanan ng Customer" : "Customer Home",
+              maxLines: 1,
+              softWrap: false,
+              style: TextStyle(
+                color: _primaryColor,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.2,
+              ),
+            );
             return Scaffold(
               backgroundColor: _backgroundColor,
               appBar: AppBar(
                 backgroundColor: _cardColor,
                 elevation: 0,
                 foregroundColor: _primaryColor,
-                title: Text(
-                  filipino ? "Tahanan ng Customer" : "Customer Home",
-                  style: TextStyle(
-                    color: _primaryColor,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.2,
-                  ),
-                ),
+                title: isCompactHeader
+                    ? FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: homeTitle,
+                      )
+                    : homeTitle,
                 actions: [
                   ValueListenableBuilder<ThemeMode>(
                     valueListenable: appThemeModeNotifier,

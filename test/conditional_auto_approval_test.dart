@@ -36,6 +36,23 @@ void main() {
     expect(decision.action, ConditionalAutoApprovalAction.approve);
   });
 
+  test(
+    'approves at the configured 85 percent threshold when all checks pass',
+    () {
+      final decision = ConditionalAutoApproval.evaluate(
+        review: review(
+          score: 85,
+          states: List.filled(6, DocumentReviewCheckState.passed),
+        ),
+        allRequiredDocumentsPresent: true,
+        queueSlotAvailable: true,
+        suspiciousDuplicateDetected: false,
+      );
+
+      expect(decision.action, ConditionalAutoApprovalAction.approve);
+    },
+  );
+
   test('keeps readable but uncertain documents for manual review', () {
     final decision = ConditionalAutoApproval.evaluate(
       review: review(

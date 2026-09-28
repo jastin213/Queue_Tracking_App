@@ -4,6 +4,8 @@ import 'dart:typed_data';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'document_ocr_preprocessor.dart';
+
 class DocumentTextRecognizer {
   final TextRecognizer _recognizer = TextRecognizer(
     script: TextRecognitionScript.latin,
@@ -27,6 +29,28 @@ class DocumentTextRecognizer {
       );
     }
 
+    final enhancedFuture = enhanceDocumentImageForOcr(
+      bytes: bytes,
+      fileName: fileName,
+    );
+    final primaryText = await _recognizeSingle(
+      bytes: bytes,
+      fileName: fileName,
+    );
+    final enhanced = await enhancedFuture;
+    if (enhanced == null) return primaryText;
+
+    final enhancedText = await _recognizeSingle(
+      bytes: enhanced.bytes,
+      fileName: enhanced.fileName,
+    );
+    return _mergeOcrText(primaryText, enhancedText);
+  }
+
+  Future<String> _recognizeSingle({
+    required Uint8List bytes,
+    required String fileName,
+  }) async {
     final extension = _safeImageExtension(fileName);
     final directory = await getTemporaryDirectory();
     final file = File(
@@ -44,6 +68,14 @@ class DocumentTextRecognizer {
         await file.delete();
       }
     }
+  }
+
+  String _mergeOcrText(String primary, String enhanced) {
+    final first = primary.trim();
+    final second = enhanced.trim();
+    if (first.isEmpty) return second;
+    if (second.isEmpty || first == second) return first;
+    return '$first\n$second';
   }
 
   String _safeImageExtension(String fileName) {

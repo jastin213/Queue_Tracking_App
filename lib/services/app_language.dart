@@ -611,8 +611,25 @@ const Map<String, String> _filipinoTranslations = {
   'Manual approval is the safe default.':
       'Manwal na pag-apruba ang ligtas na default.',
   'Conditional Auto-Approval': 'Kondisyonal na Awtomatikong Pag-apruba',
-  'Auto-approve only when every supported check passes at 95% or higher.':
-      'Awtomatikong aprubahan lamang kapag pumasa ang lahat ng suportadong pagsusuri sa 95% o higit pa.',
+  'Auto-approve only when every supported check passes at 85% or higher.':
+      'Awtomatikong aprubahan lamang kapag pumasa ang lahat ng suportadong pagsusuri sa 85% o higit pa.',
+  'Photo quality warning': 'Babala sa kalidad ng larawan',
+  'The system may have difficulty reading this document:':
+      'Maaaring mahirapan ang system na basahin ang dokumentong ito:',
+  'The selected image could not be checked. Make sure it is a valid JPG or PNG file.':
+      'Hindi masuri ang napiling larawan. Tiyaking wastong JPG o PNG file ito.',
+  'The photo resolution is low. Small names, plate numbers, and document labels may be difficult to read.':
+      'Mababa ang resolution ng larawan. Maaaring mahirap basahin ang maliliit na pangalan, plate number, at label ng dokumento.',
+  'The photo is too dark. Retake it in brighter, even lighting.':
+      'Masyadong madilim ang larawan. Kunan itong muli sa mas maliwanag at pantay na ilaw.',
+  'The photo is too bright or has glare. Move away from direct light and retake it.':
+      'Masyadong maliwanag o may silaw ang larawan. Lumayo sa direktang ilaw at kunan itong muli.',
+  'The photo may be blurry. Hold the camera steady and tap the document to focus.':
+      'Maaaring malabo ang larawan. Hawakang matatag ang camera at i-tap ang dokumento upang mag-focus.',
+  'For faster approval, keep the full document visible and make all text clear.':
+      'Para sa mas mabilis na pag-apruba, tiyaking kita ang buong dokumento at malinaw ang lahat ng teksto.',
+  'CHOOSE ANOTHER': 'PUMILI NG IBA',
+  'USE ANYWAY': 'GAMITIN PA RIN',
   'Active: new pending appointments are checked in the Admin Appointment Dashboard. Mismatches stay pending for manual review.':
       'Aktibo: awtomatikong susuriin ang mga bagong appointment sa Admin Appointment Dashboard. Mananatiling pending ang may hindi tugmang impormasyon para sa manwal na pagsusuri.',
   'Manual mode: every appointment stays pending until an administrator approves or rejects it.':
