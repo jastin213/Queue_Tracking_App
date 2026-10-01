@@ -100,4 +100,51 @@ void main() {
 
     expect(decision.action, ConditionalAutoApprovalAction.manualReview);
   });
+
+  test('rejects a confirmed zero score when auto-rejection is enabled', () {
+    final decision = ConditionalAutoApproval.evaluate(
+      review: review(
+        score: 0,
+        states: List.filled(6, DocumentReviewCheckState.warning),
+      ),
+      allRequiredDocumentsPresent: true,
+      queueSlotAvailable: true,
+      suspiciousDuplicateDetected: false,
+      autoRejectionEnabled: true,
+    );
+
+    expect(decision.action, ConditionalAutoApprovalAction.reject);
+  });
+
+  test('does not reject zero when OCR information is unavailable', () {
+    final decision = ConditionalAutoApproval.evaluate(
+      review: review(
+        score: 0,
+        states: const [
+          DocumentReviewCheckState.warning,
+          DocumentReviewCheckState.unavailable,
+        ],
+      ),
+      allRequiredDocumentsPresent: true,
+      queueSlotAvailable: true,
+      suspiciousDuplicateDetected: false,
+      autoRejectionEnabled: true,
+    );
+
+    expect(decision.action, ConditionalAutoApprovalAction.requestResubmission);
+  });
+
+  test('keeps a confirmed zero out of rejection when setting is disabled', () {
+    final decision = ConditionalAutoApproval.evaluate(
+      review: review(
+        score: 0,
+        states: List.filled(6, DocumentReviewCheckState.warning),
+      ),
+      allRequiredDocumentsPresent: true,
+      queueSlotAvailable: true,
+      suspiciousDuplicateDetected: false,
+    );
+
+    expect(decision.action, ConditionalAutoApprovalAction.requestResubmission);
+  });
 }

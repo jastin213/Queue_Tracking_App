@@ -613,6 +613,9 @@ const Map<String, String> _filipinoTranslations = {
   'Conditional Auto-Approval': 'Kondisyonal na Awtomatikong Pag-apruba',
   'Auto-approve only when every supported check passes at 85% or higher.':
       'Awtomatikong aprubahan lamang kapag pumasa ang lahat ng suportadong pagsusuri sa 85% o higit pa.',
+  'Conditional Auto-Rejection': 'Kondisyonal na Awtomatikong Pagtanggi',
+  'Auto-reject only a confirmed 0/100 result after successful original and enhanced OCR checks.':
+      'Awtomatikong tanggihan lamang ang kumpirmadong 0/100 matapos matagumpay ang orihinal at pinahusay na OCR checks.',
   'Photo quality warning': 'Babala sa kalidad ng larawan',
   'The system may have difficulty reading this document:':
       'Maaaring mahirapan ang system na basahin ang dokumentong ito:',
@@ -634,15 +637,28 @@ const Map<String, String> _filipinoTranslations = {
       'Aktibo: awtomatikong susuriin ang mga bagong appointment sa Admin Appointment Dashboard. Mananatiling pending ang may hindi tugmang impormasyon para sa manwal na pagsusuri.',
   'Manual mode: every appointment stays pending until an administrator approves or rejects it.':
       'Manwal na mode: mananatiling pending ang bawat appointment hanggang aprubahan o tanggihan ito ng administrator.',
+  'Active: complete matches can be approved automatically, while confirmed zero-score submissions can be rejected automatically. All uncertain results stay pending.':
+      'Aktibo: maaaring awtomatikong aprubahan ang kumpletong tugma at awtomatikong tanggihan ang kumpirmadong zero-score na submission. Mananatiling pending ang lahat ng hindi tiyak na resulta.',
+  'Auto-approval is active. Mismatches and uncertain results stay pending for manual review.':
+      'Aktibo ang awtomatikong pag-apruba. Mananatiling pending para sa manwal na pagsusuri ang hindi tugma at hindi tiyak na resulta.',
+  'Zero-score auto-rejection is active. Only confirmed readable mismatches are rejected; all uncertain results stay pending.':
+      'Aktibo ang awtomatikong pagtanggi sa zero score. Kumpirmado at nababasang hindi tugmang dokumento lamang ang tatanggihan; mananatiling pending ang hindi tiyak na resulta.',
   'Enable Conditional Auto-Approval?':
       'I-enable ang Kondisyonal na Awtomatikong Pag-apruba?',
+  'Enable Conditional Auto-Rejection?':
+      'I-enable ang Kondisyonal na Awtomatikong Pagtanggi?',
   'Cancel': 'Kanselahin',
   'Enable': 'I-enable',
   'Conditional auto-approval enabled.':
       'Naka-enable na ang kondisyonal na awtomatikong pag-apruba.',
+  'Safeguarded zero-score auto-rejection enabled.':
+      'Naka-enable na ang ligtas na awtomatikong pagtanggi sa zero score.',
+  'Conditional auto-rejection disabled.':
+      'Naka-disable na ang kondisyonal na awtomatikong pagtanggi.',
   'Manual appointment approval restored.':
       'Naibalik na ang manwal na pag-apruba ng appointment.',
   'Conditionally auto-approved': 'Kondisyonal na awtomatikong naaprubahan',
+  'Conditionally auto-rejected': 'Kondisyonal na awtomatikong tinanggihan',
   'Clearer or corrected upload recommended':
       'Kailangan ng mas malinaw o itinamang upload',
   'Automatic document review in progress':

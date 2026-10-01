@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' hide Text;
@@ -16,7 +15,9 @@ import '../services/appointment_approval_settings.dart';
 import '../theme/app_theme.dart';
 import '../services/appointment_lifecycle.dart';
 import '../services/conditional_auto_approval.dart';
+import '../services/document_content_hash.dart';
 import '../services/document_review_analyzer.dart';
+import '../services/document_ocr_retry_policy.dart';
 import '../services/document_text_recognition.dart';
 import '../services/firestore_query_fields.dart';
 import '../widgets/app_refresh_indicator.dart';
@@ -41,6 +42,26 @@ class _AppointmentDocumentAnalysis {
 
   final DocumentReviewResult review;
   final Map<String, String> documentHashes;
+}
+
+class _LoadedReviewDocument {
+  const _LoadedReviewDocument({
+    required this.documentType,
+    required this.label,
+    required this.bytes,
+    required this.fileName,
+    required this.hash,
+    this.error,
+  });
+
+  final String documentType;
+  final String label;
+  final Uint8List? bytes;
+  final String fileName;
+  final String hash;
+  final String? error;
+
+  bool get canRecognize => bytes != null && error == null;
 }
 
 class AdminDashboard extends StatefulWidget {
@@ -69,10 +90,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
   String? _expandedOverviewStatus;
   bool _openedInitialAppointment = false;
   bool _conditionalAutoApprovalEnabled = false;
+  bool _conditionalAutoRejectionEnabled = false;
   int _autoApprovalMinimumScore =
       AppointmentApprovalSettings.defaultMinimumScore;
   bool _autoApprovalBatchRunning = false;
   bool _autoApprovalBatchQueued = false;
+  final Map<String, String> _documentOcrSessionCache = {};
+
+  static const String _ocrCacheVersion = 'adaptive-v1';
+  static const int _maximumOcrCacheEntries = 180;
+
+  bool get _conditionalAutomationEnabled =>
+      _conditionalAutoApprovalEnabled || _conditionalAutoRejectionEnabled;
 
   @override
   void initState() {
@@ -80,6 +109,34 @@ class _AdminDashboardState extends State<AdminDashboard> {
     _listenToPendingAppointments();
     _listenToAppointmentMonth();
     _listenToAppointmentApprovalSettings();
+    unawaited(_warmUpDocumentOcr());
+  }
+
+  Future<void> _warmUpDocumentOcr() async {
+    if (!kIsWeb) return;
+    final recognizer = DocumentTextRecognizer();
+    if (!recognizer.isSupported) return;
+    try {
+      await recognizer.warmUp();
+    } catch (_) {
+      // Analysis will show its normal recoverable error if OCR is unavailable.
+    } finally {
+      await recognizer.close();
+    }
+  }
+
+  String? _cachedOcrText(String mode, String hash) {
+    if (hash.isEmpty) return null;
+    return _documentOcrSessionCache['$_ocrCacheVersion:$mode:$hash'];
+  }
+
+  void _cacheOcrText(String mode, String hash, String text) {
+    if (hash.isEmpty || text.trim().isEmpty) return;
+    final key = '$_ocrCacheVersion:$mode:$hash';
+    _documentOcrSessionCache[key] = text;
+    while (_documentOcrSessionCache.length > _maximumOcrCacheEntries) {
+      _documentOcrSessionCache.remove(_documentOcrSessionCache.keys.first);
+    }
   }
 
   @override
@@ -352,10 +409,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 
   Future<void> _processPendingAppointmentsForConditionalAutoApproval() async {
-    if (_autoApprovalBatchRunning || !_conditionalAutoApprovalEnabled) return;
+    if (_autoApprovalBatchRunning || !_conditionalAutomationEnabled) return;
     _autoApprovalBatchRunning = true;
 
     try {
+      // Let navigation, dialogs, and the first dashboard frame settle before a
+      // background OCR job starts consuming CPU in the browser worker.
+      await Future<void>.delayed(const Duration(milliseconds: 180));
       do {
         _autoApprovalBatchQueued = false;
         final candidates = List<Map<String, dynamic>>.from(
@@ -363,11 +423,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
         ).where(_needsConditionalAutoApproval).toList();
 
         for (final booking in candidates) {
-          if (!_conditionalAutoApprovalEnabled || !mounted) break;
+          if (!_conditionalAutomationEnabled || !mounted) break;
           await _processOneConditionalAutoApproval(booking);
+          await Future<void>.delayed(const Duration(milliseconds: 80));
         }
       } while (_autoApprovalBatchQueued &&
-          _conditionalAutoApprovalEnabled &&
+          _conditionalAutomationEnabled &&
           mounted);
     } finally {
       _autoApprovalBatchRunning = false;
@@ -462,6 +523,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         allRequiredDocumentsPresent: allDocumentsPresent,
         queueSlotAvailable: queueSlotAvailable,
         suspiciousDuplicateDetected: suspiciousDuplicate,
+        autoRejectionEnabled: _conditionalAutoRejectionEnabled,
         minimumScore: _autoApprovalMinimumScore,
       );
       final reviewMetadata = <String, dynamic>{
@@ -469,6 +531,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
         'reason': decision.reason,
         'score': analysis.review.score,
         'minimumScore': _autoApprovalMinimumScore,
+        'autoApprovalEnabled': _conditionalAutoApprovalEnabled,
+        'autoRejectionEnabled': _conditionalAutoRejectionEnabled,
         'suspiciousDuplicateDetected': suspiciousDuplicate,
         'queueSlotAvailable': queueSlotAvailable,
         'checks': [
@@ -492,6 +556,25 @@ class _AdminDashboardState extends State<AdminDashboard> {
         reviewMetadata['outcome'] = 'manual_review';
         reviewMetadata['reason'] =
             'The appointment changed while it was being reviewed. Administrator review is required.';
+      }
+
+      if (decision.canReject) {
+        const rejectionReason =
+            'Uploaded files did not match the required documents';
+        const rejectionFeedback =
+            'The automated review found no supported ID, Official Receipt, Certificate of Registration, customer-name, or plate-number information after the original and enhanced checks. Please create a new appointment and upload the correct documents.';
+        final rejected = await rejectBooking(
+          booking,
+          reason: rejectionReason,
+          feedback: rejectionFeedback,
+          silent: true,
+          automaticReview: reviewMetadata,
+          automaticDocumentHashes: analysis.documentHashes,
+        );
+        if (rejected) return;
+        reviewMetadata['outcome'] = 'manual_review';
+        reviewMetadata['reason'] =
+            'Automatic rejection could not be completed. Administrator review is required.';
       }
 
       await appointmentRef.update({
@@ -519,6 +602,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   String _autoApprovalOutcome(ConditionalAutoApprovalAction action) {
     return switch (action) {
       ConditionalAutoApprovalAction.approve => 'auto_approved',
+      ConditionalAutoApprovalAction.reject => 'auto_rejected',
       ConditionalAutoApprovalAction.manualReview => 'manual_review',
       ConditionalAutoApprovalAction.requestResubmission =>
         'resubmission_recommended',
@@ -828,9 +912,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
         "approvalMethod": automaticReview == null
             ? "manual"
             : "conditional_auto_approval",
-        if (automaticReview != null) "autoApprovalReview": automaticReview,
+        "autoApprovalReview": ?automaticReview,
         if (automaticReview != null)
           "autoApprovalReviewedAt": FieldValue.serverTimestamp(),
+        if (automaticReview != null)
+          "decisionSource": "conditional_auto_approval",
+        if (automaticReview != null)
+          "autoDecisionAt": FieldValue.serverTimestamp(),
         if (automaticDocumentHashes != null)
           "idDocumentHash": automaticDocumentHashes['ID'],
         if (automaticDocumentHashes != null)
@@ -1028,14 +1116,19 @@ class _AdminDashboardState extends State<AdminDashboard> {
     Map<String, dynamic> booking, {
     required String reason,
     required String feedback,
+    bool silent = false,
+    Map<String, dynamic>? automaticReview,
+    Map<String, String>? automaticDocumentHashes,
   }) async {
     final String appointmentId = booking["appointmentId"]?.toString() ?? "";
     final String queue = booking["queue"]?.toString() ?? "";
 
     if (appointmentId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Appointment ID is missing.")),
-      );
+      if (!silent) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Appointment ID is missing.")),
+        );
+      }
       return false;
     }
 
@@ -1047,6 +1140,22 @@ class _AdminDashboardState extends State<AdminDashboard> {
             "status": "Rejected",
             "rejectionReason": reason,
             "adminFeedback": feedback,
+            "rejectionMethod": automaticReview == null
+                ? "manual"
+                : "conditional_auto_rejection",
+            "autoApprovalReview": ?automaticReview,
+            if (automaticReview != null)
+              "autoApprovalReviewedAt": FieldValue.serverTimestamp(),
+            if (automaticReview != null)
+              "decisionSource": "conditional_auto_rejection",
+            if (automaticReview != null)
+              "autoDecisionAt": FieldValue.serverTimestamp(),
+            if (automaticDocumentHashes != null)
+              "idDocumentHash": automaticDocumentHashes['ID'],
+            if (automaticDocumentHashes != null)
+              "orDocumentHash": automaticDocumentHashes['OR'],
+            if (automaticDocumentHashes != null)
+              "crDocumentHash": automaticDocumentHashes['CR'],
             ...firestoreQueryFields(
               date: booking["date"],
               plate: booking["plate"],
@@ -1071,16 +1180,20 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
       if (!mounted) return true;
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("$queue rejected")));
+      if (!silent) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("$queue rejected")));
+      }
       return true;
     } catch (e) {
       if (!mounted) return false;
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Rejection failed: $e")));
+      if (!silent) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Rejection failed: $e")));
+      }
       return false;
     }
   }
@@ -1522,26 +1635,29 @@ class _AdminDashboardState extends State<AdminDashboard> {
           (settings) {
             _conditionalAutoApprovalEnabled =
                 settings.conditionalAutoApprovalEnabled;
+            _conditionalAutoRejectionEnabled =
+                settings.conditionalAutoRejectionEnabled;
             _autoApprovalMinimumScore = settings.minimumScore;
-            if (_conditionalAutoApprovalEnabled) {
+            if (_conditionalAutomationEnabled) {
               _scheduleConditionalAutoApproval();
             }
           },
           onError: (_) {
             _conditionalAutoApprovalEnabled = false;
+            _conditionalAutoRejectionEnabled = false;
           },
         );
   }
 
   void _scheduleConditionalAutoApproval() {
-    if (!_conditionalAutoApprovalEnabled || !mounted) return;
+    if (!_conditionalAutomationEnabled || !mounted) return;
     if (_autoApprovalBatchRunning) {
       _autoApprovalBatchQueued = true;
       return;
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_conditionalAutoApprovalEnabled) return;
+      if (!mounted || !_conditionalAutomationEnabled) return;
       unawaited(_processPendingAppointmentsForConditionalAutoApproval());
     });
   }
@@ -1613,6 +1729,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     Map<String, dynamic> booking, {
     required void Function(String message) onProgress,
   }) async {
+    final analysisTimer = Stopwatch()..start();
     final recognizer = DocumentTextRecognizer();
     if (!recognizer.isSupported) {
       throw UnsupportedError(
@@ -1624,61 +1741,163 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final errors = <String, String>{};
     final documentHashes = <String, String>{};
 
-    Future<void> recognizeOne(String documentType, String label) async {
-      onProgress('Loading $label...');
+    Future<_LoadedReviewDocument> loadOne(
+      String documentType,
+      String label,
+    ) async {
       try {
         final document = await loadDocumentBytesForReview(
           booking: booking,
           documentType: documentType,
         );
-        documentHashes[documentType] = sha256
-            .convert(document.bytes)
-            .toString();
-
+        final hash = await documentContentHash(document.bytes);
         if (document.fileName.toLowerCase().endsWith('.pdf')) {
-          errors[documentType] =
-              'PDF OCR is not supported. Open and review this file manually.';
-          texts[documentType] = '';
-          return;
+          return _LoadedReviewDocument(
+            documentType: documentType,
+            label: label,
+            bytes: document.bytes,
+            fileName: document.fileName,
+            hash: hash,
+            error:
+                'PDF OCR is not supported. Open and review this file manually.',
+          );
         }
 
-        onProgress('Reading $label...');
-        final text = await recognizer.recognize(
+        return _LoadedReviewDocument(
+          documentType: documentType,
+          label: label,
           bytes: document.bytes,
           fileName: document.fileName,
+          hash: hash,
         );
-        texts[documentType] = text;
-        if (text.trim().isEmpty) {
-          errors[documentType] =
-              'No readable text was detected. Open the file and review it manually.';
-        }
       } catch (_) {
-        texts[documentType] = '';
-        errors[documentType] =
-            'OCR could not read this file. Open it and review it manually.';
+        return _LoadedReviewDocument(
+          documentType: documentType,
+          label: label,
+          bytes: null,
+          fileName: '$documentType.jpg',
+          hash: '',
+          error:
+              'The document could not be loaded. Open it and review it manually.',
+        );
       }
     }
 
-    try {
-      await recognizeOne('ID', 'Valid ID');
-      await recognizeOne('OR', 'Official Receipt');
-      await recognizeOne('CR', 'Certificate of Registration');
-    } finally {
-      await recognizer.close();
-    }
-
-    onProgress('Comparing extracted details...');
-    return _AppointmentDocumentAnalysis(
-      review: DocumentReviewAnalyzer.analyze(
+    DocumentReviewResult analyzeCurrentTexts() {
+      return DocumentReviewAnalyzer.analyze(
         customerName: booking['fullName']?.toString().trim() ?? '',
         enteredPlate: booking['plate']?.toString().trim() ?? '',
         idText: texts['ID'] ?? '',
         orText: texts['OR'] ?? '',
         crText: texts['CR'] ?? '',
         errors: errors,
-      ),
-      documentHashes: documentHashes,
-    );
+      );
+    }
+
+    var cacheHits = 0;
+    var retryCount = 0;
+    try {
+      onProgress('Preparing OCR engine...');
+      await recognizer.warmUp();
+
+      onProgress('Loading 3 submitted documents...');
+      final documents = await Future.wait([
+        loadOne('ID', 'Valid ID'),
+        loadOne('OR', 'Official Receipt'),
+        loadOne('CR', 'Certificate of Registration'),
+      ]);
+
+      for (final document in documents) {
+        texts[document.documentType] = '';
+        if (document.hash.isNotEmpty) {
+          documentHashes[document.documentType] = document.hash;
+        }
+        if (document.error != null) {
+          errors[document.documentType] = document.error!;
+        }
+      }
+
+      for (var index = 0; index < documents.length; index++) {
+        final document = documents[index];
+        if (!document.canRecognize) continue;
+        final cached = _cachedOcrText('primary', document.hash);
+        if (cached != null) {
+          cacheHits++;
+          texts[document.documentType] = cached;
+          onProgress(
+            'Using recent ${document.label} analysis (${index + 1} of 3)...',
+          );
+          continue;
+        }
+
+        onProgress('Reading ${document.label} (${index + 1} of 3)...');
+        try {
+          final text = await recognizer.recognize(
+            bytes: document.bytes!,
+            fileName: document.fileName,
+          );
+          texts[document.documentType] = text;
+          _cacheOcrText('primary', document.hash, text);
+          await Future<void>.delayed(const Duration(milliseconds: 16));
+        } catch (_) {
+          texts[document.documentType] = '';
+        }
+      }
+
+      final preliminaryReview = analyzeCurrentTexts();
+      final retryTypes = documentTypesNeedingOcrRetry(preliminaryReview);
+      for (final document in documents) {
+        if (!document.canRecognize ||
+            !retryTypes.contains(document.documentType)) {
+          continue;
+        }
+        retryCount++;
+        final cached = _cachedOcrText('enhanced', document.hash);
+        if (cached != null) {
+          cacheHits++;
+          texts[document.documentType] = cached;
+          onProgress('Using improved ${document.label} analysis...');
+          continue;
+        }
+
+        onProgress('Improving unclear ${document.label} and retrying OCR...');
+        try {
+          final text = await recognizer.recognizeEnhanced(
+            bytes: document.bytes!,
+            fileName: document.fileName,
+            primaryText: texts[document.documentType] ?? '',
+          );
+          texts[document.documentType] = text;
+          _cacheOcrText('enhanced', document.hash, text);
+          await Future<void>.delayed(const Duration(milliseconds: 16));
+        } catch (_) {
+          errors[document.documentType] =
+              'The enhanced OCR retry could not be completed. Administrator review is required.';
+        }
+      }
+
+      for (final document in documents) {
+        if (document.canRecognize &&
+            (texts[document.documentType]?.trim().isEmpty ?? true)) {
+          errors[document.documentType] =
+              'No readable text was detected. Open the file and review it manually.';
+        }
+      }
+
+      onProgress('Comparing extracted details...');
+      final review = analyzeCurrentTexts();
+      analysisTimer.stop();
+      debugPrint(
+        '[DocumentReview] completed in ${analysisTimer.elapsedMilliseconds} ms; '
+        'enhanced retries: $retryCount; session cache hits: $cacheHits',
+      );
+      return _AppointmentDocumentAnalysis(
+        review: review,
+        documentHashes: documentHashes,
+      );
+    } finally {
+      await recognizer.close();
+    }
   }
 
   Widget _documentReviewMessage({
@@ -1724,6 +1943,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
         Icons.verified_rounded,
         AppColors.success,
         'Conditionally auto-approved',
+      ),
+      'auto_rejected' => (
+        Icons.gpp_bad_rounded,
+        AppColors.danger,
+        'Conditionally auto-rejected',
       ),
       'resubmission_recommended' => (
         Icons.upload_file_rounded,

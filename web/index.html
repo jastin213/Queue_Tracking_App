@@ -40,16 +40,157 @@
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@6.0.1/dist/tesseract.min.js"></script>
   <script>
     let queueOcrWorkerPromise;
+    let queueOcrTask = Promise.resolve();
+    let queueImageWorker;
+    let queueImageRequestId = 0;
+    const queueImageRequests = new Map();
 
-    window.queueOcrRecognize = async function (imageDataUrl) {
+    async function getQueueOcrWorker() {
       if (!window.Tesseract) {
         throw new Error('The local OCR engine could not be loaded. Check the internet connection and try again.');
       }
 
-      queueOcrWorkerPromise ??= window.Tesseract.createWorker('eng');
-      const worker = await queueOcrWorkerPromise;
-      const result = await worker.recognize(imageDataUrl);
-      return result?.data?.text ?? '';
+      if (!queueOcrWorkerPromise) {
+        queueOcrWorkerPromise = window.Tesseract.createWorker('eng').catch((error) => {
+          queueOcrWorkerPromise = undefined;
+          throw error;
+        });
+      }
+      return queueOcrWorkerPromise;
+    }
+
+    window.queueOcrWarmup = async function () {
+      await getQueueOcrWorker();
+      return 'ready';
+    };
+
+    function enqueueQueueOcr(task) {
+      const next = queueOcrTask
+        .catch(() => undefined)
+        .then(() => new Promise((resolve) => setTimeout(resolve, 0)))
+        .then(task);
+      queueOcrTask = next;
+      return next;
+    }
+
+    function imageBlob(imageBytes, mimeType) {
+      return new Blob([imageBytes], { type: mimeType || 'image/jpeg' });
+    }
+
+    function getQueueImageWorker() {
+      if (queueImageWorker) return queueImageWorker;
+      if (typeof Worker === 'undefined' ||
+          typeof OffscreenCanvas === 'undefined' ||
+          typeof createImageBitmap === 'undefined') {
+        return null;
+      }
+
+      const workerSource = [
+        "self.onmessage = async function(event) {",
+        "  const id = event.data.id;",
+        "  let bitmap;",
+        "  try {",
+        "    bitmap = await createImageBitmap(event.data.blob);",
+        "    const target = 2200;",
+        "    const longest = Math.max(bitmap.width, bitmap.height);",
+        "    const scale = longest > 0 ? target / longest : 1;",
+        "    const width = Math.max(1, Math.round(bitmap.width * scale));",
+        "    const height = Math.max(1, Math.round(bitmap.height * scale));",
+        "    const sampleScale = Math.min(1, 320 / Math.max(bitmap.width, bitmap.height));",
+        "    const sampleWidth = Math.max(1, Math.round(bitmap.width * sampleScale));",
+        "    const sampleHeight = Math.max(1, Math.round(bitmap.height * sampleScale));",
+        "    const sampleCanvas = new OffscreenCanvas(sampleWidth, sampleHeight);",
+        "    const sampleContext = sampleCanvas.getContext('2d', { willReadFrequently: true });",
+        "    sampleContext.drawImage(bitmap, 0, 0, sampleWidth, sampleHeight);",
+        "    const pixels = sampleContext.getImageData(0, 0, sampleWidth, sampleHeight).data;",
+        "    let luminance = 0;",
+        "    let samples = 0;",
+        "    for (let index = 0; index < pixels.length; index += 16) {",
+        "      luminance += 0.299 * pixels[index] + 0.587 * pixels[index + 1] + 0.114 * pixels[index + 2];",
+        "      samples += 1;",
+        "    }",
+        "    const mean = samples ? luminance / samples : 128;",
+        "    const brightness = mean < 90 ? 122 : 105;",
+        "    const canvas = new OffscreenCanvas(width, height);",
+        "    const context = canvas.getContext('2d');",
+        "    context.fillStyle = '#ffffff';",
+        "    context.fillRect(0, 0, width, height);",
+        "    context.filter = 'grayscale(100%) contrast(135%) brightness(' + brightness + '%)';",
+        "    context.drawImage(bitmap, 0, 0, width, height);",
+        "    const output = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.88 });",
+        "    self.postMessage({ id: id, blob: output });",
+        "  } catch (error) {",
+        "    self.postMessage({ id: id, error: error && error.message ? error.message : String(error) });",
+        "  } finally {",
+        "    if (bitmap && bitmap.close) bitmap.close();",
+        "  }",
+        "};"
+      ].join('\n');
+
+      const workerUrl = URL.createObjectURL(
+        new Blob([workerSource], { type: 'text/javascript' })
+      );
+      queueImageWorker = new Worker(workerUrl);
+      URL.revokeObjectURL(workerUrl);
+      queueImageWorker.onmessage = function (event) {
+        const request = queueImageRequests.get(event.data.id);
+        if (!request) return;
+        queueImageRequests.delete(event.data.id);
+        if (event.data.error) {
+          request.reject(new Error(event.data.error));
+        } else {
+          request.resolve(event.data.blob);
+        }
+      };
+      queueImageWorker.onerror = function (event) {
+        for (const request of queueImageRequests.values()) {
+          request.reject(new Error(event.message || 'Image worker failed.'));
+        }
+        queueImageRequests.clear();
+        queueImageWorker.terminate();
+        queueImageWorker = undefined;
+      };
+      return queueImageWorker;
+    }
+
+    function enhanceQueueImage(blob) {
+      const worker = getQueueImageWorker();
+      if (!worker) return Promise.resolve(blob);
+      const id = ++queueImageRequestId;
+      return new Promise((resolve, reject) => {
+        queueImageRequests.set(id, { resolve, reject });
+        worker.postMessage({ id, blob });
+      });
+    }
+
+    window.queueSha256 = async function (bytes) {
+      const digest = await crypto.subtle.digest('SHA-256', bytes);
+      return Array.from(new Uint8Array(digest))
+        .map((value) => value.toString(16).padStart(2, '0'))
+        .join('');
+    };
+
+    window.queueOcrRecognize = function (imageBytes, mimeType) {
+      return enqueueQueueOcr(async function () {
+        const worker = await getQueueOcrWorker();
+        const result = await worker.recognize(imageBlob(imageBytes, mimeType));
+        return result?.data?.text ?? '';
+      });
+    };
+
+    window.queueOcrRecognizeEnhanced = function (imageBytes, mimeType) {
+      return enqueueQueueOcr(async function () {
+        const worker = await getQueueOcrWorker();
+        const original = imageBlob(imageBytes, mimeType);
+        let enhanced = original;
+        try {
+          enhanced = await enhanceQueueImage(original);
+        } catch (error) {
+          console.warn('Enhanced OCR preprocessing was skipped.', error);
+        }
+        const result = await worker.recognize(enhanced);
+        return result?.data?.text ?? '';
+      });
     };
   </script>
   <!--

@@ -140,10 +140,14 @@ class _AdminPageState extends State<AdminPage> {
   bool _desktopSidebarVisible = true;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
   _pendingAppointmentSubscription;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+  _automaticDecisionSubscription;
   List<Map<String, dynamic>> _pendingAppointments = [];
+  List<Map<String, dynamic>> _automaticDecisionNotifications = [];
   final Set<String> _readPendingAppointmentNotifications = <String>{};
   late final String _adminNotificationPreferenceKey;
   bool _receivedInitialPendingAppointments = false;
+  bool _receivedInitialAutomaticDecisions = false;
 
   @override
   void initState() {
@@ -159,13 +163,17 @@ class _AdminPageState extends State<AdminPage> {
     } catch (_) {
       // Session-only notification state is used when Firebase is unavailable.
     }
-    return 'read_v2_admin_appointment_notifications_${accountId.isEmpty ? 'admin' : accountId}';
+    return 'read_v3_admin_appointment_notifications_${accountId.isEmpty ? 'admin' : accountId}';
   }
 
   String _adminAppointmentNotificationKey(Map<String, dynamic> appointment) {
     final appointmentId = appointment['appointmentId']?.toString().trim() ?? '';
-    if (appointmentId.isNotEmpty) return appointmentId;
-    return '${appointment['queue']}:${appointment['date']}:${appointment['plate']}';
+    final decisionSource = appointment['decisionSource']?.toString().trim();
+    final eventType = decisionSource?.isNotEmpty == true
+        ? decisionSource!
+        : 'pending';
+    if (appointmentId.isNotEmpty) return '$eventType:$appointmentId';
+    return '$eventType:${appointment['queue']}:${appointment['date']}:${appointment['plate']}';
   }
 
   bool _isAdminAppointmentNotificationRead(Map<String, dynamic> appointment) {
@@ -198,7 +206,7 @@ class _AdminPageState extends State<AdminPage> {
             .doc(user.uid)
             .get();
         final cloudReadKeys = userDocument
-            .data()?['adminReadNotificationKeysV2'];
+            .data()?['adminReadNotificationKeysV3'];
         if (cloudReadKeys is Iterable) {
           _readPendingAppointmentNotifications.addAll(
             cloudReadKeys
@@ -211,7 +219,10 @@ class _AdminPageState extends State<AdminPage> {
       // Local read state remains available when Firestore is offline.
     }
 
-    if (mounted) _listenToPendingAppointments();
+    if (mounted) {
+      _listenToPendingAppointments();
+      _listenToAutomaticDecisionNotifications();
+    }
   }
 
   Future<void> _saveReadAdminAppointmentNotifications() async {
@@ -230,7 +241,7 @@ class _AdminPageState extends State<AdminPage> {
       if (user != null) {
         final readKeys = _readPendingAppointmentNotifications.toList()..sort();
         await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-          'adminReadNotificationKeysV2': readKeys,
+          'adminReadNotificationKeysV3': readKeys,
         }, SetOptions(merge: true));
       }
     } catch (_) {
@@ -241,6 +252,7 @@ class _AdminPageState extends State<AdminPage> {
   @override
   void dispose() {
     _pendingAppointmentSubscription?.cancel();
+    _automaticDecisionSubscription?.cancel();
     flutterTts.stop();
     super.dispose();
   }
@@ -299,21 +311,10 @@ class _AdminPageState extends State<AdminPage> {
 
             _receivedInitialPendingAppointments = true;
             if (!mounted) return;
-            final activeNotificationKeys = appointments
-                .map(_adminAppointmentNotificationKey)
-                .toSet();
-            final readCountBeforeCleanup =
-                _readPendingAppointmentNotifications.length;
-            _readPendingAppointmentNotifications.retainWhere(
-              activeNotificationKeys.contains,
-            );
             setState(() {
               _pendingAppointments = appointments;
             });
-            if (readCountBeforeCleanup !=
-                _readPendingAppointmentNotifications.length) {
-              unawaited(_saveReadAdminAppointmentNotifications());
-            }
+            _cleanupReadAdminAppointmentNotifications();
 
             if (newestAppointment != null) {
               final appointment = newestAppointment;
@@ -326,6 +327,114 @@ class _AdminPageState extends State<AdminPage> {
             debugPrint("Admin appointment notification stream error: $error");
           },
         );
+  }
+
+  void _listenToAutomaticDecisionNotifications() {
+    _automaticDecisionSubscription = FirebaseFirestore.instance
+        .collection('appointments')
+        .where(
+          'decisionSource',
+          whereIn: const [
+            'conditional_auto_approval',
+            'conditional_auto_rejection',
+          ],
+        )
+        .snapshots()
+        .listen(
+          (snapshot) {
+            final decisions = snapshot.docs.map((doc) {
+              final data = doc.data();
+              return {
+                ...data,
+                'appointmentId': data['appointmentId'] ?? doc.id,
+              };
+            }).toList();
+            decisions.sort((a, b) {
+              final aTime = notificationDateTime(
+                a['autoDecisionAt'] ?? a['updatedAt'],
+              );
+              final bTime = notificationDateTime(
+                b['autoDecisionAt'] ?? b['updatedAt'],
+              );
+              if (aTime == null && bTime == null) return 0;
+              if (aTime == null) return 1;
+              if (bTime == null) return -1;
+              return bTime.compareTo(aTime);
+            });
+
+            Map<String, dynamic>? newestDecision;
+            if (_receivedInitialAutomaticDecisions) {
+              for (final change in snapshot.docChanges) {
+                if (change.type == DocumentChangeType.removed) continue;
+                final data = change.doc.data();
+                if (data != null) {
+                  newestDecision = {
+                    ...data,
+                    'appointmentId': data['appointmentId'] ?? change.doc.id,
+                  };
+                  break;
+                }
+              }
+            }
+
+            _receivedInitialAutomaticDecisions = true;
+            if (!mounted) return;
+            setState(() {
+              _automaticDecisionNotifications = decisions.take(30).toList();
+            });
+            _cleanupReadAdminAppointmentNotifications();
+
+            if (newestDecision != null) {
+              final decision = newestDecision;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) _showNewAppointmentNotification(decision);
+              });
+            }
+          },
+          onError: (Object error) {
+            debugPrint('Admin automatic decision stream error: $error');
+          },
+        );
+  }
+
+  void _cleanupReadAdminAppointmentNotifications() {
+    if (!_receivedInitialPendingAppointments ||
+        !_receivedInitialAutomaticDecisions) {
+      return;
+    }
+    final activeNotificationKeys = {
+      ..._pendingAppointments.map(_adminAppointmentNotificationKey),
+      ..._automaticDecisionNotifications.map(_adminAppointmentNotificationKey),
+    };
+    final countBefore = _readPendingAppointmentNotifications.length;
+    _readPendingAppointmentNotifications.retainWhere(
+      activeNotificationKeys.contains,
+    );
+    if (countBefore != _readPendingAppointmentNotifications.length) {
+      unawaited(_saveReadAdminAppointmentNotifications());
+    }
+  }
+
+  dynamic _adminNotificationTime(Map<String, dynamic> appointment) {
+    return appointment['autoDecisionAt'] ??
+        appointment['createdAt'] ??
+        appointment['updatedAt'];
+  }
+
+  List<Map<String, dynamic>> get _adminAppointmentNotifications {
+    final notifications = <Map<String, dynamic>>[
+      ..._pendingAppointments,
+      ..._automaticDecisionNotifications,
+    ];
+    notifications.sort((a, b) {
+      final aTime = notificationDateTime(_adminNotificationTime(a));
+      final bTime = notificationDateTime(_adminNotificationTime(b));
+      if (aTime == null && bTime == null) return 0;
+      if (aTime == null) return 1;
+      if (bTime == null) return -1;
+      return bTime.compareTo(aTime);
+    });
+    return notifications;
   }
 
   void _openAppointmentDashboard() {
@@ -368,17 +477,26 @@ class _AdminPageState extends State<AdminPage> {
             .toString();
     final queue = appointment["queue"]?.toString() ?? "-";
     final eventTime = formatNotificationTime(
-      appointment['createdAt'] ?? appointment['updatedAt'],
+      _adminNotificationTime(appointment),
     );
+    final decisionSource = appointment['decisionSource']?.toString() ?? '';
+    final score = appointment['autoApprovalReview'] is Map
+        ? (appointment['autoApprovalReview'] as Map)['score']?.toString()
+        : null;
+    final message = switch (decisionSource) {
+      'conditional_auto_approval' =>
+        'Automatically approved $name • Queue $queue • Score ${score ?? '-'} / 100 • $eventTime',
+      'conditional_auto_rejection' =>
+        'Automatically rejected $name • Queue $queue • Score ${score ?? '0'} / 100 • $eventTime',
+      _ => 'New appointment from $name • Queue $queue • $eventTime',
+    };
 
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 8),
-          content: Text(
-            "New appointment from $name • Queue $queue • $eventTime",
-          ),
+          content: Text(message),
           action: SnackBarAction(
             label: "CHECK",
             textColor: Colors.white,
@@ -391,7 +509,7 @@ class _AdminPageState extends State<AdminPage> {
   }
 
   Widget _buildAppointmentNotificationButton() {
-    final count = _pendingAppointments.where((appointment) {
+    final count = _adminAppointmentNotifications.where((appointment) {
       return !_isAdminAppointmentNotificationRead(appointment);
     }).length;
     return SizedBox(
@@ -414,7 +532,7 @@ class _AdminPageState extends State<AdminPage> {
     final button = buttonContext?.findRenderObject() as RenderBox?;
     if (button == null || overlay == null) return;
 
-    final notifications = _pendingAppointments.take(8).toList();
+    final notifications = _adminAppointmentNotifications.take(8).toList();
 
     final buttonTopLeft = button.localToGlobal(Offset.zero, ancestor: overlay);
     final availableWidth = overlay.size.width - 24;
@@ -486,13 +604,41 @@ class _AdminPageState extends State<AdminPage> {
             final queue = appointment['queue']?.toString() ?? '-';
             final plate = appointment['plate']?.toString() ?? '-';
             final date = appointment['date']?.toString() ?? '-';
+            final decisionSource =
+                appointment['decisionSource']?.toString() ?? '';
+            final isAutoApproved =
+                decisionSource == 'conditional_auto_approval';
+            final isAutoRejected =
+                decisionSource == 'conditional_auto_rejection';
+            final accentColor = isAutoApproved
+                ? AppColors.success
+                : isAutoRejected
+                ? AppColors.danger
+                : AppColors.warning;
+            final notificationIcon = isAutoApproved
+                ? Icons.verified_rounded
+                : isAutoRejected
+                ? Icons.gpp_bad_rounded
+                : Icons.event_note_rounded;
+            final score = appointment['autoApprovalReview'] is Map
+                ? (appointment['autoApprovalReview'] as Map)['score']
+                      ?.toString()
+                : null;
+            final notificationTitle = isAutoApproved
+                ? 'Automatically approved $name'
+                : isAutoRejected
+                ? 'Automatically rejected $name'
+                : 'New appointment from $name';
+            final notificationSubtitle = isAutoApproved || isAutoRejected
+                ? 'Queue $queue • Score ${score ?? (isAutoRejected ? '0' : '-')} / 100'
+                : 'Queue $queue • Plate $plate';
             final notificationKey = _adminAppointmentNotificationKey(
               appointment,
             );
             final isViewed = _isAdminAppointmentNotificationRead(appointment);
             final contentColor = isViewed ? _mutedTextColor : _primaryColor;
             final time = formatNotificationTime(
-              appointment['createdAt'] ?? appointment['updatedAt'],
+              _adminNotificationTime(appointment),
             );
 
             return PopupMenuItem<String>(
@@ -503,7 +649,7 @@ class _AdminPageState extends State<AdminPage> {
                 decoration: BoxDecoration(
                   color: isViewed
                       ? Colors.transparent
-                      : AppColors.warning.withValues(alpha: 0.08),
+                      : accentColor.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Row(
@@ -515,12 +661,12 @@ class _AdminPageState extends State<AdminPage> {
                       decoration: BoxDecoration(
                         color: isViewed
                             ? _mutedTextColor.withValues(alpha: 0.10)
-                            : AppColors.warning.withValues(alpha: 0.14),
+                            : accentColor.withValues(alpha: 0.14),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Icon(
-                        Icons.event_note_rounded,
-                        color: isViewed ? _mutedTextColor : AppColors.warning,
+                        notificationIcon,
+                        color: isViewed ? _mutedTextColor : accentColor,
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -530,7 +676,7 @@ class _AdminPageState extends State<AdminPage> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Text(
-                            "New appointment from $name",
+                            notificationTitle,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
@@ -540,7 +686,7 @@ class _AdminPageState extends State<AdminPage> {
                           ),
                           const SizedBox(height: 3),
                           Text(
-                            "Queue $queue • Plate $plate",
+                            notificationSubtitle,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(color: contentColor, fontSize: 12),

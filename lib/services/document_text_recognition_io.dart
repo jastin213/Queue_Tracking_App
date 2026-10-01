@@ -13,6 +13,8 @@ class DocumentTextRecognizer {
 
   bool get isSupported => Platform.isAndroid || Platform.isIOS;
 
+  Future<void> warmUp() async {}
+
   Future<String> recognize({
     required Uint8List bytes,
     required String fileName,
@@ -29,15 +31,18 @@ class DocumentTextRecognizer {
       );
     }
 
-    final enhancedFuture = enhanceDocumentImageForOcr(
+    return _recognizeSingle(bytes: bytes, fileName: fileName);
+  }
+
+  Future<String> recognizeEnhanced({
+    required Uint8List bytes,
+    required String fileName,
+    required String primaryText,
+  }) async {
+    final enhanced = await enhanceDocumentImageForOcr(
       bytes: bytes,
       fileName: fileName,
     );
-    final primaryText = await _recognizeSingle(
-      bytes: bytes,
-      fileName: fileName,
-    );
-    final enhanced = await enhancedFuture;
     if (enhanced == null) return primaryText;
 
     final enhancedText = await _recognizeSingle(

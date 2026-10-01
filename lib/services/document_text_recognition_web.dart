@@ -1,14 +1,27 @@
-import 'dart:convert';
 import 'dart:js_interop';
 import 'dart:typed_data';
 
-import 'document_ocr_preprocessor.dart';
-
 @JS('queueOcrRecognize')
-external JSPromise<JSString> _queueOcrRecognize(JSString imageDataUrl);
+external JSPromise<JSString> _queueOcrRecognize(
+  JSUint8Array imageBytes,
+  JSString mimeType,
+);
+
+@JS('queueOcrRecognizeEnhanced')
+external JSPromise<JSString> _queueOcrRecognizeEnhanced(
+  JSUint8Array imageBytes,
+  JSString mimeType,
+);
+
+@JS('queueOcrWarmup')
+external JSPromise<JSString> _queueOcrWarmup();
 
 class DocumentTextRecognizer {
   bool get isSupported => true;
+
+  Future<void> warmUp() async {
+    await _queueOcrWarmup().toDart;
+  }
 
   Future<String> recognize({
     required Uint8List bytes,
@@ -20,23 +33,21 @@ class DocumentTextRecognizer {
       );
     }
 
-    final enhancedFuture = enhanceDocumentImageForOcr(
-      bytes: bytes,
-      fileName: fileName,
-    );
-    final primaryText = await _recognizeSingle(
-      bytes: bytes,
-      fileName: fileName,
-    );
-    final enhanced = await enhancedFuture;
-    if (enhanced == null) return primaryText;
+    return _recognizeSingle(bytes: bytes, fileName: fileName);
+  }
 
-    final enhancedText = await _recognizeSingle(
-      bytes: enhanced.bytes,
-      fileName: enhanced.fileName,
-    );
+  Future<String> recognizeEnhanced({
+    required Uint8List bytes,
+    required String fileName,
+    required String primaryText,
+  }) async {
+    final mimeType = _mimeType(fileName);
+    final enhancedText = await _queueOcrRecognizeEnhanced(
+      bytes.toJS,
+      mimeType.toJS,
+    ).toDart;
     final first = primaryText.trim();
-    final second = enhancedText.trim();
+    final second = enhancedText.toDart.trim();
     if (first.isEmpty) return second;
     if (second.isEmpty || first == second) return first;
     return '$first\n$second';
@@ -46,14 +57,16 @@ class DocumentTextRecognizer {
     required Uint8List bytes,
     required String fileName,
   }) async {
-    final mimeType = fileName.toLowerCase().endsWith('.png')
-        ? 'image/png'
-        : fileName.toLowerCase().endsWith('.webp')
-        ? 'image/webp'
-        : 'image/jpeg';
-    final dataUrl = 'data:$mimeType;base64,${base64Encode(bytes)}';
-    final text = await _queueOcrRecognize(dataUrl.toJS).toDart;
+    final mimeType = _mimeType(fileName);
+    final text = await _queueOcrRecognize(bytes.toJS, mimeType.toJS).toDart;
     return text.toDart;
+  }
+
+  String _mimeType(String fileName) {
+    final lowerName = fileName.toLowerCase();
+    if (lowerName.endsWith('.png')) return 'image/png';
+    if (lowerName.endsWith('.webp')) return 'image/webp';
+    return 'image/jpeg';
   }
 
   Future<void> close() async {}

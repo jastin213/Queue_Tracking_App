@@ -59,6 +59,7 @@ class _AdminSettingsState extends State<AdminSettings> {
   _appointmentApprovalSettingsSubscription;
   StreamSubscription<String>? _displayAnnouncementSubscription;
   bool _conditionalAutoApprovalEnabled = false;
+  bool _conditionalAutoRejectionEnabled = false;
   bool _appointmentApprovalSettingsLoading = true;
   bool _appointmentApprovalSettingsSaving = false;
 
@@ -84,6 +85,8 @@ class _AdminSettingsState extends State<AdminSettings> {
             setState(() {
               _conditionalAutoApprovalEnabled =
                   settings.conditionalAutoApprovalEnabled;
+              _conditionalAutoRejectionEnabled =
+                  settings.conditionalAutoRejectionEnabled;
               _appointmentApprovalSettingsLoading = false;
             });
           },
@@ -299,10 +302,37 @@ class _AdminSettingsState extends State<AdminSettings> {
             content: const Text(
               'Only appointments that pass every supported document, name, '
               'plate, duplicate, and queue-slot check with a score of at '
-              'least 85 will be approved automatically. Uncertain '
-              'appointments will remain pending and will never be '
-              'automatically rejected. This checks consistency but does not '
+              'least 85 will be approved automatically. Other results follow '
+              'the separate auto-rejection setting or remain pending for '
+              'manual review. This checks consistency but does not '
               'prove LTO authenticity without an official verification API.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Enable'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  Future<bool> confirmConditionalAutoRejection() async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Enable Conditional Auto-Rejection?'),
+            content: const Text(
+              'Automatic rejection applies only when all three documents load '
+              'successfully, original and enhanced OCR checks finish, the '
+              'consistency score is exactly 0, and every supported check '
+              'fails. Unreadable files and technical OCR errors will not be '
+              'automatically rejected.',
             ),
             actions: [
               TextButton(
@@ -354,6 +384,54 @@ class _AdminSettingsState extends State<AdminSettings> {
     }
   }
 
+  Future<void> updateConditionalAutoRejection(bool enabled) async {
+    if (_appointmentApprovalSettingsSaving) return;
+    if (enabled && !await confirmConditionalAutoRejection()) return;
+
+    setState(() => _appointmentApprovalSettingsSaving = true);
+    try {
+      await AppointmentApprovalSettings.setConditionalAutoRejectionEnabled(
+        enabled,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            enabled
+                ? 'Safeguarded zero-score auto-rejection enabled.'
+                : 'Conditional auto-rejection disabled.',
+          ),
+        ),
+      );
+    } on FirebaseException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not update appointment rejection setting: ${error.message ?? error.code}',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _appointmentApprovalSettingsSaving = false);
+      }
+    }
+  }
+
+  String appointmentAutomationSummary() {
+    if (_conditionalAutoApprovalEnabled && _conditionalAutoRejectionEnabled) {
+      return 'Active: complete matches can be approved automatically, while confirmed zero-score submissions can be rejected automatically. All uncertain results stay pending.';
+    }
+    if (_conditionalAutoApprovalEnabled) {
+      return 'Auto-approval is active. Mismatches and uncertain results stay pending for manual review.';
+    }
+    if (_conditionalAutoRejectionEnabled) {
+      return 'Zero-score auto-rejection is active. Only confirmed readable mismatches are rejected; all uncertain results stay pending.';
+    }
+    return 'Manual mode: every appointment stays pending until an administrator approves or rejects it.';
+  }
+
   Widget buildAppointmentApprovalSettings() {
     return settingsCard(
       icon: Icons.fact_check_outlined,
@@ -381,6 +459,25 @@ class _AdminSettingsState extends State<AdminSettings> {
                     onChanged: updateConditionalAutoApproval,
                   ),
           ),
+          settingTile(
+            icon: Icons.gpp_bad_outlined,
+            title: 'Conditional Auto-Rejection',
+            subtitle:
+                'Auto-reject only a confirmed 0/100 result after successful original and enhanced OCR checks.',
+            trailing:
+                _appointmentApprovalSettingsLoading ||
+                    _appointmentApprovalSettingsSaving
+                ? const SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2.5),
+                  )
+                : Switch(
+                    value: _conditionalAutoRejectionEnabled,
+                    activeThumbColor: Colors.red,
+                    onChanged: updateConditionalAutoRejection,
+                  ),
+          ),
           const SizedBox(height: 12),
           Container(
             width: double.infinity,
@@ -391,9 +488,7 @@ class _AdminSettingsState extends State<AdminSettings> {
               border: Border.all(color: _borderColor),
             ),
             child: Text(
-              _conditionalAutoApprovalEnabled
-                  ? 'Active: new pending appointments are checked in the Admin Appointment Dashboard. Mismatches stay pending for manual review.'
-                  : 'Manual mode: every appointment stays pending until an administrator approves or rejects it.',
+              appointmentAutomationSummary(),
               style: TextStyle(
                 color: _mutedTextColor,
                 fontSize: 12.5,

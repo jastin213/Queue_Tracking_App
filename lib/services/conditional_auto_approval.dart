@@ -2,6 +2,7 @@ import 'document_review_analyzer.dart';
 
 enum ConditionalAutoApprovalAction {
   approve,
+  reject,
   manualReview,
   requestResubmission,
 }
@@ -16,6 +17,7 @@ class ConditionalAutoApprovalDecision {
   final String reason;
 
   bool get canApprove => action == ConditionalAutoApprovalAction.approve;
+  bool get canReject => action == ConditionalAutoApprovalAction.reject;
 }
 
 class ConditionalAutoApproval {
@@ -26,6 +28,7 @@ class ConditionalAutoApproval {
     required bool allRequiredDocumentsPresent,
     required bool queueSlotAvailable,
     required bool suspiciousDuplicateDetected,
+    bool autoRejectionEnabled = false,
     int minimumScore = defaultMinimumScore,
   }) {
     if (!allRequiredDocumentsPresent) {
@@ -42,6 +45,21 @@ class ConditionalAutoApproval {
         action: ConditionalAutoApprovalAction.requestResubmission,
         reason:
             'At least one document could not be read automatically. A clearer image is required.',
+      );
+    }
+
+    final everySupportedCheckFailed =
+        review.checks.isNotEmpty &&
+        review.checks.every(
+          (check) => check.state == DocumentReviewCheckState.warning,
+        );
+    if (autoRejectionEnabled &&
+        review.score == 0 &&
+        everySupportedCheckFailed) {
+      return const ConditionalAutoApprovalDecision(
+        action: ConditionalAutoApprovalAction.reject,
+        reason:
+            'No required ID, OR, CR, customer-name, or plate information matched after the original and enhanced OCR checks.',
       );
     }
 
