@@ -21,7 +21,7 @@ class ConditionalAutoApprovalDecision {
 }
 
 class ConditionalAutoApproval {
-  static const int defaultMinimumScore = 85;
+  static const int defaultMinimumScore = 80;
 
   static ConditionalAutoApprovalDecision evaluate({
     required DocumentReviewResult review,
@@ -86,15 +86,27 @@ class ConditionalAutoApproval {
       );
     }
 
-    final allChecksPassed =
-        review.checks.isNotEmpty &&
-        review.checks.every(
-          (check) => check.state == DocumentReviewCheckState.passed,
-        );
-    if (review.score >= minimumScore && allChecksPassed) {
+    bool checkPassed(String title) => review.checks.any(
+      (check) =>
+          check.title == title &&
+          check.state == DocumentReviewCheckState.passed,
+    );
+    final requiredDocumentTypesPassed =
+        checkPassed('Valid ID document type') &&
+        checkPassed('Official Receipt (OR) document type') &&
+        checkPassed('Certificate of Registration (CR) document type');
+    final customerNamePassed = checkPassed('Customer name on ID');
+    final atLeastOnePlatePassed =
+        checkPassed('Plate number on OR') || checkPassed('Plate number on CR');
+    final requiredEvidencePassed =
+        requiredDocumentTypesPassed &&
+        customerNamePassed &&
+        atLeastOnePlatePassed;
+    if (review.score >= minimumScore && requiredEvidencePassed) {
       return const ConditionalAutoApprovalDecision(
         action: ConditionalAutoApprovalAction.approve,
-        reason: 'Every mandatory consistency check passed.',
+        reason:
+            'All document types and the customer name matched, and the plate was confirmed on at least one vehicle document.',
       );
     }
 

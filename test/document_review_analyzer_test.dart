@@ -120,6 +120,8 @@ void main() {
             .state,
         DocumentReviewCheckState.warning,
       );
+      expect(result.score, 80);
+      expect(result.title, 'Likely consistent');
     });
 
     test('gives unrelated readable images a zero consistency score', () {

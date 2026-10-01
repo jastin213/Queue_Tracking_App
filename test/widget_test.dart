@@ -270,6 +270,20 @@ void main() {
     expect(find.byType(AppRefreshIndicator), findsNothing);
     expect(find.text('Customer Portal'), findsNothing);
     expect(find.text('Admin Login'), findsNothing);
+    final loginScrollView = tester.widget<SingleChildScrollView>(
+      find.byType(SingleChildScrollView).first,
+    );
+    expect(loginScrollView.physics, isA<ClampingScrollPhysics>());
+    expect(
+      loginScrollView.keyboardDismissBehavior,
+      ScrollViewKeyboardDismissBehavior.onDrag,
+    );
+    final emailField = find.byType(TextField).first;
+    expect(
+      find.ancestor(of: emailField, matching: find.byType(FittedBox)),
+      findsNothing,
+    );
+    expect(tester.widget<TextField>(emailField).style?.fontSize, 16);
     expect(
       find.text('Admins and customers use the same login form.'),
       findsNothing,

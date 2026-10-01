@@ -655,15 +655,9 @@ class _CustomerLoginState extends State<CustomerLogin> {
     );
   }
 
-  Widget webStaticLogin(Widget child) {
-    if (!kIsWeb) return child;
-
-    return FittedBox(
-      fit: BoxFit.scaleDown,
-      alignment: Alignment.center,
-      child: child,
-    );
-  }
+  // Keep this wrapper deliberately unscaled. Scaling the complete form from
+  // the available height makes mobile web shrink when the keyboard opens.
+  Widget unscaledLogin(Widget child) => child;
 
   @override
   Widget build(BuildContext context) {
@@ -693,17 +687,18 @@ class _CustomerLoginState extends State<CustomerLogin> {
         ),
       ),
       child: Scaffold(
+        resizeToAvoidBottomInset: true,
         body: SafeArea(
           child: Center(
             child: ScrollConfiguration(
               behavior: ScrollConfiguration.of(
                 context,
               ).copyWith(overscroll: false, scrollbars: !kIsWeb),
-              child: webStaticLogin(
+              child: unscaledLogin(
                 SingleChildScrollView(
-                  physics: kIsWeb
-                      ? const NeverScrollableScrollPhysics()
-                      : const ClampingScrollPhysics(),
+                  keyboardDismissBehavior:
+                      ScrollViewKeyboardDismissBehavior.onDrag,
+                  physics: const ClampingScrollPhysics(),
                   padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
                   child: Column(
                     children: [
@@ -966,9 +961,13 @@ class _CustomerLoginState extends State<CustomerLogin> {
                             TextField(
                               controller: emailController,
                               keyboardType: TextInputType.emailAddress,
+                              textInputAction: TextInputAction.next,
+                              autofillHints: const [AutofillHints.email],
+                              scrollPadding: const EdgeInsets.only(bottom: 140),
                               style: TextStyle(
                                 color: _primaryColor,
                                 fontWeight: FontWeight.w600,
+                                fontSize: 16,
                               ),
                               decoration: formDecoration(
                                 label: "Email",
@@ -984,9 +983,16 @@ class _CustomerLoginState extends State<CustomerLogin> {
                               obscureText: obscurePassword,
                               enableSuggestions: false,
                               autocorrect: false,
+                              textInputAction: TextInputAction.done,
+                              autofillHints: const [AutofillHints.password],
+                              onSubmitted: (_) {
+                                if (!isAuthenticationBusy) login();
+                              },
+                              scrollPadding: const EdgeInsets.only(bottom: 140),
                               style: TextStyle(
                                 color: _primaryColor,
                                 fontWeight: FontWeight.w600,
+                                fontSize: 16,
                               ),
                               decoration: formDecoration(
                                 label: "Password",

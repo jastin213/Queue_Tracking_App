@@ -176,7 +176,6 @@ class DocumentReviewAnalyzer {
     );
     if (crPlateMatch) score += 20;
 
-    final criticalMatches = nameMatch && orPlateMatch && crPlateMatch;
     final allDocumentTypesConfirmed = idReadable && orReadable && crReadable;
     final coherentEvidence =
         nameMatch &&
@@ -186,16 +185,13 @@ class DocumentReviewAnalyzer {
       score += 5;
     }
 
-    if (score >= 85 &&
-        criticalMatches &&
-        allDocumentTypesConfirmed &&
-        errors.isEmpty) {
+    if (score >= 80 && coherentEvidence && errors.isEmpty) {
       return DocumentReviewResult(
         score: score,
         title: 'Likely consistent',
         summary:
-            'The key name and plate details were found. Visually inspect the '
-            'documents before making the final decision.',
+            'The required document types and customer name were found, and the '
+            'plate matched at least one vehicle document.',
         checks: checks,
       );
     }

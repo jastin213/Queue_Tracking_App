@@ -301,8 +301,9 @@ class _AdminSettingsState extends State<AdminSettings> {
             title: const Text('Enable Conditional Auto-Approval?'),
             content: const Text(
               'Only appointments that pass every supported document, name, '
-              'plate, duplicate, and queue-slot check with a score of at '
-              'least 85 will be approved automatically. Other results follow '
+              'duplicate, and queue-slot check, with the plate confirmed on '
+              'the OR or CR and a score of at least 80, will be approved '
+              'automatically. Other results follow '
               'the separate auto-rejection setting or remain pending for '
               'manual review. This checks consistency but does not '
               'prove LTO authenticity without an official verification API.',
@@ -444,7 +445,7 @@ class _AdminSettingsState extends State<AdminSettings> {
             icon: Icons.auto_awesome_rounded,
             title: 'Conditional Auto-Approval',
             subtitle:
-                'Auto-approve only when every supported check passes at 85% or higher.',
+                'Auto-approve at 80% or higher when all document types and the name pass, and the plate matches the OR or CR.',
             trailing:
                 _appointmentApprovalSettingsLoading ||
                     _appointmentApprovalSettingsSaving

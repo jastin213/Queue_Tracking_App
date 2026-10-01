@@ -7,6 +7,14 @@ void main() {
     required int score,
     required List<DocumentReviewCheckState> states,
   }) {
+    const titles = [
+      'Valid ID document type',
+      'Official Receipt (OR) document type',
+      'Certificate of Registration (CR) document type',
+      'Customer name on ID',
+      'Plate number on OR',
+      'Plate number on CR',
+    ];
     return DocumentReviewResult(
       score: score,
       title: 'Review',
@@ -14,7 +22,7 @@ void main() {
       checks: [
         for (var index = 0; index < states.length; index++)
           DocumentReviewCheck(
-            title: 'Check $index',
+            title: titles[index],
             detail: 'Detail',
             state: states[index],
           ),
@@ -36,30 +44,38 @@ void main() {
     expect(decision.action, ConditionalAutoApprovalAction.approve);
   });
 
-  test(
-    'approves at the configured 85 percent threshold when all checks pass',
-    () {
-      final decision = ConditionalAutoApproval.evaluate(
-        review: review(
-          score: 85,
-          states: List.filled(6, DocumentReviewCheckState.passed),
-        ),
-        allRequiredDocumentsPresent: true,
-        queueSlotAvailable: true,
-        suspiciousDuplicateDetected: false,
-      );
-
-      expect(decision.action, ConditionalAutoApprovalAction.approve);
-    },
-  );
-
-  test('keeps readable but uncertain documents for manual review', () {
+  test('approves at 80 percent when one plate document is unclear', () {
     final decision = ConditionalAutoApproval.evaluate(
       review: review(
         score: 80,
         states: const [
           DocumentReviewCheckState.passed,
+          DocumentReviewCheckState.passed,
+          DocumentReviewCheckState.passed,
+          DocumentReviewCheckState.passed,
           DocumentReviewCheckState.warning,
+          DocumentReviewCheckState.passed,
+        ],
+      ),
+      allRequiredDocumentsPresent: true,
+      queueSlotAvailable: true,
+      suspiciousDuplicateDetected: false,
+    );
+
+    expect(decision.action, ConditionalAutoApprovalAction.approve);
+  });
+
+  test('keeps an 80 score pending when a required document type fails', () {
+    final decision = ConditionalAutoApproval.evaluate(
+      review: review(
+        score: 80,
+        states: const [
+          DocumentReviewCheckState.warning,
+          DocumentReviewCheckState.passed,
+          DocumentReviewCheckState.passed,
+          DocumentReviewCheckState.passed,
+          DocumentReviewCheckState.passed,
+          DocumentReviewCheckState.passed,
         ],
       ),
       allRequiredDocumentsPresent: true,

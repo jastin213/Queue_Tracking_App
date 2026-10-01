@@ -10,7 +10,7 @@ class AppointmentApprovalSettings {
 
   static const bool defaultEnabled = false;
   static const bool defaultAutoRejectionEnabled = false;
-  static const int defaultMinimumScore = 85;
+  static const int defaultMinimumScore = 80;
   static const String documentPath = 'system_config/appointment_approval';
 
   final bool conditionalAutoApprovalEnabled;

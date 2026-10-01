@@ -611,8 +611,8 @@ const Map<String, String> _filipinoTranslations = {
   'Manual approval is the safe default.':
       'Manwal na pag-apruba ang ligtas na default.',
   'Conditional Auto-Approval': 'Kondisyonal na Awtomatikong Pag-apruba',
-  'Auto-approve only when every supported check passes at 85% or higher.':
-      'Awtomatikong aprubahan lamang kapag pumasa ang lahat ng suportadong pagsusuri sa 85% o higit pa.',
+  'Auto-approve at 80% or higher when all document types and the name pass, and the plate matches the OR or CR.':
+      'Awtomatikong aprubahan sa 80% o higit pa kapag pumasa ang lahat ng uri ng dokumento at pangalan, at tugma ang plate sa OR o CR.',
   'Conditional Auto-Rejection': 'Kondisyonal na Awtomatikong Pagtanggi',
   'Auto-reject only a confirmed 0/100 result after successful original and enhanced OCR checks.':
       'Awtomatikong tanggihan lamang ang kumpirmadong 0/100 matapos matagumpay ang orihinal at pinahusay na OCR checks.',
