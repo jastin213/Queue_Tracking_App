@@ -203,6 +203,7 @@ const Map<String, String> _filipinoTranslations = {
   'Fast': 'Mabilis',
   'Filipino': 'Filipino',
   'Forgot Password?': 'Nakalimutan ang Password?',
+  'Remember Me': 'Tandaan Ako',
   'Full name': 'Buong pangalan',
   'GAS': 'GAS',
   'Generate Queue': 'Gumawa ng Numero sa Pila',

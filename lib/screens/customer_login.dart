@@ -8,6 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import '../services/document_upload_consent.dart';
+import '../services/remembered_login.dart';
 
 import 'customer_register.dart';
 import 'customer_home.dart';
@@ -39,6 +40,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
   bool isGoogleSigningIn = false;
   bool isSendingPasswordReset = false;
   bool obscurePassword = true;
+  bool rememberMe = false;
 
   bool get isAuthenticationBusy =>
       isLoading || isGoogleSigningIn || isSendingPasswordReset;
@@ -382,6 +384,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
   Future<void> routeAuthenticatedUser(
     User user, {
     required String loginEmail,
+    required bool rememberSession,
     bool allowGoogleProfileCreation = false,
     bool isNewAuthUser = false,
   }) async {
@@ -419,6 +422,8 @@ class _CustomerLoginState extends State<CustomerLogin> {
         "lastLoginAt": FieldValue.serverTimestamp(),
         "updatedAt": FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
+
+      await saveRememberedLoginPreference(rememberSession);
 
       if (!mounted) return;
       Navigator.pushReplacement(
@@ -464,6 +469,8 @@ class _CustomerLoginState extends State<CustomerLogin> {
       }
       await profileReference.set(updates, SetOptions(merge: true));
 
+      await saveRememberedLoginPreference(rememberSession);
+
       loggedInCustomerNameNotifier.value =
           (data["fullName"] ?? user.displayName ?? "").toString();
       loggedInCustomerEmailNotifier.value = authEmail;
@@ -492,6 +499,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
     });
 
     try {
+      await prepareLoginSession(remember: rememberMe);
       final provider = GoogleAuthProvider()
         ..setCustomParameters({"prompt": "select_account"});
       final UserCredential credential;
@@ -530,6 +538,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
       await routeAuthenticatedUser(
         user,
         loginEmail: user.email?.trim() ?? "",
+        rememberSession: rememberMe,
         allowGoogleProfileCreation: true,
         isNewAuthUser: credential.additionalUserInfo?.isNewUser ?? false,
       );
@@ -573,6 +582,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
     });
 
     try {
+      await prepareLoginSession(remember: rememberMe);
       final UserCredential credential = await FirebaseAuth.instance
           .signInWithEmailAndPassword(email: email, password: password);
       final User? user = credential.user;
@@ -588,6 +598,7 @@ class _CustomerLoginState extends State<CustomerLogin> {
       await routeAuthenticatedUser(
         FirebaseAuth.instance.currentUser ?? user,
         loginEmail: email,
+        rememberSession: rememberMe,
       );
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
@@ -1019,22 +1030,64 @@ class _CustomerLoginState extends State<CustomerLogin> {
                               ),
                             ),
 
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: TextButton(
-                                onPressed: isAuthenticationBusy
-                                    ? null
-                                    : resetPassword,
-                                child: Text(
-                                  isSendingPasswordReset
-                                      ? "Sending reset link..."
-                                      : "Forgot Password?",
-                                  style: TextStyle(
-                                    color: _primaryColor,
-                                    fontWeight: FontWeight.w700,
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(10),
+                                    onTap: isAuthenticationBusy
+                                        ? null
+                                        : () {
+                                            setState(() {
+                                              rememberMe = !rememberMe;
+                                            });
+                                          },
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Checkbox(
+                                          value: rememberMe,
+                                          onChanged: isAuthenticationBusy
+                                              ? null
+                                              : (value) {
+                                                  setState(() {
+                                                    rememberMe = value ?? false;
+                                                  });
+                                                },
+                                          activeColor: _primaryColor,
+                                          visualDensity: VisualDensity.compact,
+                                        ),
+                                        Flexible(
+                                          child: Text(
+                                            "Remember Me",
+                                            maxLines: 1,
+                                            style: TextStyle(
+                                              color: _mutedTextColor,
+                                              fontSize: 13.5,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ),
-                              ),
+                                TextButton(
+                                  onPressed: isAuthenticationBusy
+                                      ? null
+                                      : resetPassword,
+                                  child: Text(
+                                    isSendingPasswordReset
+                                        ? "Sending reset link..."
+                                        : "Forgot Password?",
+                                    style: TextStyle(
+                                      color: _primaryColor,
+                                      fontSize: 13.5,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
 
                             const SizedBox(height: 8),

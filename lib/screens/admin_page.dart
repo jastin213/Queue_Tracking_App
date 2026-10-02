@@ -14,6 +14,7 @@ import '../services/browser_tab_opener.dart';
 import '../services/notification_time.dart';
 import '../services/queue_source.dart';
 import '../services/queue_voice.dart';
+import '../services/remembered_login.dart';
 import '../theme/app_theme.dart';
 import '../services/firestore_query_fields.dart';
 import '../widgets/app_responsive_content.dart';
@@ -495,7 +496,7 @@ class _AdminPageState extends State<AdminPage> {
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
-          duration: const Duration(seconds: 8),
+          duration: const Duration(seconds: 3),
           content: Text(message),
           action: SnackBarAction(
             label: "CHECK",
@@ -2896,7 +2897,7 @@ class _AdminPageState extends State<AdminPage> {
 
   Future<void> _logoutAdmin() async {
     await _saveReadAdminAppointmentNotifications();
-    await FirebaseAuth.instance.signOut();
+    await signOutAndClearRememberedLogin();
     if (!mounted) return;
     Navigator.pushAndRemoveUntil(
       context,

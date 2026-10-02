@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
 import '../services/notification_time.dart';
 import '../services/customer_preferences.dart';
+import '../services/remembered_login.dart';
 import '../widgets/app_refresh_indicator.dart';
 import '../widgets/app_responsive_content.dart';
 import '../widgets/app_motion.dart';
@@ -572,7 +573,7 @@ class _CustomerHomeState extends State<CustomerHome> {
 
     try {
       await _saveReadAppointmentNotifications();
-      await FirebaseAuth.instance.signOut();
+      await signOutAndClearRememberedLogin();
 
       loggedInCustomerNameNotifier.value = "";
       loggedInCustomerEmailNotifier.value = "";

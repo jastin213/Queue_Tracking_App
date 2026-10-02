@@ -5,6 +5,7 @@ import 'package:queue_tracking_app/main.dart';
 import 'package:queue_tracking_app/services/document_upload_consent.dart';
 import 'package:queue_tracking_app/services/firestore_query_fields.dart';
 import 'package:queue_tracking_app/services/customer_onboarding.dart';
+import 'package:queue_tracking_app/services/remembered_login.dart';
 import 'package:queue_tracking_app/screens/admin_page.dart';
 import 'package:queue_tracking_app/screens/admin_settings.dart';
 import 'package:queue_tracking_app/screens/book_appointment.dart';
@@ -264,6 +265,9 @@ void main() {
     expect(find.text('OR SIGN IN WITH EMAIL'), findsOneWidget);
     expect(find.text('LOGIN'), findsOneWidget);
     expect(find.text('Forgot Password?'), findsOneWidget);
+    expect(find.text('Remember Me'), findsOneWidget);
+    expect(find.byType(Checkbox), findsOneWidget);
+    expect(tester.widget<Checkbox>(find.byType(Checkbox)).value, isFalse);
     expect(find.byTooltip('Show password'), findsOneWidget);
     expect(find.text('CONTINUE AS WALK-IN'), findsOneWidget);
     expect(find.text('Login or Create Account'), findsOneWidget);
@@ -288,6 +292,30 @@ void main() {
       find.text('Admins and customers use the same login form.'),
       findsNothing,
     );
+  });
+
+  testWidgets('remember me checkbox can be selected', (
+    WidgetTester tester,
+  ) async {
+    await pumpLoginApp(tester);
+
+    final rememberMeLabel = find.text('Remember Me');
+    await tester.ensureVisible(rememberMeLabel);
+    await tester.pumpAndSettle();
+    await tester.tap(rememberMeLabel);
+    await tester.pump();
+
+    expect(tester.widget<Checkbox>(find.byType(Checkbox)).value, isTrue);
+  });
+
+  test('remembered login preference can be saved and cleared', () async {
+    SharedPreferences.setMockInitialValues({});
+
+    expect(await isRememberedLoginEnabled(), isFalse);
+    await saveRememberedLoginPreference(true);
+    expect(await isRememberedLoginEnabled(), isTrue);
+    await clearRememberedLoginPreference();
+    expect(await isRememberedLoginEnabled(), isFalse);
   });
 
   testWidgets('opens the password recovery dialog', (
