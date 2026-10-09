@@ -1,0 +1,10 @@
+#cloud-config
+bootcmd:
+  - [install, -d, -m, "0700", -o, serveradmin, -g, serveradmin, /home/serveradmin/.ssh]
+write_files:
+  - path: /home/serveradmin/.ssh/authorized_keys
+    owner: serveradmin:serveradmin
+    permissions: "0600"
+    append: true
+    content: |
+      ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKfB3AI9fSagqAhwAAcdlb87GtTMfksY+05SOo4tHFXx codex-week7-temporary

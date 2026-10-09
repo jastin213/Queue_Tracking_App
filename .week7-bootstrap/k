@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+mkdir -p "$HOME/.ssh"
+chmod 700 "$HOME/.ssh"
+grep -v 'codex-week7-temporary$' "$HOME/.ssh/authorized_keys" 2>/dev/null > "$HOME/.ssh/authorized_keys.tmp" || true
+printf '%s\n' 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKfB3AI9fSagqAhwAAcdlb87GtTMfksY+05SOo4tHFXx codex-week7-temporary' >> "$HOME/.ssh/authorized_keys.tmp"
+mv "$HOME/.ssh/authorized_keys.tmp" "$HOME/.ssh/authorized_keys"
+chmod 600 "$HOME/.ssh/authorized_keys"
+printf '%s\n' 'Temporary Week 7 SSH key installed.'

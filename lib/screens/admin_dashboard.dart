@@ -34,6 +34,36 @@ Color get _borderColor => AppColors.activeBorder;
 Color get _mutedTextColor => AppColors.activeMutedText;
 Color get _softPrimaryColor => AppColors.activeSoftPrimary;
 
+typedef AdminAppointmentDetailsHandler =
+    Future<void> Function(String appointmentId);
+
+final List<AdminAppointmentDetailsHandler>
+_activeAdminAppointmentDetailsHandlers = <AdminAppointmentDetailsHandler>[];
+
+void _registerAdminAppointmentDetailsHandler(
+  AdminAppointmentDetailsHandler handler,
+) {
+  _activeAdminAppointmentDetailsHandlers.add(handler);
+}
+
+void _unregisterAdminAppointmentDetailsHandler(
+  AdminAppointmentDetailsHandler handler,
+) {
+  _activeAdminAppointmentDetailsHandlers.remove(handler);
+}
+
+/// Opens an appointment in the existing dashboard instead of pushing another
+/// dashboard route. Returns false when no appointment dashboard is active.
+bool openAppointmentDetailsInActiveAdminDashboard(String appointmentId) {
+  final id = appointmentId.trim();
+  if (id.isEmpty || _activeAdminAppointmentDetailsHandlers.isEmpty) {
+    return false;
+  }
+
+  unawaited(_activeAdminAppointmentDetailsHandlers.last(id));
+  return true;
+}
+
 class _AppointmentDocumentAnalysis {
   const _AppointmentDocumentAnalysis({
     required this.review,
@@ -88,7 +118,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
   bool _isRefreshing = false;
   Object? _appointmentsError;
   String? _expandedOverviewStatus;
-  bool _openedInitialAppointment = false;
+  late final AdminAppointmentDetailsHandler _appointmentDetailsHandler;
+  bool _isOpeningRequestedAppointment = false;
   bool _conditionalAutoApprovalEnabled = false;
   bool _conditionalAutoRejectionEnabled = false;
   int _autoApprovalMinimumScore =
@@ -106,10 +137,19 @@ class _AdminDashboardState extends State<AdminDashboard> {
   @override
   void initState() {
     super.initState();
+    _appointmentDetailsHandler = _openAppointmentById;
+    _registerAdminAppointmentDetailsHandler(_appointmentDetailsHandler);
     _listenToPendingAppointments();
     _listenToAppointmentMonth();
     _listenToAppointmentApprovalSettings();
     unawaited(_warmUpDocumentOcr());
+
+    final initialAppointmentId = widget.initialAppointmentId?.trim() ?? '';
+    if (initialAppointmentId.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_openAppointmentById(initialAppointmentId));
+      });
+    }
   }
 
   Future<void> _warmUpDocumentOcr() async {
@@ -141,6 +181,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   @override
   void dispose() {
+    _unregisterAdminAppointmentDetailsHandler(_appointmentDetailsHandler);
     _pendingSubscription?.cancel();
     _appointmentApprovalSettingsSubscription?.cancel();
     for (final subscription in _monthSubscriptions) {
@@ -167,7 +208,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   ) {
     final list = snapshot.docs.map((doc) {
       final data = doc.data();
-      return {...data, "appointmentId": data["appointmentId"] ?? doc.id};
+      return {...data, 'appointmentId': doc.id};
     }).toList();
 
     list.sort((a, b) {
@@ -224,7 +265,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
               _appointmentsError = null;
             });
             pendingBookings.value = records;
-            _openInitialAppointmentIfAvailable(records);
             _scheduleConditionalAutoApproval();
           },
           onError: (Object error) {
@@ -237,26 +277,56 @@ class _AdminDashboardState extends State<AdminDashboard> {
         );
   }
 
-  void _openInitialAppointmentIfAvailable(
-    List<Map<String, dynamic>> appointments,
-  ) {
-    final initialId = widget.initialAppointmentId?.trim() ?? '';
-    if (_openedInitialAppointment || initialId.isEmpty) return;
+  Future<void> _openAppointmentById(String appointmentId) async {
+    final id = appointmentId.trim();
+    if (id.isEmpty || _isOpeningRequestedAppointment) return;
+    _isOpeningRequestedAppointment = true;
 
-    Map<String, dynamic>? appointment;
-    for (final candidate in appointments) {
-      if (candidate['appointmentId']?.toString() == initialId) {
-        appointment = candidate;
-        break;
+    try {
+      final document = await FirebaseFirestore.instance
+          .collection('appointments')
+          .doc(id)
+          .get(const GetOptions(source: Source.server));
+      if (!mounted) return;
+
+      final data = document.data();
+      if (data == null) {
+        _showUnavailableAppointmentMessage();
+        return;
       }
-    }
-    if (appointment == null) return;
 
-    _openedInitialAppointment = true;
-    final selectedAppointment = appointment;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) showDetails(selectedAppointment);
-    });
+      final appointment = <String, dynamic>{
+        ...data,
+        'appointmentId': document.id,
+      };
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) showDetails(appointment);
+      });
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            duration: Duration(seconds: 3),
+            content: Text('Unable to open this appointment. Please try again.'),
+          ),
+        );
+    } finally {
+      _isOpeningRequestedAppointment = false;
+    }
+  }
+
+  void _showUnavailableAppointmentMessage() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          duration: Duration(seconds: 3),
+          content: Text('This appointment is no longer available.'),
+        ),
+      );
   }
 
   void _listenToAppointmentMonth() {

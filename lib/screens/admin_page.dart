@@ -122,6 +122,12 @@ class _UpperCaseTextFormatter extends TextInputFormatter {
 
 enum _DisplayDestination { newTabOpened, newTabBlocked, currentTab }
 
+enum _AdminSessionStatus { authorized, unauthorized, unavailable }
+
+class _AdminSessionExpiredException implements Exception {
+  const _AdminSessionExpiredException();
+}
+
 class AdminPage extends StatefulWidget {
   const AdminPage({super.key});
 
@@ -137,6 +143,9 @@ class _AdminPageState extends State<AdminPage> {
   String _lastScheduledQueueSignature = "";
   bool _isGeneratingQueue = false;
   bool _isRefreshingQueue = false;
+  bool _isAdminSessionReady = false;
+  bool _isCheckingAdminSession = true;
+  bool _isReturningToLogin = false;
   bool _isCallingCustomer = false;
   bool _desktopSidebarVisible = true;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
@@ -154,7 +163,160 @@ class _AdminPageState extends State<AdminPage> {
   void initState() {
     super.initState();
     _adminNotificationPreferenceKey = _buildAdminNotificationPreferenceKey();
+    unawaited(_initializeAdminSession());
     _initializeAppointmentNotifications();
+  }
+
+  Future<_AdminSessionStatus> _verifyAdminSession({
+    bool forceTokenRefresh = false,
+  }) async {
+    try {
+      User? user = FirebaseAuth.instance.currentUser;
+      if (user == null) return _AdminSessionStatus.unauthorized;
+
+      if (forceTokenRefresh) {
+        await user.reload();
+        user = FirebaseAuth.instance.currentUser;
+        if (user == null) return _AdminSessionStatus.unauthorized;
+      }
+
+      await user.getIdToken(forceTokenRefresh);
+      final profile = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get(const GetOptions(source: Source.server));
+      final role = (profile.data()?['role'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+
+      return role == 'admin'
+          ? _AdminSessionStatus.authorized
+          : _AdminSessionStatus.unauthorized;
+    } on FirebaseAuthException catch (error) {
+      const invalidSessionCodes = <String>{
+        'invalid-user-token',
+        'user-token-expired',
+        'user-disabled',
+        'user-not-found',
+      };
+      return invalidSessionCodes.contains(error.code)
+          ? _AdminSessionStatus.unauthorized
+          : _AdminSessionStatus.unavailable;
+    } on FirebaseException catch (error) {
+      return error.code == 'permission-denied' ||
+              error.code == 'unauthenticated'
+          ? _AdminSessionStatus.unauthorized
+          : _AdminSessionStatus.unavailable;
+    } catch (_) {
+      return _AdminSessionStatus.unavailable;
+    }
+  }
+
+  Future<void> _initializeAdminSession() async {
+    var status = await _verifyAdminSession();
+    if (status != _AdminSessionStatus.authorized) {
+      // A restored browser tab can briefly hold an outdated token. Refresh it
+      // once before deciding that the administrator must sign in again.
+      status = await _verifyAdminSession(forceTokenRefresh: true);
+    }
+    if (!mounted) return;
+
+    setState(() {
+      _isCheckingAdminSession = false;
+      _isAdminSessionReady = status == _AdminSessionStatus.authorized;
+    });
+
+    if (status == _AdminSessionStatus.unauthorized) {
+      await _returnToLoginForExpiredAdminSession();
+      return;
+    }
+
+    if (status == _AdminSessionStatus.unavailable) {
+      _showAdminSessionUnavailableMessage();
+    }
+  }
+
+  void _showAdminSessionUnavailableMessage() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          duration: Duration(seconds: 4),
+          content: Text(
+            'Unable to verify the admin session. Check your connection and press Refresh.',
+          ),
+        ),
+      );
+  }
+
+  Future<bool> _recoverAdminSession() async {
+    if (!mounted) return false;
+    setState(() {
+      _isCheckingAdminSession = true;
+      _isAdminSessionReady = false;
+    });
+
+    final status = await _verifyAdminSession(forceTokenRefresh: true);
+    if (!mounted) return false;
+
+    setState(() {
+      _isCheckingAdminSession = false;
+      _isAdminSessionReady = status == _AdminSessionStatus.authorized;
+    });
+
+    if (status == _AdminSessionStatus.authorized) return true;
+    return false;
+  }
+
+  Future<void> _returnToLoginForExpiredAdminSession() async {
+    if (_isReturningToLogin) return;
+    _isReturningToLogin = true;
+
+    final messenger = mounted ? ScaffoldMessenger.of(context) : null;
+    await signOutAndClearRememberedLogin();
+    if (!mounted) return;
+
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const HomePage()),
+      (route) => false,
+    );
+    messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          duration: Duration(seconds: 4),
+          content: Text('Admin session expired. Please sign in again.'),
+        ),
+      );
+  }
+
+  Future<void> _saveQueueWithSessionRecovery(
+    DocumentReference<Map<String, dynamic>> queueReference,
+    Map<String, dynamic> queueData,
+  ) async {
+    try {
+      await queueReference.set(queueData);
+      return;
+    } on FirebaseException catch (error) {
+      if (error.code != 'permission-denied') rethrow;
+    }
+
+    final recovered = await _recoverAdminSession();
+    if (!recovered) throw const _AdminSessionExpiredException();
+
+    try {
+      // Retry the exact same document and payload once. This avoids creating a
+      // second queue number if the first authorization attempt was stale.
+      await queueReference.set(queueData);
+    } on FirebaseException catch (error) {
+      if (error.code == 'permission-denied') {
+        throw const _AdminSessionExpiredException();
+      }
+      rethrow;
+    }
   }
 
   String _buildAdminNotificationPreferenceKey() {
@@ -279,10 +441,7 @@ class _AdminPageState extends State<AdminPage> {
                 })
                 .map((doc) {
                   final data = doc.data();
-                  return {
-                    ...data,
-                    "appointmentId": data["appointmentId"] ?? doc.id,
-                  };
+                  return {...data, "appointmentId": doc.id};
                 })
                 .toList();
 
@@ -301,10 +460,7 @@ class _AdminPageState extends State<AdminPage> {
                 if (change.type != DocumentChangeType.added) continue;
                 final data = change.doc.data();
                 if (data != null && !isPastPendingAppointment(data)) {
-                  newestAppointment = {
-                    ...data,
-                    "appointmentId": data["appointmentId"] ?? change.doc.id,
-                  };
+                  newestAppointment = {...data, "appointmentId": change.doc.id};
                   break;
                 }
               }
@@ -345,10 +501,7 @@ class _AdminPageState extends State<AdminPage> {
           (snapshot) {
             final decisions = snapshot.docs.map((doc) {
               final data = doc.data();
-              return {
-                ...data,
-                'appointmentId': data['appointmentId'] ?? doc.id,
-              };
+              return {...data, 'appointmentId': doc.id};
             }).toList();
             decisions.sort((a, b) {
               final aTime = notificationDateTime(
@@ -369,10 +522,7 @@ class _AdminPageState extends State<AdminPage> {
                 if (change.type == DocumentChangeType.removed) continue;
                 final data = change.doc.data();
                 if (data != null) {
-                  newestDecision = {
-                    ...data,
-                    'appointmentId': data['appointmentId'] ?? change.doc.id,
-                  };
+                  newestDecision = {...data, 'appointmentId': change.doc.id};
                   break;
                 }
               }
@@ -449,12 +599,30 @@ class _AdminPageState extends State<AdminPage> {
 
   void _openAppointmentDetails(Map<String, dynamic> appointment) {
     final appointmentId = appointment['appointmentId']?.toString().trim() ?? '';
+
+    if (appointmentId.isEmpty) {
+      _openAppointmentDashboard();
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            duration: Duration(seconds: 3),
+            content: Text(
+              'This older notification is not linked to an appointment.',
+            ),
+          ),
+        );
+      return;
+    }
+
+    if (openAppointmentDetailsInActiveAdminDashboard(appointmentId)) {
+      return;
+    }
+
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => AdminDashboard(
-          initialAppointmentId: appointmentId.isEmpty ? null : appointmentId,
-        ),
+        builder: (_) => AdminDashboard(initialAppointmentId: appointmentId),
       ),
     ).then((_) {
       if (mounted) setState(() {});
@@ -925,6 +1093,25 @@ class _AdminPageState extends State<AdminPage> {
     });
 
     try {
+      if (!_isAdminSessionReady) {
+        final status = await _verifyAdminSession(forceTokenRefresh: true);
+        if (!mounted) return;
+
+        setState(() {
+          _isCheckingAdminSession = false;
+          _isAdminSessionReady = status == _AdminSessionStatus.authorized;
+        });
+
+        if (status == _AdminSessionStatus.unauthorized) {
+          await _returnToLoginForExpiredAdminSession();
+          return;
+        }
+        if (status == _AdminSessionStatus.unavailable) {
+          _showAdminSessionUnavailableMessage();
+          return;
+        }
+      }
+
       await refreshQueue();
 
       if (!mounted) return;
@@ -1398,6 +1585,10 @@ class _AdminPageState extends State<AdminPage> {
 
   Future<bool> generateQueue(String type, String name, String plate) async {
     if (_isGeneratingQueue) return false;
+    if (!_isAdminSessionReady || _isCheckingAdminSession) {
+      _showAdminSessionUnavailableMessage();
+      return false;
+    }
     _isGeneratingQueue = true;
 
     try {
@@ -1488,7 +1679,10 @@ class _AdminPageState extends State<AdminPage> {
     };
 
     try {
-      await queueItemsRef(selectedDate).doc(queueNumber).set(queueData);
+      await _saveQueueWithSessionRecovery(
+        queueItemsRef(selectedDate).doc(queueNumber),
+        queueData,
+      );
 
       markQueueCodeAsIssued(selectedDate, queueNumber);
 
@@ -1508,6 +1702,9 @@ class _AdminPageState extends State<AdminPage> {
       );
 
       return true;
+    } on _AdminSessionExpiredException {
+      await _returnToLoginForExpiredAdminSession();
+      return false;
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("Failed to save queue online: $e")),
@@ -2393,7 +2590,8 @@ class _AdminPageState extends State<AdminPage> {
 
   Widget buildRefreshControl(BuildContext context) {
     final bool showLabel = MediaQuery.sizeOf(context).width >= 700;
-    final Widget icon = _isRefreshingQueue
+    final bool isBusy = _isRefreshingQueue || _isCheckingAdminSession;
+    final Widget icon = isBusy
         ? SizedBox.square(
             dimension: 18,
             child: CircularProgressIndicator(
@@ -2407,7 +2605,7 @@ class _AdminPageState extends State<AdminPage> {
       return IconButton(
         key: const Key("admin-refresh-button"),
         tooltip: text("Refresh queue", "I-refresh ang queue"),
-        onPressed: _isRefreshingQueue ? null : refreshQueueFromControl,
+        onPressed: isBusy ? null : refreshQueueFromControl,
         icon: icon,
       );
     }
@@ -2416,7 +2614,7 @@ class _AdminPageState extends State<AdminPage> {
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: OutlinedButton.icon(
         key: const Key("admin-refresh-button"),
-        onPressed: _isRefreshingQueue ? null : refreshQueueFromControl,
+        onPressed: isBusy ? null : refreshQueueFromControl,
         icon: icon,
         label: Text(text("Refresh", "I-refresh")),
         style: OutlinedButton.styleFrom(
@@ -3136,9 +3334,9 @@ class _AdminPageState extends State<AdminPage> {
                 width: double.infinity,
                 height: 48,
                 child: ElevatedButton.icon(
-                  onPressed: () {
-                    showGenerateDialog("Gas");
-                  },
+                  onPressed: _isAdminSessionReady && !_isCheckingAdminSession
+                      ? () => showGenerateDialog("Gas")
+                      : null,
                   icon: const Icon(Icons.directions_car_rounded),
                   label: const Text("GAS"),
                 ),
@@ -3148,9 +3346,9 @@ class _AdminPageState extends State<AdminPage> {
                 width: double.infinity,
                 height: 48,
                 child: ElevatedButton.icon(
-                  onPressed: () {
-                    showGenerateDialog("Diesel");
-                  },
+                  onPressed: _isAdminSessionReady && !_isCheckingAdminSession
+                      ? () => showGenerateDialog("Diesel")
+                      : null,
                   icon: const Icon(Icons.local_shipping_rounded),
                   label: const Text("DIESEL"),
                 ),
