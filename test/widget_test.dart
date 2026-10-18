@@ -263,14 +263,17 @@ void main() {
     expect(find.text('Password'), findsOneWidget);
     expect(find.text('CONTINUE WITH GOOGLE'), findsOneWidget);
     expect(find.text('OR SIGN IN WITH EMAIL'), findsOneWidget);
-    expect(find.text('LOGIN'), findsOneWidget);
+    expect(find.text('SIGN IN'), findsOneWidget);
     expect(find.text('Forgot Password?'), findsOneWidget);
     expect(find.text('Remember Me'), findsOneWidget);
     expect(find.byType(Checkbox), findsOneWidget);
     expect(tester.widget<Checkbox>(find.byType(Checkbox)).value, isFalse);
     expect(find.byTooltip('Show password'), findsOneWidget);
-    expect(find.text('CONTINUE AS WALK-IN'), findsOneWidget);
-    expect(find.text('Login or Create Account'), findsOneWidget);
+    expect(find.text('Track Walk-In Queue'), findsOneWidget);
+    expect(
+      find.text('NPJN SMART QUEUE MANAGEMENT AND APPOINTMENT SYSTEM'),
+      findsOneWidget,
+    );
     expect(find.byType(AppRefreshIndicator), findsNothing);
     expect(find.text('Customer Portal'), findsNothing);
     expect(find.text('Admin Login'), findsNothing);
@@ -287,7 +290,7 @@ void main() {
       find.ancestor(of: emailField, matching: find.byType(FittedBox)),
       findsNothing,
     );
-    expect(tester.widget<TextField>(emailField).style?.fontSize, 16);
+    expect(tester.widget<TextField>(emailField).style?.fontSize, 15);
     expect(
       find.text('Admins and customers use the same login form.'),
       findsNothing,

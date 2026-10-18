@@ -59,3 +59,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/branding/vehicle_queue_logo_v2.png
+    - assets/images/npjn_emission_center_login.jpg

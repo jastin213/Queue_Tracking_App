@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' hide Text;
 import '../widgets/localized_text.dart';
@@ -15,11 +17,172 @@ import 'customer_home.dart';
 import 'admin_page.dart';
 import 'track_page.dart';
 
-Color get _backgroundColor => AppColors.activeBackground;
 Color get _primaryColor => AppColors.activePrimary;
-Color get _cardColor => AppColors.activeSurface;
-Color get _borderColor => AppColors.activeBorder;
 Color get _mutedTextColor => AppColors.activeMutedText;
+
+const Color _loginNavy = AppColors.primary;
+const Color _loginMuted = AppColors.mutedText;
+const Color _loginBorder = AppColors.border;
+const Color _loginFieldFill = AppColors.softPrimary;
+
+class _LoginViewport extends StatelessWidget {
+  const _LoginViewport({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final desktopLayout = constraints.maxWidth >= 1000;
+        final compact = constraints.maxWidth < 600;
+        final horizontalPadding = compact ? 18.0 : 28.0;
+        final animatedChild = TweenAnimationBuilder<double>(
+          duration: MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero
+              : const Duration(milliseconds: 520),
+          curve: Curves.easeOutCubic,
+          tween: Tween(begin: 0, end: 1),
+          child: child,
+          builder: (context, value, content) {
+            return Opacity(
+              opacity: value,
+              child: Transform.translate(
+                offset: Offset(0, 14 * (1 - value)),
+                child: content,
+              ),
+            );
+          },
+        );
+
+        return ClipRect(
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Color(0xFFE7F6FB),
+                      Color(0xFFD7F2F4),
+                      Color(0xFFB8E8EC),
+                    ],
+                  ),
+                ),
+              ),
+              const Positioned(
+                top: -170,
+                left: -90,
+                child: _LoginBackdropBlob(
+                  width: 780,
+                  height: 370,
+                  colors: [Color(0x99C9EAF5), Color(0x339DDCE7)],
+                ),
+              ),
+              const Positioned(
+                top: -115,
+                right: -120,
+                child: _LoginBackdropBlob(
+                  width: 600,
+                  height: 360,
+                  colors: [Color(0x8B72CDD9), Color(0x307CE0D3)],
+                ),
+              ),
+              const Positioned(
+                bottom: -220,
+                left: -100,
+                child: _LoginBackdropBlob(
+                  width: 760,
+                  height: 480,
+                  colors: [Color(0x8B64C8DA), Color(0x257BD4E5)],
+                ),
+              ),
+              const Positioned(
+                bottom: -190,
+                right: -80,
+                child: _LoginBackdropBlob(
+                  width: 720,
+                  height: 420,
+                  colors: [Color(0x8AADEAEF), Color(0x3572D5D0)],
+                ),
+              ),
+              if (desktopLayout)
+                SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Center(
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: SizedBox(
+                          width: 1440,
+                          height: 720,
+                          child: animatedChild,
+                        ),
+                      ),
+                    ),
+                  ),
+                )
+              else
+                SafeArea(
+                  child: ScrollConfiguration(
+                    behavior: ScrollConfiguration.of(
+                      context,
+                    ).copyWith(overscroll: false, scrollbars: false),
+                    child: SingleChildScrollView(
+                      keyboardDismissBehavior:
+                          ScrollViewKeyboardDismissBehavior.onDrag,
+                      physics: const ClampingScrollPhysics(),
+                      padding: EdgeInsets.fromLTRB(
+                        horizontalPadding,
+                        24,
+                        horizontalPadding,
+                        28,
+                      ),
+                      child: Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 620),
+                          child: animatedChild,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _LoginBackdropBlob extends StatelessWidget {
+  const _LoginBackdropBlob({
+    required this.width,
+    required this.height,
+    required this.colors,
+  });
+
+  final double width;
+  final double height;
+  final List<Color> colors;
+
+  @override
+  Widget build(BuildContext context) {
+    return Transform.rotate(
+      angle: -0.12,
+      child: Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(height),
+          gradient: LinearGradient(colors: colors),
+        ),
+      ),
+    );
+  }
+}
 
 enum _EmailSignInRecoveryAction { google, resetPassword }
 
@@ -644,49 +807,631 @@ class _CustomerLoginState extends State<CustomerLogin> {
     return InputDecoration(
       labelText: appText(label),
       hintText: appText(hint),
-      prefixIcon: Icon(icon, color: _primaryColor),
+      prefixIcon: Icon(icon, color: _loginNavy, size: 21),
       suffixIcon: suffixIcon,
-      labelStyle: TextStyle(
-        color: _mutedTextColor,
+      labelStyle: const TextStyle(
+        color: _loginMuted,
         fontWeight: FontWeight.w600,
       ),
-      hintStyle: TextStyle(color: _mutedTextColor),
+      hintStyle: const TextStyle(color: _loginMuted),
       filled: true,
-      fillColor: _backgroundColor,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+      fillColor: _loginFieldFill,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
       enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide(color: _borderColor),
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: _loginBorder),
       ),
       focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide(color: _primaryColor, width: 1.5),
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: _loginNavy, width: 1.6),
       ),
     );
   }
 
-  // Keep this wrapper deliberately unscaled. Scaling the complete form from
-  // the available height makes mobile web shrink when the keyboard opens.
-  Widget unscaledLogin(Widget child) => child;
+  Widget _buildBrandHeader({required bool compact}) {
+    return Column(
+      crossAxisAlignment: compact
+          ? CrossAxisAlignment.center
+          : CrossAxisAlignment.start,
+      children: [
+        Text(
+          "NPJN SMART QUEUE MANAGEMENT AND APPOINTMENT SYSTEM",
+          textAlign: compact ? TextAlign.center : TextAlign.left,
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: compact ? 27 : 36,
+            height: 1.1,
+            fontWeight: FontWeight.w900,
+            letterSpacing: -0.7,
+          ),
+        ),
+        const SizedBox(height: 9),
+        Text(
+          "Book appointments and track your queue with ease.",
+          textAlign: compact ? TextAlign.center : TextAlign.left,
+          style: TextStyle(
+            color: const Color(0xFFE1F3F5),
+            fontSize: compact ? 14 : 17,
+            height: 1.35,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBenefactorPhoto() {
+    return CustomPaint(
+      foregroundPainter: const _OrganicPhotoBorderPainter(),
+      child: ClipPath(
+        clipper: const _OrganicPhotoClipper(),
+        child: Image.asset(
+          'assets/images/npjn_emission_center_login.jpg',
+          fit: BoxFit.cover,
+          alignment: const Alignment(0.1, 0),
+          filterQuality: FilterQuality.high,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildWalkInCard(BuildContext context, {required bool compact}) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(compact ? 20 : 24),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          padding: EdgeInsets.all(compact ? 17 : 20),
+          decoration: BoxDecoration(
+            color: const Color(0xFF0A2036).withValues(alpha: 0.74),
+            borderRadius: BorderRadius.circular(compact ? 20 : 24),
+            border: Border.all(
+              color: Colors.white.withValues(alpha: 0.72),
+              width: 1.2,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.22),
+                blurRadius: 28,
+                offset: const Offset(0, 12),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: compact ? 42 : 48,
+                    height: compact ? 42 : 48,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.16),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(
+                      Icons.directions_walk_rounded,
+                      color: Colors.white,
+                      size: compact ? 25 : 28,
+                    ),
+                  ),
+                  const SizedBox(width: 13),
+                  Expanded(
+                    child: Text(
+                      "Walk-In Customer",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: compact ? 17 : 20,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              SizedBox(height: compact ? 10 : 12),
+              Text(
+                "Get your queue number at the center, then track your position here without an account.",
+                style: TextStyle(
+                  color: const Color(0xFFE6EFF4),
+                  fontSize: compact ? 13 : 14.5,
+                  height: 1.4,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              SizedBox(height: compact ? 13 : 16),
+              SizedBox(
+                width: double.infinity,
+                height: compact ? 48 : 52,
+                child: FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: _loginNavy,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                  ),
+                  onPressed: isAuthenticationBusy
+                      ? null
+                      : () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  const TrackPage(isWalkInTracking: true),
+                            ),
+                          );
+                        },
+                  icon: const Icon(Icons.search_rounded, size: 21),
+                  label: const Text(
+                    "Track Walk-In Queue",
+                    style: TextStyle(
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.1,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBrandPanel(BuildContext context, {required bool compact}) {
+    final panel = Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF123C5C), Color(0xFF087F8C), Color(0xFF159CA5)],
+          stops: [0, 0.56, 1],
+        ),
+      ),
+      child: compact
+          ? Padding(
+              padding: const EdgeInsets.fromLTRB(22, 26, 22, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildBrandHeader(compact: true),
+                  const SizedBox(height: 18),
+                  SizedBox(height: 285, child: _buildBenefactorPhoto()),
+                  Transform.translate(
+                    offset: const Offset(0, -22),
+                    child: _buildWalkInCard(context, compact: true),
+                  ),
+                ],
+              ),
+            )
+          : Stack(
+              fit: StackFit.expand,
+              children: [
+                Positioned(
+                  left: 56,
+                  right: 46,
+                  top: 44,
+                  child: _buildBrandHeader(compact: false),
+                ),
+                Positioned(
+                  left: 36,
+                  right: 34,
+                  top: 166,
+                  bottom: 58,
+                  child: _buildBenefactorPhoto(),
+                ),
+                Positioned(
+                  left: 92,
+                  right: 92,
+                  bottom: 28,
+                  child: _buildWalkInCard(context, compact: false),
+                ),
+              ],
+            ),
+    );
+
+    if (compact) {
+      return ClipRRect(borderRadius: BorderRadius.circular(26), child: panel);
+    }
+    return panel;
+  }
+
+  Widget _buildAccountContent(BuildContext context, {required bool compact}) {
+    return AutofillGroup(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.lock_person_outlined, color: _loginNavy, size: 27),
+              SizedBox(width: 11),
+              Expanded(
+                child: Text(
+                  "Account Login",
+                  style: TextStyle(
+                    color: _loginNavy,
+                    fontSize: 23,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 7),
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              "Sign in to manage your appointments and queue updates.",
+              style: TextStyle(
+                color: _loginMuted,
+                fontSize: 13.5,
+                height: 1.38,
+              ),
+            ),
+          ),
+          SizedBox(height: compact ? 18 : 22),
+          SizedBox(
+            width: double.infinity,
+            height: 52,
+            child: OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _loginNavy,
+                backgroundColor: Colors.white,
+                elevation: 2,
+                shadowColor: Colors.black.withValues(alpha: 0.16),
+                side: const BorderSide(color: _loginBorder),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(13),
+                ),
+              ),
+              onPressed: isAuthenticationBusy ? null : signInWithGoogle,
+              child: isGoogleSigningIn
+                  ? const SizedBox(
+                      height: 21,
+                      width: 21,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.4,
+                        color: _loginNavy,
+                      ),
+                    )
+                  : const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _GoogleLogo(size: 22),
+                        SizedBox(width: 11),
+                        Flexible(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              "CONTINUE WITH GOOGLE",
+                              maxLines: 1,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          const Row(
+            children: [
+              Expanded(child: Divider(color: _loginBorder)),
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  "OR SIGN IN WITH EMAIL",
+                  style: TextStyle(
+                    color: _loginMuted,
+                    fontSize: 11,
+                    letterSpacing: 0.8,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+              Expanded(child: Divider(color: _loginBorder)),
+            ],
+          ),
+          const SizedBox(height: 18),
+          TextField(
+            controller: emailController,
+            keyboardType: TextInputType.emailAddress,
+            textInputAction: TextInputAction.next,
+            autofillHints: const [AutofillHints.email],
+            scrollPadding: const EdgeInsets.only(bottom: 140),
+            style: const TextStyle(
+              color: _loginNavy,
+              fontWeight: FontWeight.w600,
+              fontSize: 15,
+            ),
+            decoration: formDecoration(
+              label: "Email",
+              hint: "Enter your email address",
+              icon: Icons.email_outlined,
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: passwordController,
+            obscureText: obscurePassword,
+            enableSuggestions: false,
+            autocorrect: false,
+            textInputAction: TextInputAction.done,
+            autofillHints: const [AutofillHints.password],
+            onSubmitted: (_) {
+              if (!isAuthenticationBusy) login();
+            },
+            scrollPadding: const EdgeInsets.only(bottom: 140),
+            style: const TextStyle(
+              color: _loginNavy,
+              fontWeight: FontWeight.w600,
+              fontSize: 15,
+            ),
+            decoration: formDecoration(
+              label: "Password",
+              hint: "Enter your password",
+              icon: Icons.lock_outline_rounded,
+              suffixIcon: IconButton(
+                tooltip: obscurePassword ? "Show password" : "Hide password",
+                onPressed: isAuthenticationBusy
+                    ? null
+                    : () {
+                        setState(() {
+                          obscurePassword = !obscurePassword;
+                        });
+                      },
+                icon: Icon(
+                  obscurePassword
+                      ? Icons.visibility_off_rounded
+                      : Icons.visibility_rounded,
+                  color: _loginNavy,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 3),
+          Row(
+            children: [
+              Expanded(
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: isAuthenticationBusy
+                      ? null
+                      : () {
+                          setState(() {
+                            rememberMe = !rememberMe;
+                          });
+                        },
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Checkbox(
+                        value: rememberMe,
+                        onChanged: isAuthenticationBusy
+                            ? null
+                            : (value) {
+                                setState(() {
+                                  rememberMe = value ?? false;
+                                });
+                              },
+                        activeColor: _loginNavy,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      const Flexible(
+                        child: Text(
+                          "Remember Me",
+                          maxLines: 1,
+                          style: TextStyle(
+                            color: _loginMuted,
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: isAuthenticationBusy ? null : resetPassword,
+                child: Text(
+                  isSendingPasswordReset
+                      ? "Sending reset link..."
+                      : "Forgot Password?",
+                  style: const TextStyle(
+                    color: _loginNavy,
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 7),
+          SizedBox(
+            width: double.infinity,
+            height: 54,
+            child: ElevatedButton(
+              onPressed: isAuthenticationBusy ? null : login,
+              child: isLoading
+                  ? const SizedBox(
+                      height: 22,
+                      width: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.5,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Text("SIGN IN"),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              const Text(
+                "No account yet?",
+                style: TextStyle(color: _loginMuted, fontSize: 13.5),
+              ),
+              TextButton(
+                onPressed: isAuthenticationBusy
+                    ? null
+                    : () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const CustomerRegister(),
+                          ),
+                        );
+                      },
+                child: const Text(
+                  "Create Account",
+                  style: TextStyle(
+                    color: _loginNavy,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildResponsiveLogin(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final desktopLayout = constraints.maxWidth >= 1000;
+
+        if (desktopLayout) {
+          return Column(
+            children: [
+              Expanded(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(30),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF0A2E43).withValues(alpha: 0.24),
+                        blurRadius: 38,
+                        offset: const Offset(0, 18),
+                      ),
+                    ],
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 8,
+                        child: _buildBrandPanel(context, compact: false),
+                      ),
+                      Expanded(
+                        flex: 5,
+                        child: ColoredBox(
+                          color: Colors.white,
+                          child: Center(
+                            child: SingleChildScrollView(
+                              physics: const ClampingScrollPhysics(),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 46,
+                                vertical: 34,
+                              ),
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 440,
+                                ),
+                                child: _buildAccountContent(
+                                  context,
+                                  compact: false,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                "Queue · Appointment · Tracking",
+                style: TextStyle(
+                  color: _loginNavy,
+                  fontSize: 13,
+                  letterSpacing: 1.15,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          );
+        }
+
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildBrandPanel(context, compact: true),
+            const SizedBox(height: 18),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(20, 22, 20, 18),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.98),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.white),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF0A2E43).withValues(alpha: 0.18),
+                    blurRadius: 30,
+                    offset: const Offset(0, 14),
+                  ),
+                ],
+              ),
+              child: _buildAccountContent(context, compact: true),
+            ),
+            const SizedBox(height: 18),
+            const Text(
+              "Queue · Appointment · Tracking",
+              style: TextStyle(
+                color: _loginNavy,
+                fontSize: 12.5,
+                letterSpacing: 1.1,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Theme(
       data: Theme.of(context).copyWith(
-        scaffoldBackgroundColor: _backgroundColor,
+        scaffoldBackgroundColor: const Color(0xFFDDF3F6),
         colorScheme: Theme.of(context).colorScheme.copyWith(
-          primary: _primaryColor,
+          primary: _loginNavy,
           onPrimary: Colors.white,
-          surface: _cardColor,
-          onSurface: _primaryColor,
+          surface: Colors.white,
+          onSurface: _loginNavy,
         ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
-            backgroundColor: _primaryColor,
+            backgroundColor: _loginNavy,
             foregroundColor: Colors.white,
-            elevation: 0,
-            shadowColor: Colors.transparent,
+            elevation: 2,
+            shadowColor: _loginNavy.withValues(alpha: 0.24),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(AppRadii.control),
             ),
@@ -699,478 +1444,98 @@ class _CustomerLoginState extends State<CustomerLogin> {
       ),
       child: Scaffold(
         resizeToAvoidBottomInset: true,
-        body: SafeArea(
-          child: Center(
-            child: ScrollConfiguration(
-              behavior: ScrollConfiguration.of(
-                context,
-              ).copyWith(overscroll: false, scrollbars: !kIsWeb),
-              child: unscaledLogin(
-                SingleChildScrollView(
-                  keyboardDismissBehavior:
-                      ScrollViewKeyboardDismissBehavior.onDrag,
-                  physics: const ClampingScrollPhysics(),
-                  padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
-                  child: Column(
-                    children: [
-                      Container(
-                        height: 92,
-                        width: 92,
-                        decoration: BoxDecoration(
-                          color: _primaryColor,
-                          borderRadius: BorderRadius.circular(AppRadii.card),
-                          boxShadow: AppEffects.raisedShadow,
-                        ),
-                        child: const Icon(
-                          Icons.account_circle_rounded,
-                          color: Colors.white,
-                          size: 50,
-                        ),
-                      ),
-
-                      const SizedBox(height: 22),
-
-                      Text(
-                        "Account Login",
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.w800,
-                          color: _primaryColor,
-                          letterSpacing: 0.8,
-                        ),
-                      ),
-
-                      const SizedBox(height: 8),
-
-                      Text(
-                        "Continue as a walk-in, or use your registered account.",
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 14.5,
-                          height: 1.4,
-                          color: _mutedTextColor,
-                        ),
-                      ),
-
-                      const SizedBox(height: 28),
-
-                      Container(
-                        width: double.infinity,
-                        constraints: const BoxConstraints(maxWidth: 380),
-                        padding: const EdgeInsets.all(18),
-                        decoration: BoxDecoration(
-                          color: _primaryColor,
-                          borderRadius: BorderRadius.circular(AppRadii.card),
-                          boxShadow: AppEffects.raisedShadow,
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Row(
-                              children: [
-                                Icon(
-                                  Icons.directions_walk_rounded,
-                                  color: Colors.white,
-                                  size: 30,
-                                ),
-                                SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    "Walk-In Customer",
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                            const Text(
-                              "Get your queue number at the center, then track your position here without an account.",
-                              style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: 13.5,
-                                height: 1.4,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 16),
-                            SizedBox(
-                              width: double.infinity,
-                              height: 50,
-                              child: FilledButton.icon(
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: Colors.white,
-                                  foregroundColor: _primaryColor,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(
-                                      AppRadii.control,
-                                    ),
-                                  ),
-                                ),
-                                onPressed: isAuthenticationBusy
-                                    ? null
-                                    : () {
-                                        Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (_) => const TrackPage(
-                                              isWalkInTracking: true,
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                icon: const Icon(Icons.search_rounded),
-                                label: const Text(
-                                  "CONTINUE AS WALK-IN",
-                                  style: TextStyle(fontWeight: FontWeight.w800),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      const SizedBox(height: 18),
-
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          SizedBox(
-                            width: 50,
-                            child: Divider(color: _borderColor),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                            child: Text(
-                              "ACCOUNT",
-                              style: TextStyle(
-                                color: _mutedTextColor,
-                                fontSize: 12,
-                                letterSpacing: 1.2,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                          SizedBox(
-                            width: 50,
-                            child: Divider(color: _borderColor),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 18),
-
-                      Container(
-                        width: double.infinity,
-                        constraints: const BoxConstraints(maxWidth: 380),
-                        padding: const EdgeInsets.all(22),
-                        decoration: BoxDecoration(
-                          color: _cardColor,
-                          borderRadius: BorderRadius.circular(AppRadii.card),
-                          border: Border.all(color: _borderColor),
-                          boxShadow: AppEffects.cardShadow,
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: Text(
-                                "Login or Create Account",
-                                style: TextStyle(
-                                  color: _primaryColor,
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ),
-
-                            const SizedBox(height: 16),
-
-                            SizedBox(
-                              width: double.infinity,
-                              height: 52,
-                              child: OutlinedButton(
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: _primaryColor,
-                                  backgroundColor: _cardColor,
-                                  side: BorderSide(color: _borderColor),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(
-                                      AppRadii.control,
-                                    ),
-                                  ),
-                                ),
-                                onPressed: isAuthenticationBusy
-                                    ? null
-                                    : signInWithGoogle,
-                                child: isGoogleSigningIn
-                                    ? SizedBox(
-                                        height: 21,
-                                        width: 21,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2.4,
-                                          color: _primaryColor,
-                                        ),
-                                      )
-                                    : const Row(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          _GoogleLogo(size: 21),
-                                          SizedBox(width: 10),
-                                          Flexible(
-                                            child: FittedBox(
-                                              fit: BoxFit.scaleDown,
-                                              child: Text(
-                                                "CONTINUE WITH GOOGLE",
-                                                maxLines: 1,
-                                                style: TextStyle(
-                                                  fontWeight: FontWeight.w800,
-                                                  letterSpacing: 0.3,
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                              ),
-                            ),
-
-                            const SizedBox(height: 16),
-
-                            Row(
-                              children: [
-                                Expanded(child: Divider(color: _borderColor)),
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                  ),
-                                  child: Text(
-                                    "OR SIGN IN WITH EMAIL",
-                                    style: TextStyle(
-                                      color: _mutedTextColor,
-                                      fontSize: 11,
-                                      letterSpacing: 0.8,
-                                      fontWeight: FontWeight.w800,
-                                    ),
-                                  ),
-                                ),
-                                Expanded(child: Divider(color: _borderColor)),
-                              ],
-                            ),
-
-                            const SizedBox(height: 16),
-
-                            TextField(
-                              controller: emailController,
-                              keyboardType: TextInputType.emailAddress,
-                              textInputAction: TextInputAction.next,
-                              autofillHints: const [AutofillHints.email],
-                              scrollPadding: const EdgeInsets.only(bottom: 140),
-                              style: TextStyle(
-                                color: _primaryColor,
-                                fontWeight: FontWeight.w600,
-                                fontSize: 16,
-                              ),
-                              decoration: formDecoration(
-                                label: "Email",
-                                hint: "Enter your email address",
-                                icon: Icons.email_outlined,
-                              ),
-                            ),
-
-                            const SizedBox(height: 16),
-
-                            TextField(
-                              controller: passwordController,
-                              obscureText: obscurePassword,
-                              enableSuggestions: false,
-                              autocorrect: false,
-                              textInputAction: TextInputAction.done,
-                              autofillHints: const [AutofillHints.password],
-                              onSubmitted: (_) {
-                                if (!isAuthenticationBusy) login();
-                              },
-                              scrollPadding: const EdgeInsets.only(bottom: 140),
-                              style: TextStyle(
-                                color: _primaryColor,
-                                fontWeight: FontWeight.w600,
-                                fontSize: 16,
-                              ),
-                              decoration: formDecoration(
-                                label: "Password",
-                                hint: "Enter your password",
-                                icon: Icons.lock_outline_rounded,
-                                suffixIcon: IconButton(
-                                  tooltip: obscurePassword
-                                      ? "Show password"
-                                      : "Hide password",
-                                  onPressed: isAuthenticationBusy
-                                      ? null
-                                      : () {
-                                          setState(() {
-                                            obscurePassword = !obscurePassword;
-                                          });
-                                        },
-                                  icon: Icon(
-                                    obscurePassword
-                                        ? Icons.visibility_off_rounded
-                                        : Icons.visibility_rounded,
-                                    color: _primaryColor,
-                                  ),
-                                ),
-                              ),
-                            ),
-
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: InkWell(
-                                    borderRadius: BorderRadius.circular(10),
-                                    onTap: isAuthenticationBusy
-                                        ? null
-                                        : () {
-                                            setState(() {
-                                              rememberMe = !rememberMe;
-                                            });
-                                          },
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Checkbox(
-                                          value: rememberMe,
-                                          onChanged: isAuthenticationBusy
-                                              ? null
-                                              : (value) {
-                                                  setState(() {
-                                                    rememberMe = value ?? false;
-                                                  });
-                                                },
-                                          activeColor: _primaryColor,
-                                          visualDensity: VisualDensity.compact,
-                                        ),
-                                        Flexible(
-                                          child: Text(
-                                            "Remember Me",
-                                            maxLines: 1,
-                                            style: TextStyle(
-                                              color: _mutedTextColor,
-                                              fontSize: 13.5,
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                                TextButton(
-                                  onPressed: isAuthenticationBusy
-                                      ? null
-                                      : resetPassword,
-                                  child: Text(
-                                    isSendingPasswordReset
-                                        ? "Sending reset link..."
-                                        : "Forgot Password?",
-                                    style: TextStyle(
-                                      color: _primaryColor,
-                                      fontSize: 13.5,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-
-                            const SizedBox(height: 8),
-
-                            SizedBox(
-                              width: double.infinity,
-                              height: 55,
-                              child: ElevatedButton(
-                                onPressed: isAuthenticationBusy ? null : login,
-                                child: isLoading
-                                    ? const SizedBox(
-                                        height: 22,
-                                        width: 22,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2.5,
-                                          color: Colors.white,
-                                        ),
-                                      )
-                                    : const Text("LOGIN"),
-                              ),
-                            ),
-
-                            const SizedBox(height: 14),
-
-                            Wrap(
-                              alignment: WrapAlignment.center,
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              children: [
-                                Text(
-                                  "No account yet?",
-                                  style: TextStyle(
-                                    color: _mutedTextColor,
-                                    fontSize: 13.5,
-                                  ),
-                                ),
-                                TextButton(
-                                  onPressed: isAuthenticationBusy
-                                      ? null
-                                      : () {
-                                          Navigator.push(
-                                            context,
-                                            MaterialPageRoute(
-                                              builder: (_) =>
-                                                  const CustomerRegister(),
-                                            ),
-                                          );
-                                        },
-                                  child: Text(
-                                    "Create Account",
-                                    style: TextStyle(
-                                      color: _primaryColor,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      const SizedBox(height: 24),
-
-                      Text(
-                        "Queue · Appointment · Tracking",
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: _mutedTextColor,
-                          fontSize: 13.5,
-                          letterSpacing: 1.2,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
+        body: _LoginViewport(child: _buildResponsiveLogin(context)),
       ),
     );
   }
+}
+
+Path _organicPhotoPath(Size size) {
+  return Path()
+    ..moveTo(0, size.height * 0.19)
+    ..cubicTo(
+      size.width * 0.08,
+      size.height * 0.01,
+      size.width * 0.27,
+      0,
+      size.width * 0.43,
+      size.height * 0.1,
+    )
+    ..cubicTo(
+      size.width * 0.62,
+      size.height * 0.22,
+      size.width * 0.74,
+      size.height * 0.02,
+      size.width * 0.9,
+      size.height * 0.08,
+    )
+    ..cubicTo(
+      size.width,
+      size.height * 0.13,
+      size.width,
+      size.height * 0.35,
+      size.width * 0.98,
+      size.height * 0.55,
+    )
+    ..cubicTo(
+      size.width * 0.96,
+      size.height * 0.78,
+      size.width * 0.79,
+      size.height * 0.97,
+      size.width * 0.59,
+      size.height * 0.94,
+    )
+    ..cubicTo(
+      size.width * 0.36,
+      size.height * 0.9,
+      size.width * 0.16,
+      size.height,
+      size.width * 0.05,
+      size.height * 0.82,
+    )
+    ..cubicTo(
+      -size.width * 0.02,
+      size.height * 0.69,
+      -size.width * 0.02,
+      size.height * 0.37,
+      0,
+      size.height * 0.19,
+    )
+    ..close();
+}
+
+class _OrganicPhotoClipper extends CustomClipper<Path> {
+  const _OrganicPhotoClipper();
+
+  @override
+  Path getClip(Size size) => _organicPhotoPath(size);
+
+  @override
+  bool shouldReclip(covariant _OrganicPhotoClipper oldClipper) => false;
+}
+
+class _OrganicPhotoBorderPainter extends CustomPainter {
+  const _OrganicPhotoBorderPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = _organicPhotoPath(size);
+    final glowPaint = Paint()
+      ..color = const Color(0xFF8DEEFF).withValues(alpha: 0.54)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 8
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
+    final borderPaint = Paint()
+      ..color = const Color(0xFFC3F7FF).withValues(alpha: 0.88)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.2;
+
+    canvas.drawPath(path, glowPaint);
+    canvas.drawPath(path, borderPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _OrganicPhotoBorderPainter oldDelegate) => false;
 }
 
 class _GoogleLogo extends StatelessWidget {
