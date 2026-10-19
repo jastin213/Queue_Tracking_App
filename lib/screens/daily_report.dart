@@ -36,9 +36,16 @@ enum _ReportSection {
 }
 
 class DailyReport extends StatefulWidget {
-  const DailyReport({super.key, this.analyticsOnly = false});
+  const DailyReport({
+    super.key,
+    this.analyticsOnly = false,
+    this.onNavigationPressed,
+    this.navigationIcon = Icons.menu_rounded,
+  });
 
   final bool analyticsOnly;
+  final VoidCallback? onNavigationPressed;
+  final IconData navigationIcon;
 
   @override
   State<DailyReport> createState() => _DailyReportState();
@@ -1350,6 +1357,14 @@ class _DailyReportState extends State<DailyReport> {
       ),
       child: Scaffold(
         appBar: AppBar(
+          automaticallyImplyLeading: widget.onNavigationPressed == null,
+          leading: widget.onNavigationPressed == null
+              ? null
+              : IconButton(
+                  tooltip: 'Navigation menu',
+                  onPressed: widget.onNavigationPressed,
+                  icon: Icon(widget.navigationIcon),
+                ),
           title: Text(widget.analyticsOnly ? "Analytics" : "Reports"),
           actions: [buildRefreshControl(), const SizedBox(width: 12)],
         ),

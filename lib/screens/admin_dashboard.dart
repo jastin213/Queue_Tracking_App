@@ -95,9 +95,16 @@ class _LoadedReviewDocument {
 }
 
 class AdminDashboard extends StatefulWidget {
-  const AdminDashboard({super.key, this.initialAppointmentId});
+  const AdminDashboard({
+    super.key,
+    this.initialAppointmentId,
+    this.onNavigationPressed,
+    this.navigationIcon = Icons.menu_rounded,
+  });
 
   final String? initialAppointmentId;
+  final VoidCallback? onNavigationPressed;
+  final IconData navigationIcon;
 
   @override
   State<AdminDashboard> createState() => _AdminDashboardState();
@@ -3759,6 +3766,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
       ),
       child: Scaffold(
         appBar: AppBar(
+          automaticallyImplyLeading: widget.onNavigationPressed == null,
+          leading: widget.onNavigationPressed == null
+              ? null
+              : IconButton(
+                  tooltip: 'Navigation menu',
+                  onPressed: widget.onNavigationPressed,
+                  icon: Icon(widget.navigationIcon),
+                ),
           title: const Text("Admin Appointment Dashboard"),
           actions: [
             if (kIsWeb)

@@ -191,74 +191,81 @@ class DisplayPage extends StatelessWidget {
                   final double framePadding = isWide ? 22 : 12;
                   final double titleSize = isWide ? 28 : 19;
                   final double queueFontSize = isWide ? 128 : 72;
+                  final double displayCanvasWidth = isWide
+                      ? constraints.maxWidth - (pagePadding * 2)
+                      : 720;
 
-                  return SingleChildScrollView(
+                  return Padding(
                     padding: EdgeInsets.all(pagePadding),
                     child: Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 1260),
-                        child: Container(
-                          constraints: BoxConstraints(
-                            minHeight:
-                                constraints.maxHeight - (pagePadding * 2),
-                          ),
-                          padding: EdgeInsets.all(framePadding),
-                          decoration: BoxDecoration(
-                            color: _displayFrameColor,
-                            borderRadius: BorderRadius.circular(
-                              isWide ? 24 : 20,
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: SizedBox(
+                          width: displayCanvasWidth,
+                          child: Container(
+                            constraints: BoxConstraints(
+                              minHeight:
+                                  constraints.maxHeight - (pagePadding * 2),
                             ),
-                            border: Border.all(
-                              color: const Color(0xFF24364A),
-                              width: isWide ? 6 : 4,
+                            padding: EdgeInsets.all(framePadding),
+                            decoration: BoxDecoration(
+                              color: _displayFrameColor,
+                              borderRadius: BorderRadius.circular(
+                                isWide ? 24 : 20,
+                              ),
+                              border: Border.all(
+                                color: const Color(0xFF24364A),
+                                width: isWide ? 6 : 4,
+                              ),
+                              boxShadow: const [
+                                BoxShadow(
+                                  color: Color(0x66000000),
+                                  blurRadius: 34,
+                                  offset: Offset(0, 16),
+                                ),
+                              ],
                             ),
-                            boxShadow: const [
-                              BoxShadow(
-                                color: Color(0x66000000),
-                                blurRadius: 34,
-                                offset: Offset(0, 16),
-                              ),
-                            ],
-                          ),
-                          child: Column(
-                            children: [
-                              buildHeader(
-                                titleSize: titleSize,
-                                isWide: isWide,
-                                isShort: isShort,
-                                showBackButton: showBackButton,
-                                onBack: () => Navigator.maybePop(context),
-                              ),
-
-                              SizedBox(height: isShort ? 14 : 20),
-
-                              if (snapshot.connectionState ==
-                                      ConnectionState.waiting &&
-                                  !snapshot.hasData)
-                                buildLoadingCard()
-                              else if (snapshot.hasError)
-                                buildErrorCard(snapshot.error.toString())
-                              else ...[
-                                buildNowServingCard(
-                                  nowServing: nowServing,
-                                  queueFontSize: queueFontSize,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                buildHeader(
+                                  titleSize: titleSize,
+                                  isWide: isWide,
                                   isShort: isShort,
+                                  showBackButton: showBackButton,
+                                  onBack: () => Navigator.maybePop(context),
                                 ),
 
                                 SizedBox(height: isShort ? 14 : 20),
 
-                                buildNextInLineCard(
-                                  today: today,
-                                  waitingQueue: waitingQueue,
-                                  isWide: isWide,
-                                  isShort: isShort,
-                                ),
+                                if (snapshot.connectionState ==
+                                        ConnectionState.waiting &&
+                                    !snapshot.hasData)
+                                  buildLoadingCard()
+                                else if (snapshot.hasError)
+                                  buildErrorCard(snapshot.error.toString())
+                                else ...[
+                                  buildNowServingCard(
+                                    nowServing: nowServing,
+                                    queueFontSize: queueFontSize,
+                                    isShort: isShort,
+                                  ),
 
-                                SizedBox(height: isShort ? 12 : 16),
+                                  SizedBox(height: isShort ? 14 : 20),
 
-                                buildAnnouncement(),
+                                  buildNextInLineCard(
+                                    today: today,
+                                    waitingQueue: waitingQueue,
+                                    isWide: isWide,
+                                    isShort: isShort,
+                                  ),
+
+                                  SizedBox(height: isShort ? 12 : 16),
+
+                                  buildAnnouncement(),
+                                ],
                               ],
-                            ],
+                            ),
                           ),
                         ),
                       ),
@@ -715,12 +722,12 @@ class DisplayPage extends StatelessWidget {
 
           if (waitingQueue.isEmpty)
             emptyQueueBox()
-          else if (isWide)
+          else
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 for (int index = 0; index < visibleQueue.length; index++) ...[
-                  if (index > 0) const SizedBox(width: 14),
+                  if (index > 0) SizedBox(width: isWide ? 14 : 10),
                   Expanded(
                     child: queueTile(
                       customer: visibleQueue[index],
@@ -729,24 +736,6 @@ class DisplayPage extends StatelessWidget {
                   ),
                 ],
               ],
-            )
-          else
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  for (int index = 0; index < visibleQueue.length; index++) ...[
-                    if (index > 0) const SizedBox(width: 10),
-                    SizedBox(
-                      width: 155,
-                      child: queueTile(
-                        customer: visibleQueue[index],
-                        index: index,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
             ),
           if (hiddenQueueCount > 0) ...[
             const SizedBox(height: 14),

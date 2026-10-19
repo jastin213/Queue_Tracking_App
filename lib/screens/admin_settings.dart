@@ -46,7 +46,14 @@ ValueNotifier<bool> showEstimatedWaitingTimeNotifier = ValueNotifier(true);
 // ============================================================================
 
 class AdminSettings extends StatefulWidget {
-  const AdminSettings({super.key});
+  const AdminSettings({
+    super.key,
+    this.onNavigationPressed,
+    this.navigationIcon = Icons.menu_rounded,
+  });
+
+  final VoidCallback? onNavigationPressed;
+  final IconData navigationIcon;
 
   @override
   State<AdminSettings> createState() => _AdminSettingsState();
@@ -235,7 +242,17 @@ class _AdminSettingsState extends State<AdminSettings> {
         ),
       ),
       child: Scaffold(
-        appBar: AppBar(title: const Text("Admin Settings")),
+        appBar: AppBar(
+          automaticallyImplyLeading: widget.onNavigationPressed == null,
+          leading: widget.onNavigationPressed == null
+              ? null
+              : IconButton(
+                  tooltip: 'Navigation menu',
+                  onPressed: widget.onNavigationPressed,
+                  icon: Icon(widget.navigationIcon),
+                ),
+          title: const Text("Admin Settings"),
+        ),
         body: SafeArea(
           child: LayoutBuilder(
             builder: (context, constraints) {

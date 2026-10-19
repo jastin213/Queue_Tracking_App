@@ -124,6 +124,8 @@ enum _DisplayDestination { newTabOpened, newTabBlocked, currentTab }
 
 enum _AdminSessionStatus { authorized, unauthorized, unavailable }
 
+enum _AdminSection { queue, appointments, reports, analytics, settings }
+
 class _AdminSessionExpiredException implements Exception {
   const _AdminSessionExpiredException();
 }
@@ -148,6 +150,9 @@ class _AdminPageState extends State<AdminPage> {
   bool _isReturningToLogin = false;
   bool _isCallingCustomer = false;
   bool _desktopSidebarVisible = true;
+  _AdminSection _activeAdminSection = _AdminSection.queue;
+  String? _initialAppointmentId;
+  int _appointmentPageRevision = 0;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
   _pendingAppointmentSubscription;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
@@ -588,13 +593,28 @@ class _AdminPageState extends State<AdminPage> {
     return notifications;
   }
 
-  void _openAppointmentDashboard() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const AdminDashboard()),
-    ).then((_) {
-      if (mounted) setState(() {});
+  void _selectAdminSection(_AdminSection section, {String? appointmentId}) {
+    final requestedAppointmentId = appointmentId?.trim() ?? '';
+    setState(() {
+      _activeAdminSection = section;
+      _initialAppointmentId = requestedAppointmentId.isEmpty
+          ? null
+          : requestedAppointmentId;
+      if (requestedAppointmentId.isNotEmpty) {
+        _appointmentPageRevision++;
+      }
     });
+
+    if (requestedAppointmentId.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _initialAppointmentId != requestedAppointmentId) return;
+        setState(() => _initialAppointmentId = null);
+      });
+    }
+  }
+
+  void _openAppointmentDashboard() {
+    _selectAdminSection(_AdminSection.appointments);
   }
 
   void _openAppointmentDetails(Map<String, dynamic> appointment) {
@@ -619,14 +639,10 @@ class _AdminPageState extends State<AdminPage> {
       return;
     }
 
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => AdminDashboard(initialAppointmentId: appointmentId),
-      ),
-    ).then((_) {
-      if (mounted) setState(() {});
-    });
+    _selectAdminSection(
+      _AdminSection.appointments,
+      appointmentId: appointmentId,
+    );
   }
 
   Future<void> _openAdminAppointmentNotification(
@@ -2628,6 +2644,58 @@ class _AdminPageState extends State<AdminPage> {
     );
   }
 
+  void _toggleDesktopSidebar() {
+    setState(() {
+      _desktopSidebarVisible = !_desktopSidebarVisible;
+    });
+  }
+
+  VoidCallback _adminNavigationAction({required bool desktopShell}) {
+    if (desktopShell) return _toggleDesktopSidebar;
+    return () => _mobileScaffoldKey.currentState?.openDrawer();
+  }
+
+  IconData _adminNavigationIcon({required bool desktopShell}) {
+    if (!desktopShell) return Icons.menu_rounded;
+    return _desktopSidebarVisible
+        ? Icons.menu_open_rounded
+        : Icons.menu_rounded;
+  }
+
+  Widget _buildSelectedAdminPage({required bool desktopShell}) {
+    final onNavigationPressed = _adminNavigationAction(
+      desktopShell: desktopShell,
+    );
+    final navigationIcon = _adminNavigationIcon(desktopShell: desktopShell);
+
+    return switch (_activeAdminSection) {
+      _AdminSection.appointments => AdminDashboard(
+        key: ValueKey('appointments-$_appointmentPageRevision'),
+        initialAppointmentId: _initialAppointmentId,
+        onNavigationPressed: onNavigationPressed,
+        navigationIcon: navigationIcon,
+      ),
+      _AdminSection.reports => DailyReport(
+        onNavigationPressed: onNavigationPressed,
+        navigationIcon: navigationIcon,
+      ),
+      _AdminSection.analytics => AnalyticsPage(
+        onNavigationPressed: onNavigationPressed,
+        navigationIcon: navigationIcon,
+      ),
+      _AdminSection.settings => AdminSettings(
+        onNavigationPressed: onNavigationPressed,
+        navigationIcon: navigationIcon,
+      ),
+      _AdminSection.queue => const SizedBox.shrink(),
+    };
+  }
+
+  void _closeDrawerAndSelect(_AdminSection section) {
+    Navigator.pop(context);
+    _selectAdminSection(section);
+  }
+
   // ================= UI =================
 
   @override
@@ -2664,6 +2732,9 @@ class _AdminPageState extends State<AdminPage> {
               selectedDateQueue: selectedDateQueue,
               displayedNowServing: displayedNowServing,
             );
+            final selectedAdminPage = _activeAdminSection == _AdminSection.queue
+                ? queuePanelBody
+                : _buildSelectedAdminPage(desktopShell: desktopShell);
 
             return Theme(
               data: Theme.of(context).copyWith(
@@ -2709,12 +2780,14 @@ class _AdminPageState extends State<AdminPage> {
                         children: [
                           if (_desktopSidebarVisible) buildDesktopSidebar(),
                           Expanded(
-                            child: Column(
-                              children: [
-                                buildDesktopHeader(),
-                                Expanded(child: queuePanelBody),
-                              ],
-                            ),
+                            child: _activeAdminSection == _AdminSection.queue
+                                ? Column(
+                                    children: [
+                                      buildDesktopHeader(),
+                                      Expanded(child: queuePanelBody),
+                                    ],
+                                  )
+                                : selectedAdminPage,
                           ),
                         ],
                       ),
@@ -2723,26 +2796,31 @@ class _AdminPageState extends State<AdminPage> {
                       key: _mobileScaffoldKey,
                       backgroundColor: _backgroundColor,
                       drawer: buildDrawer(),
-                      appBar: AppBar(
-                        leading: IconButton(
-                          key: const Key('mobile-navigation-toggle'),
-                          tooltip: 'Open navigation menu',
-                          onPressed: () {
-                            _mobileScaffoldKey.currentState?.openDrawer();
-                          },
-                          icon: const Icon(Icons.menu_rounded),
-                        ),
-                        title: Text(
-                          text("Admin Control Panel", "Admin Control Panel"),
-                        ),
-                        actions: [
-                          _buildThemeModeButton(),
-                          _buildAppointmentNotificationButton(),
-                          buildRefreshControl(context),
-                          const SizedBox(width: 12),
-                        ],
-                      ),
-                      body: queuePanelBody,
+                      appBar: _activeAdminSection == _AdminSection.queue
+                          ? AppBar(
+                              leading: IconButton(
+                                key: const Key('mobile-navigation-toggle'),
+                                tooltip: 'Open navigation menu',
+                                onPressed: () {
+                                  _mobileScaffoldKey.currentState?.openDrawer();
+                                },
+                                icon: const Icon(Icons.menu_rounded),
+                              ),
+                              title: Text(
+                                text(
+                                  "Admin Control Panel",
+                                  "Admin Control Panel",
+                                ),
+                              ),
+                              actions: [
+                                _buildThemeModeButton(),
+                                _buildAppointmentNotificationButton(),
+                                buildRefreshControl(context),
+                                const SizedBox(width: 12),
+                              ],
+                            )
+                          : null,
+                      body: selectedAdminPage,
                     ),
             );
           },
@@ -2858,11 +2936,7 @@ class _AdminPageState extends State<AdminPage> {
                 : 'Show navigation menu',
             child: IconButton(
               key: const Key('desktop-sidebar-toggle'),
-              onPressed: () {
-                setState(() {
-                  _desktopSidebarVisible = !_desktopSidebarVisible;
-                });
-              },
+              onPressed: _toggleDesktopSidebar,
               style: IconButton.styleFrom(
                 foregroundColor: _primaryColor,
                 backgroundColor: _softPrimaryColor,
@@ -2992,45 +3066,32 @@ class _AdminPageState extends State<AdminPage> {
             desktopSidebarItem(
               icon: Icons.format_list_numbered_rounded,
               title: text('Queue Panel', 'Queue Panel'),
-              selected: true,
-              onTap: () {},
+              selected: _activeAdminSection == _AdminSection.queue,
+              onTap: () => _selectAdminSection(_AdminSection.queue),
             ),
             desktopSidebarItem(
               icon: Icons.calendar_month_rounded,
               title: text('Appointment', 'Appointment'),
+              selected: _activeAdminSection == _AdminSection.appointments,
               onTap: _openAppointmentDashboard,
             ),
             desktopSidebarItem(
               icon: Icons.description_rounded,
               title: text('Reports', 'Reports'),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const DailyReport()),
-                );
-              },
+              selected: _activeAdminSection == _AdminSection.reports,
+              onTap: () => _selectAdminSection(_AdminSection.reports),
             ),
             desktopSidebarItem(
               icon: Icons.bar_chart_rounded,
               title: text('Analytics', 'Analytics'),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const AnalyticsPage()),
-                );
-              },
+              selected: _activeAdminSection == _AdminSection.analytics,
+              onTap: () => _selectAdminSection(_AdminSection.analytics),
             ),
             desktopSidebarItem(
               icon: Icons.settings_rounded,
               title: text('Settings', 'Settings'),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const AdminSettings()),
-                ).then((_) {
-                  if (mounted) setState(() {});
-                });
-              },
+              selected: _activeAdminSection == _AdminSection.settings,
+              onTap: () => _selectAdminSection(_AdminSection.settings),
             ),
             const Spacer(),
             const Divider(color: Color(0xFF29445F), height: 1),
@@ -3167,52 +3228,32 @@ class _AdminPageState extends State<AdminPage> {
           drawerTile(
             icon: Icons.queue_rounded,
             title: text("Queue Panel", "Queue Panel"),
-            onTap: () {
-              Navigator.pop(context);
-            },
+            selected: _activeAdminSection == _AdminSection.queue,
+            onTap: () => _closeDrawerAndSelect(_AdminSection.queue),
           ),
           drawerTile(
             icon: Icons.dashboard_rounded,
             title: text("Appointment Dashboard", "Appointment Dashboard"),
-            onTap: () {
-              Navigator.pop(context);
-              _openAppointmentDashboard();
-            },
+            selected: _activeAdminSection == _AdminSection.appointments,
+            onTap: () => _closeDrawerAndSelect(_AdminSection.appointments),
           ),
           drawerTile(
             icon: Icons.assessment_rounded,
             title: text("Reports", "Reports"),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const DailyReport()),
-              );
-            },
+            selected: _activeAdminSection == _AdminSection.reports,
+            onTap: () => _closeDrawerAndSelect(_AdminSection.reports),
           ),
           drawerTile(
             icon: Icons.insights_rounded,
             title: text("Analytics", "Analytics"),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const AnalyticsPage()),
-              );
-            },
+            selected: _activeAdminSection == _AdminSection.analytics,
+            onTap: () => _closeDrawerAndSelect(_AdminSection.analytics),
           ),
           drawerTile(
             icon: Icons.settings_rounded,
             title: text("Settings", "Settings"),
-            onTap: () {
-              Navigator.pop(context);
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const AdminSettings()),
-              ).then((_) {
-                setState(() {});
-              });
-            },
+            selected: _activeAdminSection == _AdminSection.settings,
+            onTap: () => _closeDrawerAndSelect(_AdminSection.settings),
           ),
           Divider(color: _borderColor, height: 24),
           drawerTile(
@@ -3230,13 +3271,14 @@ class _AdminPageState extends State<AdminPage> {
     required IconData icon,
     required String title,
     required VoidCallback onTap,
+    bool selected = false,
     bool isLogout = false,
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       child: ListTile(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        tileColor: _cardColor,
+        tileColor: selected ? _softPrimaryColor : _cardColor,
         leading: Icon(icon, color: isLogout ? Colors.red : _primaryColor),
         title: Text(
           title,
