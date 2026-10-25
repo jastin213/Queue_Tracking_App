@@ -362,6 +362,8 @@ const Map<String, String> _filipinoTranslations = {
   'Estimated Queue Time': 'Tinatayang Oras ng Paghihintay',
   'Example: G001 or D001': 'Halimbawa: G001 o D001',
   'Fully booked': 'Puno Na',
+  'Reserved—Pending Approval': 'Nakareserba—Hinihintay ang Pag-apruba',
+  'Taken': 'Hindi Available',
   'Full Name': 'Buong Pangalan',
   'Get your queue number at the center, then track your position here without an account.':
       'Kunin ang iyong numero sa pila sa center, pagkatapos ay subaybayan ito rito kahit walang account.',

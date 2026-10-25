@@ -13,6 +13,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:printing/printing.dart';
 
 import '../theme/app_theme.dart';
+import '../services/booking_queue_availability.dart';
 import '../services/document_image_optimizer.dart';
 import '../services/document_image_quality.dart';
 import '../services/document_upload_consent.dart';
@@ -136,10 +137,13 @@ class _BookAppointmentState extends State<BookAppointment> {
   _appointmentAvailabilitySubscription;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
   _queueAvailabilitySubscription;
-  Set<String> _appointmentUnavailableCodes = {};
-  Set<String> _queueUnavailableCodes = {};
+  Map<String, BookingQueueCodeState>? _appointmentCodeStates;
+  Set<String>? _liveQueueCodes;
   bool _appointmentAvailabilityLoaded = false;
   bool _queueAvailabilityLoaded = false;
+  int _availabilityGeneration = 0;
+  int _appointmentAvailabilityRevision = 0;
+  int _queueAvailabilityRevision = 0;
   Object? _availabilityError;
   int _queueSegmentIndex = 0;
 
@@ -263,39 +267,28 @@ class _BookAppointmentState extends State<BookAppointment> {
       selectedDate != null &&
       (!_appointmentAvailabilityLoaded || !_queueAvailabilityLoaded);
 
-  Set<String> get realtimeUnavailableCodes => {
-    ..._appointmentUnavailableCodes,
-    ..._queueUnavailableCodes,
-  };
+  Set<String> get realtimeUnavailableCodes =>
+      getQueueCodes().where(isQueueTaken).toSet();
 
-  Set<String> unavailableAppointmentCodes(
-    QuerySnapshot<Map<String, dynamic>> snapshot,
-  ) {
-    return snapshot.docs
-        .where((doc) {
-          final status = doc.data()["status"]?.toString() ?? "";
-          return status == "Pending" || status == "Approved";
-        })
-        .map((doc) => doc.data()["queue"]?.toString() ?? "")
-        .where((code) {
-          return code.isNotEmpty;
-        })
-        .toSet();
-  }
-
-  Set<String> unavailableQueueCodes(
-    QuerySnapshot<Map<String, dynamic>> snapshot,
-  ) {
-    return snapshot.docs
-        .where((doc) {
-          final status = doc.data()["status"]?.toString() ?? "";
-          return status != "Cancelled" && status != "Reset";
-        })
-        .map((doc) => doc.data()["queue"]?.toString() ?? doc.id)
-        .where((code) {
-          return code.isNotEmpty;
-        })
-        .toSet();
+  void updateQueueAvailability({
+    Iterable<Map<String, dynamic>>? appointments,
+    Iterable<Map<String, dynamic>>? queueItems,
+  }) {
+    if (!mounted) return;
+    setState(() {
+      if (appointments != null) {
+        _appointmentCodeStates = appointmentQueueCodeStates(appointments);
+        _appointmentAvailabilityLoaded = true;
+        _appointmentAvailabilityRevision++;
+      }
+      if (queueItems != null) {
+        _liveQueueCodes = unavailableLiveQueueCodes(queueItems);
+        _queueAvailabilityLoaded = true;
+        _queueAvailabilityRevision++;
+      }
+      _availabilityError = null;
+      keepSelectedQueueAvailable();
+    });
   }
 
   void keepSelectedQueueAvailable() {
@@ -312,10 +305,11 @@ class _BookAppointmentState extends State<BookAppointment> {
 
     final date = formattedDate;
     if (date.isEmpty) return;
+    final generation = ++_availabilityGeneration;
 
     setState(() {
-      _appointmentUnavailableCodes = {};
-      _queueUnavailableCodes = {};
+      _appointmentCodeStates = null;
+      _liveQueueCodes = null;
       _appointmentAvailabilityLoaded = false;
       _queueAvailabilityLoaded = false;
       _availabilityError = null;
@@ -327,18 +321,13 @@ class _BookAppointmentState extends State<BookAppointment> {
         .snapshots()
         .listen(
           (snapshot) {
-            if (!mounted || formattedDate != date) return;
-            setState(() {
-              _appointmentUnavailableCodes = unavailableAppointmentCodes(
-                snapshot,
-              );
-              _appointmentAvailabilityLoaded = true;
-              _availabilityError = null;
-              keepSelectedQueueAvailable();
-            });
+            if (!mounted || _availabilityGeneration != generation) return;
+            updateQueueAvailability(
+              appointments: snapshot.docs.map((doc) => doc.data()),
+            );
           },
           onError: (Object error) {
-            if (!mounted || formattedDate != date) return;
+            if (!mounted || _availabilityGeneration != generation) return;
             setState(() {
               _appointmentAvailabilityLoaded = true;
               _availabilityError = error;
@@ -348,16 +337,15 @@ class _BookAppointmentState extends State<BookAppointment> {
 
     _queueAvailabilitySubscription = queueItemsRef(date).snapshots().listen(
       (snapshot) {
-        if (!mounted || formattedDate != date) return;
-        setState(() {
-          _queueUnavailableCodes = unavailableQueueCodes(snapshot);
-          _queueAvailabilityLoaded = true;
-          _availabilityError = null;
-          keepSelectedQueueAvailable();
-        });
+        if (!mounted || _availabilityGeneration != generation) return;
+        updateQueueAvailability(
+          queueItems: snapshot.docs.map(
+            (doc) => {...doc.data(), 'queue': doc.data()['queue'] ?? doc.id},
+          ),
+        );
       },
       onError: (Object error) {
-        if (!mounted || formattedDate != date) return;
+        if (!mounted || _availabilityGeneration != generation) return;
         setState(() {
           _queueAvailabilityLoaded = true;
           _availabilityError = error;
@@ -369,6 +357,9 @@ class _BookAppointmentState extends State<BookAppointment> {
   Future<void> refreshQueueAvailability() async {
     final date = formattedDate;
     if (date.isEmpty) return;
+    final generation = _availabilityGeneration;
+    final appointmentRevision = _appointmentAvailabilityRevision;
+    final queueRevision = _queueAvailabilityRevision;
 
     final results = await Future.wait([
       FirebaseFirestore.instance
@@ -378,15 +369,22 @@ class _BookAppointmentState extends State<BookAppointment> {
       queueItemsRef(date).get(const GetOptions(source: Source.server)),
     ]);
 
-    if (!mounted || formattedDate != date) return;
-    setState(() {
-      _appointmentUnavailableCodes = unavailableAppointmentCodes(results[0]);
-      _queueUnavailableCodes = unavailableQueueCodes(results[1]);
-      _appointmentAvailabilityLoaded = true;
-      _queueAvailabilityLoaded = true;
-      _availabilityError = null;
-      keepSelectedQueueAvailable();
-    });
+    if (!mounted || _availabilityGeneration != generation) return;
+    // A refresh started before a live rejection must not restore its old hold.
+    final appointments = appointmentRevision == _appointmentAvailabilityRevision
+        ? results[0].docs.map((doc) => doc.data())
+        : null;
+    final queueItems = queueRevision == _queueAvailabilityRevision
+        ? results[1].docs.map(
+            (doc) => {...doc.data(), 'queue': doc.data()['queue'] ?? doc.id},
+          )
+        : null;
+    if (appointments != null || queueItems != null) {
+      updateQueueAvailability(
+        appointments: appointments,
+        queueItems: queueItems,
+      );
+    }
   }
 
   List<String> getQueueCodes() {
@@ -397,38 +395,44 @@ class _BookAppointmentState extends State<BookAppointment> {
     });
   }
 
-  bool isQueueTaken(String code) {
-    if (selectedDate == null) return false;
+  BookingQueueCodeState queueCodeState(String code) {
+    if (selectedDate == null) return BookingQueueCodeState.available;
 
-    if (realtimeUnavailableCodes.contains(code)) return true;
+    final liveCodes = _liveQueueCodes;
+    if (liveCodes != null) {
+      if (liveCodes.contains(code)) return BookingQueueCodeState.taken;
+    } else {
+      final locallyIssued =
+          issuedQueueCodesNotifier.value[formattedDate]?.contains(code) ??
+          false;
+      final localQueue = [
+        ...waitingQueueNotifier.value,
+        ?nowServingNotifier.value,
+      ].where((item) => item['date'] == formattedDate);
+      if (locallyIssued ||
+          unavailableLiveQueueCodes(localQueue).contains(code)) {
+        return BookingQueueCodeState.taken;
+      }
+    }
 
-    bool inIssued =
-        issuedQueueCodesNotifier.value[formattedDate]?.contains(code) ?? false;
-
-    bool inPending = pendingBookings.value.any(
-      (b) => b["date"] == formattedDate && b["queue"] == code,
-    );
-
-    bool inApproved = approvedBookings.value.any(
-      (b) => b["date"] == formattedDate && b["queue"] == code,
-    );
-
-    bool inWaitingQueue = waitingQueueNotifier.value.any(
-      (customer) =>
-          customer["date"] == formattedDate && customer["queue"] == code,
-    );
-
-    bool inNowServing =
-        nowServingNotifier.value != null &&
-        nowServingNotifier.value!["date"] == formattedDate &&
-        nowServingNotifier.value!["queue"] == code;
-
-    return inIssued ||
-        inPending ||
-        inApproved ||
-        inWaitingQueue ||
-        inNowServing;
+    // A received empty snapshot releases stale local reservations too.
+    final appointmentStates =
+        _appointmentCodeStates ??
+        appointmentQueueCodeStates(
+          [
+            ...pendingBookings.value.map(
+              (item) => {'status': 'Pending', ...item},
+            ),
+            ...approvedBookings.value.map(
+              (item) => {'status': 'Approved', ...item},
+            ),
+          ].where((item) => item['date'] == formattedDate),
+        );
+    return appointmentStates[code] ?? BookingQueueCodeState.available;
   }
+
+  bool isQueueTaken(String code) =>
+      queueCodeState(code) != BookingQueueCodeState.available;
 
   Future<bool> isQueueTakenInFirestore(String date, String queueCode) async {
     final results = await Future.wait([
@@ -443,17 +447,15 @@ class _BookAppointmentState extends State<BookAppointment> {
     final appointmentSnapshot =
         results[0] as QuerySnapshot<Map<String, dynamic>>;
     final queueSnapshot = results[1] as DocumentSnapshot<Map<String, dynamic>>;
-    final reservedAppointment = appointmentSnapshot.docs.any((doc) {
-      final data = doc.data();
-      final status = data["status"]?.toString() ?? "";
-      return data["queue"]?.toString() == queueCode &&
-          (status == "Pending" || status == "Approved");
-    });
-    final queueStatus = queueSnapshot.data()?["status"]?.toString() ?? "";
+    final reservedAppointment = appointmentQueueCodeStates(
+      appointmentSnapshot.docs.map((doc) => doc.data()),
+    ).containsKey(queueCode);
+    final queueData = queueSnapshot.data();
     final activeQueue =
-        queueSnapshot.exists &&
-        queueStatus != "Cancelled" &&
-        queueStatus != "Reset";
+        queueData != null &&
+        unavailableLiveQueueCodes([
+          {...queueData, 'queue': queueCode},
+        ]).isNotEmpty;
 
     return reservedAppointment || activeQueue;
   }
@@ -491,8 +493,8 @@ class _BookAppointmentState extends State<BookAppointment> {
 
     if (picked != null) {
       setState(() {
-        _appointmentUnavailableCodes = {};
-        _queueUnavailableCodes = {};
+        _appointmentCodeStates = null;
+        _liveQueueCodes = null;
         selectedDate = picked;
         selectedQueueCode = getFirstAvailableQueueCode();
         _queueSegmentIndex = queueSegmentIndexForCode(selectedQueueCode);
@@ -1763,6 +1765,36 @@ class _BookAppointmentState extends State<BookAppointment> {
     );
   }
 
+  double _queueCodeTileHeight(BuildContext context, double contentWidth) {
+    double textHeight(String value, TextStyle style) {
+      final painter = TextPainter(
+        text: TextSpan(
+          text: appText(value),
+          style: DefaultTextStyle.of(context).style.merge(style),
+        ),
+        textScaler: MediaQuery.textScalerOf(context),
+        textDirection: Directionality.of(context),
+      )..layout(maxWidth: contentWidth);
+      final height = painter.height;
+      painter.dispose();
+      return height;
+    }
+
+    final codeHeight = textHeight(
+      'G000',
+      const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+    );
+    final statusHeight = textHeight(
+      'Reserved—Pending Approval',
+      const TextStyle(fontSize: 9.5, height: 1.15, fontWeight: FontWeight.w600),
+    );
+    // Include padding, border, spacing, and rounding for every wrapped line.
+    return (codeHeight + statusHeight + 15).ceilToDouble().clamp(
+      44,
+      double.infinity,
+    );
+  }
+
   Widget queueCodesView(List<String> codes) {
     final segmentCount = (codes.length / queueCodesPerSegment).ceil();
     final safeSegmentIndex = _queueSegmentIndex
@@ -1874,82 +1906,128 @@ class _BookAppointmentState extends State<BookAppointment> {
               ),
             );
           },
-          child: GridView.builder(
-            key: ValueKey(safeSegmentIndex),
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: visibleCodes.length,
-            gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-              maxCrossAxisExtent: 96,
-              mainAxisExtent: 44,
-              crossAxisSpacing: 8,
-              mainAxisSpacing: 8,
-            ),
-            itemBuilder: (context, index) {
-              final code = visibleCodes[index];
-              final taken = isQueueTaken(code);
-              final selected = selectedQueueCode == code;
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              const maxTileWidth = 96.0;
+              const spacing = 8.0;
+              final columns = (constraints.maxWidth / (maxTileWidth + spacing))
+                  .ceil()
+                  .clamp(1, visibleCodes.length);
+              final tileWidth =
+                  (constraints.maxWidth - spacing * (columns - 1)) / columns;
+              final tileHeight = _queueCodeTileHeight(
+                context,
+                (tileWidth - 10).clamp(1, double.infinity),
+              );
+              return GridView.builder(
+                key: ValueKey(safeSegmentIndex),
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: visibleCodes.length,
+                gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: maxTileWidth,
+                  mainAxisExtent: tileHeight,
+                  crossAxisSpacing: 8,
+                  mainAxisSpacing: 8,
+                ),
+                itemBuilder: (context, index) {
+                  final code = visibleCodes[index];
+                  final state = queueCodeState(code);
+                  final pending =
+                      state == BookingQueueCodeState.pendingApproval;
+                  final taken = state != BookingQueueCodeState.available;
+                  final selected = !taken && selectedQueueCode == code;
+                  final statusLabel = pending
+                      ? 'Reserved—Pending Approval'
+                      : 'Taken';
 
-              return Semantics(
-                button: true,
-                enabled: !taken && !isSubmitting,
-                selected: selected,
-                label: taken ? '$code, taken' : 'Queue code $code',
-                child: Material(
-                  color: Colors.transparent,
-                  borderRadius: BorderRadius.circular(12),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(12),
-                    onTap: taken || isSubmitting
-                        ? null
-                        : () {
-                            setState(() {
-                              selectedQueueCode = code;
-                            });
-                          },
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 160),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: taken
-                            ? const Color(0xFFE3E9EC)
-                            : selected
-                            ? _primaryColor
-                            : _cardColor,
+                  return Semantics(
+                    button: true,
+                    enabled: !taken && !isSubmitting,
+                    selected: selected,
+                    label: taken
+                        ? '$code, ${appText(statusLabel)}'
+                        : 'Queue code $code',
+                    child: Material(
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(12),
+                      child: InkWell(
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: selected
-                              ? _primaryColor
-                              : taken
-                              ? const Color(0xFFD1DCE1)
-                              : _borderColor,
-                          width: selected ? 1.5 : 1,
-                        ),
-                        boxShadow: selected
-                            ? [
-                                BoxShadow(
-                                  color: _primaryColor.withValues(alpha: 0.18),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 3),
+                        onTap: taken || isSubmitting
+                            ? null
+                            : () {
+                                setState(() {
+                                  selectedQueueCode = code;
+                                });
+                              },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 160),
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: taken
+                                ? const Color(0xFFE3E9EC)
+                                : selected
+                                ? _primaryColor
+                                : _cardColor,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: selected
+                                  ? _primaryColor
+                                  : taken
+                                  ? const Color(0xFFD1DCE1)
+                                  : _borderColor,
+                              width: selected ? 1.5 : 1,
+                            ),
+                            boxShadow: selected
+                                ? [
+                                    BoxShadow(
+                                      color: _primaryColor.withValues(
+                                        alpha: 0.18,
+                                      ),
+                                      blurRadius: 8,
+                                      offset: const Offset(0, 3),
+                                    ),
+                                  ]
+                                : null,
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(4),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  code,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: selected
+                                        ? Colors.white
+                                        : taken
+                                        ? _mutedTextColor
+                                        : _primaryColor,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
-                              ]
-                            : null,
-                      ),
-                      child: Text(
-                        taken ? 'Taken' : code,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: selected
-                              ? Colors.white
-                              : taken
-                              ? _mutedTextColor
-                              : _primaryColor,
-                          fontWeight: FontWeight.bold,
+                                if (taken) ...[
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    statusLabel,
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontSize: 9.5,
+                                      height: 1.15,
+                                      color: _mutedTextColor,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ),
+                  );
+                },
               );
             },
           ),
