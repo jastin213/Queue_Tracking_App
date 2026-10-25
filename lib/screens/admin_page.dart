@@ -10,6 +10,8 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/appointment_lifecycle.dart';
+import '../services/admin_notification_event.dart';
+import '../services/admin_notification_read_state.dart';
 import '../services/browser_tab_opener.dart';
 import '../services/notification_time.dart';
 import '../services/queue_source.dart';
@@ -20,6 +22,7 @@ import '../services/firestore_query_fields.dart';
 import '../widgets/app_responsive_content.dart';
 import '../widgets/app_refresh_indicator.dart';
 import '../widgets/app_motion.dart';
+import '../widgets/admin_notification_snackbar.dart';
 import 'analytics_page.dart';
 import 'daily_report.dart';
 import 'display_page.dart';
@@ -157,17 +160,31 @@ class _AdminPageState extends State<AdminPage> {
   _pendingAppointmentSubscription;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
   _automaticDecisionSubscription;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>?
+  _notificationReadStateSubscription;
   List<Map<String, dynamic>> _pendingAppointments = [];
   List<Map<String, dynamic>> _automaticDecisionNotifications = [];
   final Set<String> _readPendingAppointmentNotifications = <String>{};
+  late final String _notificationAccountId;
   late final String _adminNotificationPreferenceKey;
-  bool _receivedInitialPendingAppointments = false;
-  bool _receivedInitialAutomaticDecisions = false;
+  final DateTime _notificationSessionStartedAt = DateTime.now();
+  late final AdminNotificationPopupGate _pendingNotificationPopupGate;
+  late final AdminNotificationPopupGate _automaticNotificationPopupGate;
+  bool _notificationReadStateReady = false;
+  Future<void> _localNotificationReadSave = Future<void>.value();
+  final _notificationSnackBar = AdminNotificationSnackBarPresenter();
 
   @override
   void initState() {
     super.initState();
+    _notificationAccountId = _currentNotificationAccountId();
     _adminNotificationPreferenceKey = _buildAdminNotificationPreferenceKey();
+    _pendingNotificationPopupGate = AdminNotificationPopupGate(
+      sessionStartedAt: _notificationSessionStartedAt,
+    );
+    _automaticNotificationPopupGate = AdminNotificationPopupGate(
+      sessionStartedAt: _notificationSessionStartedAt,
+    );
     unawaited(_initializeAdminSession());
     _initializeAppointmentNotifications();
   }
@@ -324,30 +341,33 @@ class _AdminPageState extends State<AdminPage> {
     }
   }
 
-  String _buildAdminNotificationPreferenceKey() {
-    String accountId = '';
+  String _currentNotificationAccountId() {
     try {
-      accountId = FirebaseAuth.instance.currentUser?.uid ?? '';
+      return FirebaseAuth.instance.currentUser?.uid ?? '';
     } catch (_) {
-      // Session-only notification state is used when Firebase is unavailable.
+      return '';
     }
-    return 'read_v3_admin_appointment_notifications_${accountId.isEmpty ? 'admin' : accountId}';
+  }
+
+  bool get _notificationOwnerIsCurrent =>
+      _notificationAccountId.isNotEmpty &&
+      _currentNotificationAccountId() == _notificationAccountId;
+
+  String _buildAdminNotificationPreferenceKey() {
+    return 'read_v3_admin_appointment_notifications_${_notificationAccountId.isEmpty ? 'admin' : _notificationAccountId}';
   }
 
   String _adminAppointmentNotificationKey(Map<String, dynamic> appointment) {
-    final appointmentId = appointment['appointmentId']?.toString().trim() ?? '';
-    final decisionSource = appointment['decisionSource']?.toString().trim();
-    final eventType = decisionSource?.isNotEmpty == true
-        ? decisionSource!
-        : 'pending';
-    if (appointmentId.isNotEmpty) return '$eventType:$appointmentId';
-    return '$eventType:${appointment['queue']}:${appointment['date']}:${appointment['plate']}';
+    return adminNotificationEvent(appointment)?.key ??
+        'unavailable:${appointment['appointmentId']}';
   }
 
   bool _isAdminAppointmentNotificationRead(Map<String, dynamic> appointment) {
-    return _readPendingAppointmentNotifications.contains(
-      _adminAppointmentNotificationKey(appointment),
-    );
+    return adminNotificationEvent(appointment)?.isRead(
+          _readPendingAppointmentNotifications,
+          legacyReadBefore: _notificationSessionStartedAt,
+        ) ??
+        false;
   }
 
   void _markAdminAppointmentNotificationRead(Map<String, dynamic> appointment) {
@@ -360,60 +380,109 @@ class _AdminPageState extends State<AdminPage> {
     try {
       final preferences = await SharedPreferences.getInstance();
       _readPendingAppointmentNotifications.addAll(
-        preferences.getStringList(_adminNotificationPreferenceKey) ?? const [],
+        mergeAdminNotificationReadKeys(
+          _readPendingAppointmentNotifications,
+          preferences.getStringList(_adminNotificationPreferenceKey),
+        ),
       );
     } catch (_) {
-      // Notifications still work for this session if local storage is blocked.
+      // Notifications retain their in-memory read state if local storage fails.
     }
 
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
-        final userDocument = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .get();
-        final cloudReadKeys = userDocument
-            .data()?['adminReadNotificationKeysV3'];
-        if (cloudReadKeys is Iterable) {
-          _readPendingAppointmentNotifications.addAll(
-            cloudReadKeys
-                .map((value) => value.toString().trim())
-                .where((value) => value.isNotEmpty),
-          );
-        }
+    if (!mounted || !_notificationOwnerIsCurrent) return;
+    _listenToNotificationReadState();
+    _listenToPendingAppointments();
+    _listenToAutomaticDecisionNotifications();
+  }
+
+  void _listenToNotificationReadState() {
+    final accountId = _notificationAccountId;
+    _notificationReadStateSubscription = FirebaseFirestore.instance
+        .collection('users')
+        .doc(accountId)
+        .snapshots(includeMetadataChanges: true)
+        .listen(
+          (snapshot) {
+            if (!mounted || !_notificationOwnerIsCurrent) return;
+            final storedKeys = snapshot.data()?['adminReadNotificationKeysV3'];
+            final mergedKeys = mergeAdminNotificationReadKeys(
+              _readPendingAppointmentNotifications,
+              storedKeys,
+            );
+            final changed =
+                mergedKeys.length !=
+                _readPendingAppointmentNotifications.length;
+            setState(() {
+              _readPendingAppointmentNotifications.addAll(mergedKeys);
+              if (snapshot.metadata.isFromCache) {
+                _notificationReadStateReady = false;
+              } else if (!snapshot.metadata.hasPendingWrites) {
+                _notificationReadStateReady = true;
+              }
+            });
+            if (changed) {
+              unawaited(_saveLocalReadAdminAppointmentNotifications());
+            }
+
+            final activeKey = _notificationSnackBar.activeEventKey;
+            if (activeKey != null &&
+                _readPendingAppointmentNotifications.contains(activeKey)) {
+              _closeActiveAdminNotification();
+            }
+
+            // Merge receipts instead of overwriting another device's reads.
+            // Sync offline/local receipts once the server connection returns.
+            if (_notificationReadStateReady &&
+                adminNotificationReadKeysToSync(
+                  local: _readPendingAppointmentNotifications,
+                  cloud: storedKeys,
+                ).isNotEmpty) {
+              unawaited(_saveReadAdminAppointmentNotifications());
+            }
+          },
+          onError: (Object error) {
+            if (!mounted || !_notificationOwnerIsCurrent) return;
+            setState(() => _notificationReadStateReady = false);
+            debugPrint('Admin notification read-state sync is unavailable.');
+          },
+        );
+  }
+
+  Future<void> _saveLocalReadAdminAppointmentNotifications() {
+    _localNotificationReadSave = _localNotificationReadSave.then((_) async {
+      try {
+        final preferences = await SharedPreferences.getInstance();
+        final keys = _readPendingAppointmentNotifications.toList()..sort();
+        await preferences.setStringList(_adminNotificationPreferenceKey, keys);
+      } catch (_) {
+        // Firebase remains the cross-device copy when local storage is blocked.
       }
-    } catch (_) {
-      // Local read state remains available when Firestore is offline.
-    }
-
-    if (mounted) {
-      _listenToPendingAppointments();
-      _listenToAutomaticDecisionNotifications();
-    }
+    });
+    return _localNotificationReadSave;
   }
 
   Future<void> _saveReadAdminAppointmentNotifications() async {
-    try {
-      final preferences = await SharedPreferences.getInstance();
-      await preferences.setStringList(
-        _adminNotificationPreferenceKey,
-        _readPendingAppointmentNotifications.toList(),
-      );
-    } catch (_) {
-      // Read state still works for the current session.
+    final accountId = _notificationAccountId;
+    final readKeys = _readPendingAppointmentNotifications.toList()..sort();
+    await _saveLocalReadAdminAppointmentNotifications();
+    if (!mounted ||
+        !_notificationOwnerIsCurrent ||
+        !_notificationReadStateReady ||
+        readKeys.isEmpty) {
+      return;
     }
 
     try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
-        final readKeys = _readPendingAppointmentNotifications.toList()..sort();
-        await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
-          'adminReadNotificationKeysV3': readKeys,
-        }, SetOptions(merge: true));
-      }
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(accountId)
+          .set({
+            'adminReadNotificationKeysV3': FieldValue.arrayUnion(readKeys),
+          }, SetOptions(merge: true))
+          .timeout(const Duration(seconds: 8));
     } catch (_) {
-      // Local storage remains the fallback if cloud state cannot be saved.
+      // Reads remain local and are merged back when the server is reachable.
+      debugPrint('Admin notification receipts are waiting to sync.');
     }
   }
 
@@ -421,6 +490,8 @@ class _AdminPageState extends State<AdminPage> {
   void dispose() {
     _pendingAppointmentSubscription?.cancel();
     _automaticDecisionSubscription?.cancel();
+    _notificationReadStateSubscription?.cancel();
+    _closeActiveAdminNotification();
     flutterTts.stop();
     super.dispose();
   }
@@ -429,64 +500,50 @@ class _AdminPageState extends State<AdminPage> {
     _pendingAppointmentSubscription = FirebaseFirestore.instance
         .collection("appointments")
         .where("status", isEqualTo: "Pending")
-        .snapshots()
+        .snapshots(includeMetadataChanges: true)
         .listen(
           (snapshot) {
+            if (!mounted || !_notificationOwnerIsCurrent) return;
             unawaited(
-              expirePastPendingAppointmentDocuments(snapshot.docs).catchError((
-                _,
-              ) {
-                return 0;
-              }),
+              expirePastPendingAppointmentDocuments(
+                snapshot.docs,
+              ).catchError((_) => 0),
             );
 
             final appointments = snapshot.docs
-                .where((doc) {
-                  return !isPastPendingAppointment(doc.data());
-                })
-                .map((doc) {
-                  final data = doc.data();
-                  return {...data, "appointmentId": doc.id};
-                })
+                .where((doc) => !isPastPendingAppointment(doc.data()))
+                .map((doc) => {...doc.data(), 'appointmentId': doc.id})
                 .toList();
-
             appointments.sort((a, b) {
-              final aCreated = a["createdAt"];
-              final bCreated = b["createdAt"];
-              if (aCreated is Timestamp && bCreated is Timestamp) {
-                return bCreated.compareTo(aCreated);
-              }
-              return 0;
+              final aTime = notificationDateTime(a['createdAt']);
+              final bTime = notificationDateTime(b['createdAt']);
+              if (aTime == null && bTime == null) return 0;
+              if (aTime == null) return 1;
+              if (bTime == null) return -1;
+              return bTime.compareTo(aTime);
             });
 
-            Map<String, dynamic>? newestAppointment;
-            if (_receivedInitialPendingAppointments) {
-              for (final change in snapshot.docChanges) {
-                if (change.type != DocumentChangeType.added) continue;
-                final data = change.doc.data();
-                if (data != null && !isPastPendingAppointment(data)) {
-                  newestAppointment = {...data, "appointmentId": change.doc.id};
-                  break;
-                }
-              }
-            }
-
-            _receivedInitialPendingAppointments = true;
-            if (!mounted) return;
-            setState(() {
-              _pendingAppointments = appointments;
-            });
-            _cleanupReadAdminAppointmentNotifications();
-
-            if (newestAppointment != null) {
-              final appointment = newestAppointment;
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) _showNewAppointmentNotification(appointment);
-              });
+            final newest = _pendingNotificationPopupGate.consider(
+              events: appointments
+                  .map(adminNotificationEvent)
+                  .whereType<AdminNotificationEvent>(),
+              fromCache:
+                  snapshot.metadata.isFromCache ||
+                  snapshot.metadata.hasPendingWrites,
+              readStateReady: _notificationReadStateReady,
+              readKeys: _readPendingAppointmentNotifications,
+              now: DateTime.now(),
+            );
+            setState(() => _pendingAppointments = appointments);
+            if (newest != null) {
+              _scheduleAdminNotificationPopup(
+                newest,
+                _pendingNotificationPopupGate,
+              );
             }
           },
           onError: (Object error) {
-            debugPrint("Admin appointment notification stream error: $error");
+            debugPrint('Admin appointment notifications are unavailable.');
           },
         );
   }
@@ -501,81 +558,81 @@ class _AdminPageState extends State<AdminPage> {
             'conditional_auto_rejection',
           ],
         )
-        .snapshots()
+        .snapshots(includeMetadataChanges: true)
         .listen(
           (snapshot) {
-            final decisions = snapshot.docs.map((doc) {
-              final data = doc.data();
-              return {...data, 'appointmentId': doc.id};
-            }).toList();
-            decisions.sort((a, b) {
-              final aTime = notificationDateTime(
-                a['autoDecisionAt'] ?? a['updatedAt'],
-              );
-              final bTime = notificationDateTime(
-                b['autoDecisionAt'] ?? b['updatedAt'],
-              );
+            if (!mounted || !_notificationOwnerIsCurrent) return;
+            final events = snapshot.docs
+                .map((doc) {
+                  final event = adminNotificationEvent({
+                    ...doc.data(),
+                    'appointmentId': doc.id,
+                  });
+                  // Do not expose a provisional, untimestamped decision in
+                  // history before its write has been acknowledged.
+                  if (doc.metadata.hasPendingWrites &&
+                      event?.occurredAt == null) {
+                    return null;
+                  }
+                  return event;
+                })
+                .whereType<AdminNotificationEvent>()
+                .where(
+                  (event) => event.kind != AdminNotificationEventKind.pending,
+                )
+                .toList();
+            events.sort((a, b) {
+              final aTime = a.occurredAt;
+              final bTime = b.occurredAt;
               if (aTime == null && bTime == null) return 0;
               if (aTime == null) return 1;
               if (bTime == null) return -1;
               return bTime.compareTo(aTime);
             });
 
-            Map<String, dynamic>? newestDecision;
-            if (_receivedInitialAutomaticDecisions) {
-              for (final change in snapshot.docChanges) {
-                if (change.type == DocumentChangeType.removed) continue;
-                final data = change.doc.data();
-                if (data != null) {
-                  newestDecision = {...data, 'appointmentId': change.doc.id};
-                  break;
-                }
-              }
-            }
-
-            _receivedInitialAutomaticDecisions = true;
-            if (!mounted) return;
+            final newest = _automaticNotificationPopupGate.consider(
+              events: events,
+              fromCache:
+                  snapshot.metadata.isFromCache ||
+                  snapshot.metadata.hasPendingWrites,
+              readStateReady: _notificationReadStateReady,
+              readKeys: _readPendingAppointmentNotifications,
+              now: DateTime.now(),
+            );
             setState(() {
-              _automaticDecisionNotifications = decisions.take(30).toList();
+              _automaticDecisionNotifications = events
+                  .take(30)
+                  .map((event) => event.appointment)
+                  .toList();
             });
-            _cleanupReadAdminAppointmentNotifications();
-
-            if (newestDecision != null) {
-              final decision = newestDecision;
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                if (mounted) _showNewAppointmentNotification(decision);
-              });
+            if (newest != null) {
+              _scheduleAdminNotificationPopup(
+                newest,
+                _automaticNotificationPopupGate,
+              );
             }
           },
           onError: (Object error) {
-            debugPrint('Admin automatic decision stream error: $error');
+            debugPrint(
+              'Admin automatic decision notifications are unavailable.',
+            );
           },
         );
   }
 
-  void _cleanupReadAdminAppointmentNotifications() {
-    if (!_receivedInitialPendingAppointments ||
-        !_receivedInitialAutomaticDecisions) {
-      return;
-    }
-    final activeNotificationKeys = {
-      ..._pendingAppointments.map(_adminAppointmentNotificationKey),
-      ..._automaticDecisionNotifications.map(_adminAppointmentNotificationKey),
-    };
-    final countBefore = _readPendingAppointmentNotifications.length;
-    _readPendingAppointmentNotifications.retainWhere(
-      activeNotificationKeys.contains,
-    );
-    if (countBefore != _readPendingAppointmentNotifications.length) {
-      unawaited(_saveReadAdminAppointmentNotifications());
-    }
+  void _scheduleAdminNotificationPopup(
+    AdminNotificationEvent event,
+    AdminNotificationPopupGate gate,
+  ) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _notificationOwnerIsCurrent) {
+        _showNewAppointmentNotification(event, gate);
+      }
+    });
   }
 
-  dynamic _adminNotificationTime(Map<String, dynamic> appointment) {
-    return appointment['autoDecisionAt'] ??
-        appointment['createdAt'] ??
-        appointment['updatedAt'];
-  }
+  DateTime? _adminNotificationTime(Map<String, dynamic> appointment) =>
+      adminNotificationEvent(appointment)?.occurredAt;
 
   List<Map<String, dynamic>> get _adminAppointmentNotifications {
     final notifications = <Map<String, dynamic>>[
@@ -648,15 +705,42 @@ class _AdminPageState extends State<AdminPage> {
   Future<void> _openAdminAppointmentNotification(
     Map<String, dynamic> appointment,
   ) async {
+    if (!mounted || !_notificationOwnerIsCurrent) return;
     if (!_isAdminAppointmentNotificationRead(appointment)) {
       setState(() => _markAdminAppointmentNotificationRead(appointment));
-      await _saveReadAdminAppointmentNotifications();
-      if (!mounted) return;
+      unawaited(_saveReadAdminAppointmentNotifications());
+    }
+    if (_notificationSnackBar.activeEventKey ==
+        _adminAppointmentNotificationKey(appointment)) {
+      _closeActiveAdminNotification();
     }
     _openAppointmentDetails(appointment);
   }
 
-  void _showNewAppointmentNotification(Map<String, dynamic> appointment) {
+  void _closeActiveAdminNotification() {
+    _notificationSnackBar.dismiss();
+  }
+
+  void _showNewAppointmentNotification(
+    AdminNotificationEvent event,
+    AdminNotificationPopupGate gate,
+  ) {
+    if (!mounted ||
+        !_notificationOwnerIsCurrent ||
+        !_isAdminSessionReady ||
+        _isReturningToLogin ||
+        !gate.canPresent(
+          event,
+          readKeys: _readPendingAppointmentNotifications,
+          now: DateTime.now(),
+          readStateReady: _notificationReadStateReady,
+        ) ||
+        !_adminAppointmentNotifications.any(
+          (item) => _adminAppointmentNotificationKey(item) == event.key,
+        )) {
+      return;
+    }
+    final appointment = event.appointment;
     final name =
         (appointment["fullName"] ?? appointment["customerName"] ?? "Customer")
             .toString();
@@ -664,33 +748,26 @@ class _AdminPageState extends State<AdminPage> {
     final eventTime = formatNotificationTime(
       _adminNotificationTime(appointment),
     );
-    final decisionSource = appointment['decisionSource']?.toString() ?? '';
     final score = appointment['autoApprovalReview'] is Map
         ? (appointment['autoApprovalReview'] as Map)['score']?.toString()
         : null;
-    final message = switch (decisionSource) {
-      'conditional_auto_approval' =>
+    final message = switch (event.kind) {
+      AdminNotificationEventKind.autoApproved =>
         'Automatically approved $name • Queue $queue • Score ${score ?? '-'} / 100 • $eventTime',
-      'conditional_auto_rejection' =>
+      AdminNotificationEventKind.autoRejected =>
         'Automatically rejected $name • Queue $queue • Score ${score ?? '0'} / 100 • $eventTime',
-      _ => 'New appointment from $name • Queue $queue • $eventTime',
+      AdminNotificationEventKind.pending =>
+        'New appointment from $name • Queue $queue • $eventTime',
     };
 
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          duration: const Duration(seconds: 3),
-          content: Text(message),
-          action: SnackBarAction(
-            label: "CHECK",
-            textColor: Colors.white,
-            onPressed: () {
-              unawaited(_openAdminAppointmentNotification(appointment));
-            },
-          ),
-        ),
-      );
+    _notificationSnackBar.show(
+      messenger: ScaffoldMessenger.of(context),
+      eventKey: event.key,
+      content: Text(message),
+      onCheck: () {
+        unawaited(_openAdminAppointmentNotification(appointment));
+      },
+    );
   }
 
   Widget _buildAppointmentNotificationButton() {
@@ -789,12 +866,11 @@ class _AdminPageState extends State<AdminPage> {
             final queue = appointment['queue']?.toString() ?? '-';
             final plate = appointment['plate']?.toString() ?? '-';
             final date = appointment['date']?.toString() ?? '-';
-            final decisionSource =
-                appointment['decisionSource']?.toString() ?? '';
+            final eventKind = adminNotificationEvent(appointment)?.kind;
             final isAutoApproved =
-                decisionSource == 'conditional_auto_approval';
+                eventKind == AdminNotificationEventKind.autoApproved;
             final isAutoRejected =
-                decisionSource == 'conditional_auto_rejection';
+                eventKind == AdminNotificationEventKind.autoRejected;
             final accentColor = isAutoApproved
                 ? AppColors.success
                 : isAutoRejected
