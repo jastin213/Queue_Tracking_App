@@ -55,6 +55,14 @@ String _translateToFilipino(String value) {
     return 'Maligayang pagdating, ${welcomeMatch.group(1)}';
   }
 
+  final appointmentSlotsMatch = RegExp(
+    r'^Appointment slots remaining: (\d+) of (\d+)$',
+  ).firstMatch(value);
+  if (appointmentSlotsMatch != null) {
+    return 'Natitirang puwesto sa appointment: '
+        '${appointmentSlotsMatch.group(1)} sa ${appointmentSlotsMatch.group(2)}';
+  }
+
   final positionMatch = RegExp(
     r'^Position\s+(\d+)\s+in line$',
   ).firstMatch(value);
@@ -153,6 +161,17 @@ String _translateToFilipino(String value) {
 }
 
 const Map<String, String> _filipinoTranslations = {
+  'Vehicle Category': 'Kategorya ng Sasakyan',
+  'Fuel Type': 'Uri ng Panggatong',
+  'Select Fuel Type': 'Piliin ang uri ng panggatong',
+  'Select vehicle category': 'Piliin ang kategorya ng sasakyan',
+  'Specify vehicle category': 'Tukuyin ang kategorya ng sasakyan',
+  'Please select a vehicle category.': 'Pumili ng kategorya ng sasakyan.',
+  'Please specify the vehicle category.': 'Tukuyin ang kategorya ng sasakyan.',
+  'Use at most 60 characters for the vehicle category.':
+      'Gumamit ng hanggang 60 karakter para sa kategorya ng sasakyan.',
+  'Not specified': 'Hindi tinukoy',
+  'Other': 'Iba pa',
   'Account Login': 'Pag-login sa Account',
   'Account Settings': 'Mga Setting ng Account',
   'Admin Appointment Dashboard': 'Dashboard ng Appointment ng Admin',
@@ -668,4 +687,18 @@ const Map<String, String> _filipinoTranslations = {
       'Isinasagawa ang awtomatikong pagsusuri ng dokumento',
   'Kept pending for manual review':
       'Nanatiling pending para sa manwal na pagsusuri',
+  'Gas and Diesel share the appointment allocation. Walk-in slots are reserved separately.':
+      'Iisa ang nakalaang bilang ng appointment para sa Gas at Diesel. Hiwalay ang mga puwesto para sa walk-in.',
+  'Appointment slots are full for this date. Please choose another date. Unused walk-in slots cannot be used for appointments.':
+      'Puno na ang mga appointment para sa petsang ito. Pumili ng ibang petsa. Hindi maaaring gamitin sa appointment ang bakanteng puwesto ng walk-in.',
+  'Appointment slots are full for this date. Walk-in slots are reserved separately. Please choose another date.':
+      'Puno na ang mga appointment para sa petsang ito. Hiwalay ang mga puwesto ng walk-in. Pumili ng ibang petsa.',
+  'Loading daily appointment capacity...':
+      'Kinukuha ang araw-araw na limitasyon ng appointment...',
+  'Daily capacity is unavailable. Reconnect before submitting.':
+      'Hindi makuha ang araw-araw na limitasyon. Kumonekta muli bago magsumite.',
+  'Daily queue capacity could not be verified yet. Please wait or retry after reconnecting.':
+      'Hindi pa makumpirma ang araw-araw na limitasyon ng pila. Maghintay o subukan muli matapos kumonekta.',
+  'Submission could not be confirmed. Check My Appointment Status before trying again.':
+      'Hindi makumpirma ang pagsusumite. Tingnan ang Status ng Aking Appointment bago subukan muli.',
 };

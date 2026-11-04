@@ -21,6 +21,349 @@ service cloud.firestore {
           in ["admin", "Admin", "ADMIN"];
     }
 
+    // Every reservation and its record change commit together. The shared day
+    // document serializes both fuel queues without a paid backend or counters
+    // that a client can increment independently of a real reservation.
+    function capacitySettings() {
+      return get(/databases/$(database)/documents/system_config/queue_capacity).data;
+    }
+
+    function validDailyLimit(limit) {
+      return limit is int && limit >= 20 && limit <= 150 && limit % 10 == 0;
+    }
+
+    function capacityReady() {
+      let settings = capacitySettings();
+      return settings.schemaVersion == 2 && settings.migrationComplete == true
+        && validDailyLimit(settings.dailyLimit);
+    }
+
+    function validIdentity(id) {
+      return id is string && id.size() > 0 && id.size() <= 180
+        && !id.matches('.*[/].*');
+    }
+
+    function validQueue(queue) {
+      return queue is string
+        && queue.matches('^[GD](00[1-9]|0[1-9][0-9]|1[0-4][0-9]|150)$');
+    }
+
+    function fuelMatchesQueue(queue, fuel) {
+      return (fuel == 'Gas' && queue.matches('^G.*'))
+        || (fuel == 'Diesel' && queue.matches('^D.*'));
+    }
+
+    function validQueueDate(date) {
+      return date is string
+        && date.matches('^([1-9]|1[0-2])/([1-9]|[12][0-9]|3[01])/[0-9]{4}$');
+    }
+
+    function dayPath(date) {
+      return /databases/$(database)/documents/capacity_days/$(date.replace('/', '-'));
+    }
+
+    function queuePath(date, queue) {
+      return /databases/$(database)/documents/queues/$(date.replace('/', '-'))/items/$(queue);
+    }
+
+    function emptyDay(date) {
+      return { 'schemaVersion': 2, 'date': date, 'appointmentClaims': {},
+        'walkInClaims': {}, 'completedClaims': {}, 'legacyQueueClaims': {} };
+    }
+
+    function dayBefore(date) {
+      return exists(dayPath(date)) ? get(dayPath(date)).data : emptyDay(date);
+    }
+
+    function claims(day, source) {
+      return source == 'appointment' ? day.appointmentClaims : day.walkInClaims;
+    }
+
+    function hasClaim(day, source, id, queue) {
+      return claims(day, source).get(id, '') == queue;
+    }
+
+    function completedKey(source, id) {
+      return source + ':' + id;
+    }
+
+    function hasCompletion(day, source, id) {
+      return completedKey(source, id) in day.completedClaims;
+    }
+
+    function matchingMutation(day, action, source, id, queue) {
+      let mutation = day.lastMutation;
+      return mutation.action == action && mutation.source == source
+        && mutation.claimId == id && mutation.queue == queue;
+    }
+
+    function identityString(value) {
+      return value is string ? value.trim() : '';
+    }
+
+    function queueIdentity(item, day, queue) {
+      let legacy = day.legacyQueueClaims.get(queue, {});
+      let requestId = identityString(item.get('capacityRequestId', ''));
+      let appointmentId = identityString(item.get('appointmentId', ''));
+      let path = identityString(item.get('_appointmentDocumentPath', '')).split('/');
+      let pathId = path[path.size() - 1];
+      let explicitSource = identityString(item.get('quotaSource', '')).lower();
+      let source = explicitSource in ['appointment', 'walkin'] ? explicitSource
+        : (appointmentId != '' || pathId != '' ? 'appointment'
+          : (requestId != '' ? 'walkin' : legacy.get('source', '')));
+      let id = source == 'appointment'
+        ? (appointmentId != '' ? appointmentId
+          : (pathId != '' ? pathId : legacy.get('claimId', '')))
+        : (requestId != '' ? requestId : legacy.get('claimId', ''));
+      return { 'source': source, 'claimId': id };
+    }
+
+    function sameQueueIdentity(before, after, day, queue) {
+      return !after.diff(before).affectedKeys().hasAny([
+          'date', 'queue', 'queueId', 'appointmentId', 'capacityRequestId',
+          'quotaSource', '_appointmentDocumentPath'
+        ]) && queueIdentity(before, day, queue) == queueIdentity(after, day, queue);
+    }
+
+    function activeQueueStatus(status) {
+      return status in ['Waiting', 'Now Serving', 'Skipped'];
+    }
+
+    function inactiveQueueStatus(status) {
+      return status in ['Cancelled', 'Reset', 'Rejected', 'Expired'];
+    }
+
+    function completedQueueStatus(status) {
+      return status in ['Passed', 'Failed'];
+    }
+
+    function noActiveQueueForClaim(date, queue, source, id, day) {
+      return !existsAfter(queuePath(date, queue))
+        || inactiveQueueStatus(getAfter(queuePath(date, queue)).data.status)
+        || queueIdentity(getAfter(queuePath(date, queue)).data, day, queue)
+          != { 'source': source, 'claimId': id };
+    }
+
+    function validDayShape(day, capacityDay) {
+      let mutation = day.lastMutation;
+      return day.keys().hasOnly(['schemaVersion', 'date', 'appointmentClaims',
+          'walkInClaims', 'completedClaims', 'legacyQueueClaims', 'lastMutation', 'updatedAt'])
+        && day.schemaVersion == 2 && validQueueDate(day.date)
+        && day.date.replace('/', '-') == capacityDay
+        && day.appointmentClaims is map && day.walkInClaims is map
+        && day.completedClaims is map && day.legacyQueueClaims is map
+        && mutation is map
+        && mutation.keys().hasOnly(['action', 'source', 'claimId', 'queue'])
+        && mutation.source in ['appointment', 'walkin']
+        && validIdentity(mutation.claimId) && validQueue(mutation.queue)
+        && day.updatedAt == request.time;
+    }
+
+    function addedOnly(before, after, id, queue) {
+      return !(id in before) && after.get(id, '') == queue
+        && after.size() == before.size() + 1
+        && after.diff(before).affectedKeys().hasOnly([id]);
+    }
+
+    function removedOnly(before, after, id, queue) {
+      return before.get(id, '') == queue && !(id in after)
+        && after.size() == before.size() - 1
+        && after.diff(before).affectedKeys().hasOnly([id]);
+    }
+
+    function validNewAppointment(id, date, queue) {
+      let path = /databases/$(database)/documents/appointments/$(id);
+      let item = getAfter(path).data;
+      return !exists(path) && hasVerifiedEmail()
+        && item.appointmentId == id && item.quotaSource == 'appointment'
+        && item.customerId == request.auth.uid && item.status == 'Pending'
+        && item.date == date && item.queue == queue
+        && fuelMatchesQueue(queue, item.vehicle);
+    }
+
+    function validNewWalkIn(id, date, queue) {
+      let path = queuePath(date, queue);
+      let receiptPath = /databases/$(database)/documents/capacity_days/$(date.replace('/', '-'))/requests/$(id);
+      let item = getAfter(path).data;
+      let receipt = getAfter(receiptPath).data;
+      return isAdmin() && (!exists(path) || inactiveQueueStatus(get(path).data.status))
+        && item.queue == queue && item.date == date && item.status == 'Waiting'
+        && fuelMatchesQueue(queue, item.type)
+        && item.capacityRequestId == id && item.quotaSource == 'walkin'
+        && !exists(receiptPath) && receipt.adminId == request.auth.uid
+        && receipt.date == date && receipt.queue == queue && receipt.createdAt == request.time;
+    }
+
+    function validReservation(before, after) {
+      let mutation = after.lastMutation;
+      let source = mutation.source;
+      let id = mutation.claimId;
+      let queue = mutation.queue;
+      let ownBefore = claims(before, source);
+      let ownAfter = claims(after, source);
+      let other = source == 'appointment' ? 'walkin' : 'appointment';
+      let limit = capacitySettings().dailyLimit;
+      return mutation.action == 'reserve'
+        && int(queue.replace('^[GD]', '')) <= limit
+        && addedOnly(ownBefore, ownAfter, id, queue)
+        && claims(before, other) == claims(after, other)
+        && before.completedClaims == after.completedClaims
+        && !hasCompletion(before, source, id)
+        && !before.appointmentClaims.values().hasAny([queue])
+        && !before.walkInClaims.values().hasAny([queue])
+        && ownAfter.size() <= limit / 2
+        && after.appointmentClaims.size() + after.walkInClaims.size() <= limit
+        && (source == 'appointment'
+          ? validNewAppointment(id, after.date, queue)
+          : validNewWalkIn(id, after.date, queue));
+    }
+
+    function validReleaseTarget(before, after) {
+      let mutation = after.lastMutation;
+      let path = /databases/$(database)/documents/appointments/$(mutation.claimId);
+      return mutation.source == 'appointment'
+        ? ((!existsAfter(path)
+            || getAfter(path).data.status in ['Rejected', 'Expired', 'Cancelled', 'Reset'])
+          && noActiveQueueForClaim(after.date, mutation.queue, 'appointment', mutation.claimId, before))
+        : noActiveQueueForClaim(after.date, mutation.queue, 'walkin', mutation.claimId, before);
+    }
+
+    function validRelease(before, after) {
+      let mutation = after.lastMutation;
+      let other = mutation.source == 'appointment' ? 'walkin' : 'appointment';
+      return isAdmin() && mutation.action == 'release'
+        && removedOnly(claims(before, mutation.source), claims(after, mutation.source),
+          mutation.claimId, mutation.queue)
+        && claims(before, other) == claims(after, other)
+        && before.completedClaims == after.completedClaims
+        && !hasCompletion(before, mutation.source, mutation.claimId)
+        && validReleaseTarget(before, after);
+    }
+
+    function completionValue(source, id, queue) {
+      return source == 'appointment'
+        ? { 'source': source, 'queue': queue, 'appointmentId': id }
+        : { 'source': source, 'queue': queue };
+    }
+
+    function validCompletion(before, after) {
+      let mutation = after.lastMutation;
+      let key = completedKey(mutation.source, mutation.claimId);
+      let item = getAfter(queuePath(after.date, mutation.queue)).data;
+      return isAdmin() && mutation.action == 'complete'
+        && before.appointmentClaims == after.appointmentClaims
+        && before.walkInClaims == after.walkInClaims
+        && hasClaim(before, mutation.source, mutation.claimId, mutation.queue)
+        && !(key in before.completedClaims)
+        && after.completedClaims.size() == before.completedClaims.size() + 1
+        && after.completedClaims.diff(before.completedClaims).affectedKeys().hasOnly([key])
+        && after.completedClaims[key] == completionValue(mutation.source, mutation.claimId, mutation.queue)
+        && item.date == after.date && item.queue == mutation.queue
+        && completedQueueStatus(item.status)
+        && queueIdentity(item, before, mutation.queue)
+          == { 'source': mutation.source, 'claimId': mutation.claimId };
+    }
+
+    function validDayMutation(before, after, capacityDay) {
+      return isSignedIn() && capacityReady() && validDayShape(after, capacityDay)
+        && before.date == after.date && before.schemaVersion == after.schemaVersion
+        && before.legacyQueueClaims == after.legacyQueueClaims
+        && (validReservation(before, after) || validRelease(before, after)
+          || validCompletion(before, after));
+    }
+
+    function reservedInThisCommit(date, source, id, queue) {
+      let before = dayBefore(date);
+      let after = getAfter(dayPath(date)).data;
+      return !hasClaim(before, source, id, queue) && hasClaim(after, source, id, queue)
+        && matchingMutation(after, 'reserve', source, id, queue)
+        && after.updatedAt == request.time;
+    }
+
+    function releasedOrAbsent(date, source, id, queue) {
+      let before = dayBefore(date);
+      let after = getAfter(dayPath(date)).data;
+      return !hasClaim(after, source, id, queue)
+        && (!hasClaim(before, source, id, queue)
+          || (matchingMutation(after, 'release', source, id, queue)
+            && after.updatedAt == request.time));
+    }
+
+    function appointmentUpdateAllowed(id, before, after) {
+      let date = before.date;
+      let queue = before.queue;
+      return !after.diff(before).affectedKeys().hasAny([
+          'appointmentId', 'customerId', 'date', 'queue', 'quotaSource', 'source'
+        ])
+        && (after.status == before.status
+          || (capacityReady() && before.status == 'Pending' && after.status == 'Approved'
+            && hasClaim(getAfter(dayPath(date)).data, 'appointment', id, queue)
+            && !hasCompletion(getAfter(dayPath(date)).data, 'appointment', id))
+          || (capacityReady() && before.status in ['Pending', 'Approved']
+            && after.status in ['Rejected', 'Expired', 'Cancelled', 'Reset']
+            && releasedOrAbsent(date, 'appointment', id, queue)));
+    }
+
+    function appointmentDeleteAllowed(id, item) {
+      let day = getAfter(dayPath(item.date)).data;
+      return capacityReady()
+        && (hasCompletion(day, 'appointment', id)
+          || (item.status == 'Approved' && hasClaim(day, 'appointment', id, item.queue)
+            && !noActiveQueueForClaim(item.date, item.queue, 'appointment', id, day))
+          || releasedOrAbsent(item.date, 'appointment', id, item.queue));
+    }
+
+    function approvedAppointmentMirror(item, queueDate, queue) {
+      let id = item.appointmentId;
+      let appointment = getAfter(/databases/$(database)/documents/appointments/$(id)).data;
+      let day = getAfter(dayPath(item.date)).data;
+      return validIdentity(id) && item.quotaSource == 'appointment'
+        && item.source == 'Appointment' && item.status == 'Waiting'
+        && item.queue == queue && item.date.replace('/', '-') == queueDate
+        && appointment.status == 'Approved' && item.customerId == appointment.customerId
+        && item.queue == appointment.queue && item.date == appointment.date
+        && hasClaim(day, 'appointment', id, queue) && !hasCompletion(day, 'appointment', id);
+    }
+
+    function queueAdmissionAllowed(item, queueDate, queue) {
+      return capacityReady() && validQueue(queue) && validQueueDate(item.date)
+        && item.queue == queue && item.date.replace('/', '-') == queueDate
+        && item.status == 'Waiting'
+        && ((item.get('quotaSource', '') == 'walkin' && item.source == 'Walk-in'
+            && validIdentity(item.capacityRequestId)
+            && reservedInThisCommit(item.date, 'walkin', item.capacityRequestId, queue))
+          || (item.get('quotaSource', '') == 'appointment'
+            && approvedAppointmentMirror(item, queueDate, queue)));
+    }
+
+    function queueUpdateAllowed(before, after, queue) {
+      let day = existsAfter(dayPath(before.date)) ? getAfter(dayPath(before.date)).data : emptyDay(before.date);
+      let identity = queueIdentity(before, day, queue);
+      let source = identity.source;
+      let id = identity.claimId;
+      return sameQueueIdentity(before, after, day, queue)
+        && (after.status == before.status
+          || (capacityReady() && validIdentity(id)
+            && ((activeQueueStatus(before.status) && activeQueueStatus(after.status)
+                && hasClaim(day, source, id, queue) && !hasCompletion(day, source, id))
+              || (completedQueueStatus(after.status) && !inactiveQueueStatus(before.status)
+                && hasClaim(day, source, id, queue) && hasCompletion(day, source, id))
+              || (inactiveQueueStatus(after.status) && !completedQueueStatus(before.status)
+                && (source == 'appointment'
+                  ? (hasClaim(day, source, id, queue) || releasedOrAbsent(before.date, source, id, queue))
+                  : releasedOrAbsent(before.date, source, id, queue))))));
+    }
+
+    function queueDeleteAllowed(item, queue) {
+      let day = getAfter(dayPath(item.date)).data;
+      let identity = queueIdentity(item, day, queue);
+      return capacityReady() && validIdentity(identity.claimId)
+        && (hasCompletion(day, identity.source, identity.claimId)
+          || (identity.source == 'appointment'
+            && hasClaim(day, 'appointment', identity.claimId, queue))
+          || releasedOrAbsent(item.date, identity.source, identity.claimId, queue));
+    }
+
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();
 
@@ -35,14 +378,21 @@ service cloud.firestore {
     }
 
     match /appointments/{appointmentId} {
-      allow create: if isSignedIn()
-        && hasVerifiedEmail()
+      allow create: if hasVerifiedEmail() && capacityReady()
         && request.resource.data.customerId == request.auth.uid
-        && request.resource.data.status == "Pending";
+        && request.resource.data.appointmentId == appointmentId
+        && request.resource.data.quotaSource == 'appointment'
+        && request.resource.data.status == 'Pending'
+        && validQueueDate(request.resource.data.date) && validQueue(request.resource.data.queue)
+        && !request.resource.data.keys().hasAny(['documentReview', 'autoApprovalReview',
+          'autoDecisionAt', 'autoApproved', 'autoRejected', 'approvedAt', 'rejectedAt'])
+        && reservedInThisCommit(request.resource.data.date, 'appointment',
+          appointmentId, request.resource.data.queue);
 
       allow read: if isSignedIn();
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
+      allow update: if isAdmin()
+        && appointmentUpdateAllowed(appointmentId, resource.data, request.resource.data);
+      allow delete: if isAdmin() && appointmentDeleteAllowed(appointmentId, resource.data);
 
       match /documents/{documentType} {
         allow create: if isSignedIn()
@@ -85,17 +435,19 @@ service cloud.firestore {
 
       match /items/{queueId} {
         allow read: if true;
-        allow create: if isAdmin();
-        allow update: if isAdmin();
-        allow delete: if isAdmin();
+        allow create: if isAdmin() && queueAdmissionAllowed(request.resource.data, queueDate, queueId);
+        allow update: if isAdmin()
+          && (queueUpdateAllowed(resource.data, request.resource.data, queueId)
+            || (inactiveQueueStatus(resource.data.status)
+              && queueAdmissionAllowed(request.resource.data, queueDate, queueId)));
+        allow delete: if isAdmin() && queueDeleteAllowed(resource.data, queueId);
       }
     }
 
     match /{path=**}/items/{queueId} {
       allow read: if isAdmin();
-      allow create: if isAdmin();
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
+      // Collection-group reads do not bypass the explicit queue write checks.
+      allow write: if false;
     }
 
     match /reports/{reportId} {
@@ -118,9 +470,47 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    match /system_config/queue_capacity {
+      allow read: if isSignedIn();
+      allow update: if isAdmin() && capacityReady()
+        && request.resource.data.schemaVersion == resource.data.schemaVersion
+        && request.resource.data.migrationComplete == resource.data.migrationComplete
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['dailyLimit', 'updatedAt'])
+        && validDailyLimit(request.resource.data.dailyLimit);
+      // Only the trusted one-time migration may initialize or change the gate.
+      allow create, delete: if false;
+    }
+
+    match /capacity_days/{capacityDay} {
+      // Only aggregate capacity and opaque completed reservation identities are
+      // stored here. Signed-in booking clients need the persistent daily usage.
+      allow read: if isSignedIn();
+      allow create: if request.resource.data.legacyQueueClaims == {}
+        && validDayMutation(emptyDay(request.resource.data.date), request.resource.data, capacityDay);
+      allow update: if validDayMutation(resource.data, request.resource.data, capacityDay);
+      allow delete: if false;
+
+      match /requests/{requestId} {
+        allow read: if isAdmin();
+        allow create: if isAdmin() && capacityReady()
+          && request.resource.data.keys().hasOnly(['adminId', 'payloadFingerprint', 'queue', 'date', 'createdAt'])
+          && request.resource.data.adminId == request.auth.uid
+          && request.resource.data.payloadFingerprint is string
+          && request.resource.data.payloadFingerprint.size() > 0
+          && request.resource.data.payloadFingerprint.size() <= 8192
+          && validQueueDate(request.resource.data.date)
+          && request.resource.data.date.replace('/', '-') == capacityDay
+          && validQueue(request.resource.data.queue)
+          && request.resource.data.createdAt == request.time
+          && reservedInThisCommit(request.resource.data.date, 'walkin', requestId, request.resource.data.queue);
+        allow update, delete: if false;
+      }
+    }
+
     // Operational status for automated retention. The Admin SDK bypasses rules.
     match /system_config/{configId} {
-      allow read, write: if isAdmin();
+      allow read: if isAdmin();
+      allow write: if isAdmin() && configId != "queue_capacity";
     }
 
     match /{document=**} {

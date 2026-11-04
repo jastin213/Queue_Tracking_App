@@ -20,6 +20,8 @@ import '../services/document_review_analyzer.dart';
 import '../services/document_ocr_retry_policy.dart';
 import '../services/document_text_recognition.dart';
 import '../services/firestore_query_fields.dart';
+import '../services/daily_queue_capacity.dart';
+import '../services/daily_queue_capacity_service.dart';
 import '../widgets/app_refresh_indicator.dart';
 import '../widgets/app_responsive_content.dart';
 import 'book_appointment.dart';
@@ -133,6 +135,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
       AppointmentApprovalSettings.defaultMinimumScore;
   bool _autoApprovalBatchRunning = false;
   bool _autoApprovalBatchQueued = false;
+  DailyQueueCapacityPolicy _capacityPolicy = const DailyQueueCapacityPolicy();
+  StreamSubscription<DailyQueueCapacityPolicy>? _capacityPolicySubscription;
   final Map<String, String> _documentOcrSessionCache = {};
 
   static const String _ocrCacheVersion = 'adaptive-v1';
@@ -149,6 +153,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
     _listenToPendingAppointments();
     _listenToAppointmentMonth();
     _listenToAppointmentApprovalSettings();
+    _capacityPolicySubscription = DailyQueueCapacityService.watchPolicy()
+        .listen((policy) {
+          if (mounted) setState(() => _capacityPolicy = policy);
+        }, onError: (_) {});
     unawaited(_warmUpDocumentOcr());
 
     final initialAppointmentId = widget.initialAppointmentId?.trim() ?? '';
@@ -188,6 +196,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   @override
   void dispose() {
+    _capacityPolicySubscription?.cancel();
     _unregisterAdminAppointmentDetailsHandler(_appointmentDetailsHandler);
     _pendingSubscription?.cancel();
     _appointmentApprovalSettingsSubscription?.cancel();
@@ -839,6 +848,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           "type": approved["vehicle"],
           "date": approved["date"],
           "source": "Appointment",
+          "quotaSource": approved["quotaSource"] ?? "appointment",
           "municipality": approved["municipality"],
           "barangay": approved["barangay"],
           "status": "Waiting",
@@ -868,6 +878,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       "type": approved["vehicle"] ?? "-",
       "date": date,
       "source": "Appointment",
+      "quotaSource": approved["quotaSource"] ?? "appointment",
       "status": "Waiting",
       "municipality": approved["municipality"] ?? "",
       "barangay": approved["barangay"] ?? "",
@@ -1018,6 +1029,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         "type": booking["vehicle"] ?? "-",
         "date": date,
         "source": "Appointment",
+        "quotaSource": booking["quotaSource"] ?? "appointment",
         "status": "Waiting",
         "municipality": booking["municipality"] ?? "",
         "barangay": booking["barangay"] ?? "",
@@ -1210,37 +1222,54 @@ class _AdminDashboardState extends State<AdminDashboard> {
     }
 
     try {
-      await FirebaseFirestore.instance
+      final appointmentRef = FirebaseFirestore.instance
           .collection("appointments")
-          .doc(appointmentId)
-          .update({
-            "status": "Rejected",
-            "rejectionReason": reason,
-            "adminFeedback": feedback,
-            "rejectionMethod": automaticReview == null
-                ? "manual"
-                : "conditional_auto_rejection",
-            "autoApprovalReview": ?automaticReview,
-            if (automaticReview != null)
-              "autoApprovalReviewedAt": FieldValue.serverTimestamp(),
-            if (automaticReview != null)
-              "decisionSource": "conditional_auto_rejection",
-            if (automaticReview != null)
-              "autoDecisionAt": FieldValue.serverTimestamp(),
-            if (automaticDocumentHashes != null)
-              "idDocumentHash": automaticDocumentHashes['ID'],
-            if (automaticDocumentHashes != null)
-              "orDocumentHash": automaticDocumentHashes['OR'],
-            if (automaticDocumentHashes != null)
-              "crDocumentHash": automaticDocumentHashes['CR'],
-            ...firestoreQueryFields(
-              date: booking["date"],
-              plate: booking["plate"],
-              name: booking["fullName"] ?? booking["name"],
-            ),
-            "updatedAt": FieldValue.serverTimestamp(),
-            "rejectedAt": FieldValue.serverTimestamp(),
-          });
+          .doc(appointmentId);
+      final rejectionUpdates = <String, dynamic>{
+        "status": "Rejected",
+        "rejectionReason": reason,
+        "adminFeedback": feedback,
+        "rejectionMethod": automaticReview == null
+            ? "manual"
+            : "conditional_auto_rejection",
+        "autoApprovalReview": ?automaticReview,
+        if (automaticReview != null)
+          "autoApprovalReviewedAt": FieldValue.serverTimestamp(),
+        if (automaticReview != null)
+          "decisionSource": "conditional_auto_rejection",
+        if (automaticReview != null)
+          "autoDecisionAt": FieldValue.serverTimestamp(),
+        if (automaticDocumentHashes != null)
+          "idDocumentHash": automaticDocumentHashes['ID'],
+        if (automaticDocumentHashes != null)
+          "orDocumentHash": automaticDocumentHashes['OR'],
+        if (automaticDocumentHashes != null)
+          "crDocumentHash": automaticDocumentHashes['CR'],
+        ...firestoreQueryFields(
+          date: booking["date"],
+          plate: booking["plate"],
+          name: booking["fullName"] ?? booking["name"],
+        ),
+        "updatedAt": FieldValue.serverTimestamp(),
+        "rejectedAt": FieldValue.serverTimestamp(),
+      };
+      final applied = await DailyQueueCapacityService.runDayTransaction<bool>(
+        booking['date']?.toString() ?? '',
+        (transaction, day) async {
+          final current = await transaction.get(appointmentRef);
+          final currentBooking = current.data();
+          if (currentBooking == null || currentBooking['status'] != 'Pending') {
+            return false;
+          }
+          day.releaseAppointment(
+            appointmentId,
+            currentBooking['queue']?.toString() ?? queue,
+          );
+          transaction.update(appointmentRef, rejectionUpdates);
+          return true;
+        },
+      );
+      if (!applied) return false;
       pendingBookings.value = pendingBookings.value
           .where((b) => b != booking)
           .toList();
@@ -3605,7 +3634,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
               final booked = bookingCounts[calendarDateKey(date)] ?? 0;
               final isPast = date.isBefore(today);
               final isClosed = date.weekday == DateTime.sunday;
-              final isFull = !isPast && !isClosed && booked >= maxQueueLimit;
+              final appointmentLimit = _capacityPolicy.sourceLimit;
+              final isFull = !isPast && !isClosed && booked >= appointmentLimit;
               final isAvailable = !isPast && !isClosed && !isFull;
               final isSelected =
                   selectedCalendarDate != null &&
@@ -3619,7 +3649,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
               final String statusText = isFull
                   ? "Full"
                   : isAvailable
-                  ? "$booked/$maxQueueLimit"
+                  ? "$booked/$appointmentLimit"
                   : isClosed
                   ? "Closed"
                   : "Past";
@@ -3628,7 +3658,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                 message: isFull
                     ? "${calendarDateKey(date)} is fully booked. Tap to view appointments."
                     : isAvailable
-                    ? "${calendarDateKey(date)} has ${maxQueueLimit - booked} slot(s) available. Tap to view appointments."
+                    ? "${calendarDateKey(date)} has ${appointmentLimit - booked} appointment slot(s) available. Walk-in slots stay reserved. Tap to view appointments."
                     : "${calendarDateKey(date)} is unavailable for booking. Tap to view appointments.",
                 child: Material(
                   color: Colors.transparent,

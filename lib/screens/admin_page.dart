@@ -13,16 +13,20 @@ import '../services/appointment_lifecycle.dart';
 import '../services/admin_notification_event.dart';
 import '../services/admin_notification_read_state.dart';
 import '../services/browser_tab_opener.dart';
+import '../services/daily_queue_capacity.dart';
+import '../services/daily_queue_capacity_service.dart';
 import '../services/notification_time.dart';
 import '../services/queue_source.dart';
 import '../services/queue_voice.dart';
 import '../services/remembered_login.dart';
+import '../services/vehicle_category.dart';
 import '../theme/app_theme.dart';
 import '../services/firestore_query_fields.dart';
 import '../widgets/app_responsive_content.dart';
 import '../widgets/app_refresh_indicator.dart';
 import '../widgets/app_motion.dart';
 import '../widgets/admin_notification_snackbar.dart';
+import '../widgets/vehicle_category_field.dart';
 import 'analytics_page.dart';
 import 'daily_report.dart';
 import 'display_page.dart';
@@ -38,6 +42,13 @@ Color get _cardColor => AppColors.activeSurface;
 Color get _borderColor => AppColors.activeBorder;
 Color get _mutedTextColor => AppColors.activeMutedText;
 Color get _softPrimaryColor => AppColors.activeSoftPrimary;
+
+bool _isWalkInCapacityRecord(Map<String, dynamic> record) {
+  final source = record['quotaSource']?.toString().trim().toLowerCase();
+  if (source == 'appointment') return false;
+  if (source == 'walkin') return true;
+  return normalizedQueueSource(record) == walkInQueueSource;
+}
 
 bool useMobileWebStatsRow({required bool isWeb, required double width}) {
   return isWeb && width < 600;
@@ -152,6 +163,16 @@ class _AdminPageState extends State<AdminPage> {
   bool _isCheckingAdminSession = true;
   bool _isReturningToLogin = false;
   bool _isCallingCustomer = false;
+  DailyQueueCapacityPolicy _capacityPolicy = const DailyQueueCapacityPolicy();
+  StreamSubscription<DailyQueueCapacityPolicy>? _capacityPolicySubscription;
+  bool _capacityPolicyReady = false;
+  StreamSubscription<Map<String, dynamic>>? _completedCapacitySubscription;
+  Map<String, dynamic> _completedCapacityClaims = {};
+  bool _completedCapacityReady = false;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
+  _capacityAppointmentsSubscription;
+  List<Map<String, dynamic>> _capacityAppointments = [];
+  bool _capacityAppointmentsReady = false;
   bool _desktopSidebarVisible = true;
   _AdminSection _activeAdminSection = _AdminSection.queue;
   String? _initialAppointmentId;
@@ -187,6 +208,66 @@ class _AdminPageState extends State<AdminPage> {
     );
     unawaited(_initializeAdminSession());
     _initializeAppointmentNotifications();
+    _capacityPolicySubscription = DailyQueueCapacityService.watchPolicy()
+        .listen(
+          (policy) {
+            if (!mounted) return;
+            setState(() {
+              _capacityPolicy = policy;
+              _capacityPolicyReady = true;
+            });
+          },
+          onError: (_) {
+            if (mounted) setState(() => _capacityPolicyReady = false);
+          },
+        );
+    selectedQueueDateNotifier.addListener(_watchCompletedCapacity);
+    _watchCompletedCapacity();
+  }
+
+  void _watchCompletedCapacity() {
+    _completedCapacitySubscription?.cancel();
+    _capacityAppointmentsSubscription?.cancel();
+    final date = selectedQueueDateNotifier.value;
+    _completedCapacityClaims = {};
+    _completedCapacityReady = false;
+    _capacityAppointments = [];
+    _capacityAppointmentsReady = false;
+    _capacityAppointmentsSubscription = FirebaseFirestore.instance
+        .collection('appointments')
+        .where('date', isEqualTo: date)
+        .snapshots()
+        .listen(
+          (snapshot) {
+            if (!mounted || date != selectedQueueDateNotifier.value) return;
+            setState(() {
+              _capacityAppointments = snapshot.docs
+                  .map((doc) => {...doc.data(), 'appointmentId': doc.id})
+                  .toList();
+              _capacityAppointmentsReady = true;
+            });
+          },
+          onError: (_) {
+            if (mounted && date == selectedQueueDateNotifier.value) {
+              setState(() => _capacityAppointmentsReady = false);
+            }
+          },
+        );
+    _completedCapacitySubscription =
+        DailyQueueCapacityService.watchCompletedClaims(date).listen(
+          (claims) {
+            if (!mounted || date != selectedQueueDateNotifier.value) return;
+            setState(() {
+              _completedCapacityClaims = claims;
+              _completedCapacityReady = true;
+            });
+          },
+          onError: (_) {
+            if (mounted && date == selectedQueueDateNotifier.value) {
+              setState(() => _completedCapacityReady = false);
+            }
+          },
+        );
   }
 
   Future<_AdminSessionStatus> _verifyAdminSession({
@@ -315,26 +396,27 @@ class _AdminPageState extends State<AdminPage> {
       );
   }
 
-  Future<void> _saveQueueWithSessionRecovery(
-    DocumentReference<Map<String, dynamic>> queueReference,
-    Map<String, dynamic> queueData,
+  Future<String> _saveQueueWithSessionRecovery(
+    Future<String> Function() save,
   ) async {
     try {
-      await queueReference.set(queueData);
-      return;
+      return await save();
     } on FirebaseException catch (error) {
-      if (error.code != 'permission-denied') rethrow;
+      if (error.code != 'permission-denied' &&
+          error.code != 'unauthenticated') {
+        rethrow;
+      }
     }
 
     final recovered = await _recoverAdminSession();
     if (!recovered) throw const _AdminSessionExpiredException();
 
     try {
-      // Retry the exact same document and payload once. This avoids creating a
-      // second queue number if the first authorization attempt was stale.
-      await queueReference.set(queueData);
+      // The same request ID makes a recovered save return its original ticket.
+      return await save();
     } on FirebaseException catch (error) {
-      if (error.code == 'permission-denied') {
+      if (error.code == 'permission-denied' ||
+          error.code == 'unauthenticated') {
         throw const _AdminSessionExpiredException();
       }
       rethrow;
@@ -488,6 +570,10 @@ class _AdminPageState extends State<AdminPage> {
 
   @override
   void dispose() {
+    selectedQueueDateNotifier.removeListener(_watchCompletedCapacity);
+    _completedCapacitySubscription?.cancel();
+    _capacityAppointmentsSubscription?.cancel();
+    _capacityPolicySubscription?.cancel();
     _pendingAppointmentSubscription?.cancel();
     _automaticDecisionSubscription?.cancel();
     _notificationReadStateSubscription?.cancel();
@@ -1404,20 +1490,51 @@ class _AdminPageState extends State<AdminPage> {
 
     if (date.isEmpty || queue.isEmpty) return;
 
-    await queueItemsRef(date).doc(queue).set({
-      ...customer,
-      "queueId": queue,
-      "queue": queue,
-      "date": date,
-      "status": status,
-      ...firestoreQueryFields(
-        date: date,
-        plate: customer["plate"],
-        name: customer["name"] ?? customer["fullName"],
-      ),
-      "updatedAt": FieldValue.serverTimestamp(),
-      ...?extraData,
-    }, SetOptions(merge: true));
+    final reference = queueItemsRef(date).doc(queue);
+    await DailyQueueCapacityService.runDayTransaction<void>(date, (
+      transaction,
+      day,
+    ) async {
+      final snapshot = await transaction.get(reference);
+      final current = snapshot.data();
+      if (current == null) {
+        throw StateError(
+          'This queue record changed. Refresh before trying again.',
+        );
+      }
+      final updates =
+          <String, dynamic>{
+            ...customer,
+            "queueId": queue,
+            "queue": queue,
+            "date": date,
+            "status": status,
+            ...firestoreQueryFields(
+              date: date,
+              plate: customer["plate"],
+              name: customer["name"] ?? customer["fullName"],
+            ),
+            "updatedAt": FieldValue.serverTimestamp(),
+            ...?extraData,
+          }..removeWhere(
+            (key, _) => const {
+              'queueId',
+              'queue',
+              'date',
+              'appointmentId',
+              'capacityRequestId',
+              'quotaSource',
+              '_appointmentDocumentPath',
+            }.contains(key),
+          );
+      if (status == 'Passed' || status == 'Failed') {
+        day.completeQueue({...current, ...updates});
+      } else if ((status == 'Cancelled' || status == 'Reset') &&
+          _isWalkInCapacityRecord(current)) {
+        day.releaseWalkIn(queue);
+      }
+      transaction.set(reference, updates, SetOptions(merge: true));
+    });
   }
 
   // ================= SPEAK =================
@@ -1545,146 +1662,213 @@ class _AdminPageState extends State<AdminPage> {
 
   // ================= GENERATE DIALOG =================
 
-  void showGenerateDialog(String type) {
+  Future<void> showGenerateDialog(String type) async {
+    final requestId = FirebaseFirestore.instance
+        .collection('capacity_requests')
+        .doc()
+        .id;
     final TextEditingController nameController = TextEditingController();
     final TextEditingController plateController = TextEditingController();
+    final otherCategoryController = TextEditingController();
+    final categoryFormKey = GlobalKey<FormState>();
+    String? category;
+    bool isSaving = false;
 
-    showDialog(
+    await showDialog<void>(
       context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: _cardColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-        title: Text(
-          text("Generate $type Queue", "Gumawa ng $type Queue"),
-          style: TextStyle(color: _primaryColor, fontWeight: FontWeight.w800),
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                textCapitalization: TextCapitalization.words,
-                style: TextStyle(
-                  color: _primaryColor,
-                  fontWeight: FontWeight.w600,
-                ),
-                decoration: InputDecoration(
-                  labelText: text("Customer Name", "Pangalan ng Customer"),
-                  labelStyle: TextStyle(color: _mutedTextColor),
-                  prefixIcon: Icon(
-                    Icons.person_outline_rounded,
-                    color: _primaryColor,
+      builder: (_) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          backgroundColor: _cardColor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+          ),
+          title: Text(
+            text("Generate $type Queue", "Gumawa ng $type Queue"),
+            style: TextStyle(color: _primaryColor, fontWeight: FontWeight.w800),
+          ),
+          content: SizedBox(
+            width: 360,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    enabled: !isSaving,
+                    textCapitalization: TextCapitalization.words,
+                    style: TextStyle(
+                      color: _primaryColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: text("Customer Name", "Pangalan ng Customer"),
+                      labelStyle: TextStyle(color: _mutedTextColor),
+                      prefixIcon: Icon(
+                        Icons.person_outline_rounded,
+                        color: _primaryColor,
+                      ),
+                      filled: true,
+                      fillColor: _backgroundColor,
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        borderSide: BorderSide(color: _borderColor),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        borderSide: BorderSide(
+                          color: _primaryColor,
+                          width: 1.5,
+                        ),
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
                   ),
-                  filled: true,
-                  fillColor: _backgroundColor,
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: BorderSide(color: _borderColor),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: plateController,
+                    enabled: !isSaving,
+                    textCapitalization: TextCapitalization.characters,
+                    maxLength: 7,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9]')),
+                      const _UpperCaseTextFormatter(),
+                      LengthLimitingTextInputFormatter(7),
+                    ],
+                    style: TextStyle(
+                      color: _primaryColor,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.2,
+                    ),
+                    decoration: InputDecoration(
+                      labelText: text("Plate Number", "Plate Number"),
+                      hintText: "ABC1234",
+                      helperText: text(
+                        "Enter exactly 6–7 letters and numbers",
+                        "Maglagay ng eksaktong 6–7 letra at numero",
+                      ),
+                      counterText: "",
+                      labelStyle: TextStyle(color: _mutedTextColor),
+                      prefixIcon: Icon(Icons.pin_rounded, color: _primaryColor),
+                      filled: true,
+                      fillColor: _backgroundColor,
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        borderSide: BorderSide(color: _borderColor),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        borderSide: BorderSide(
+                          color: _primaryColor,
+                          width: 1.5,
+                        ),
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
                   ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: BorderSide(color: _primaryColor, width: 1.5),
+                  const SizedBox(height: 14),
+                  VehicleCategoryField(
+                    formKey: categoryFormKey,
+                    category: category,
+                    otherController: otherCategoryController,
+                    enabled: !isSaving,
+                    onChanged: (value) {
+                      setDialogState(() {
+                        category = value;
+                        if (value != 'Other') otherCategoryController.clear();
+                      });
+                    },
                   ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 14),
-              TextField(
-                controller: plateController,
-                textCapitalization: TextCapitalization.characters,
-                maxLength: 7,
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9]')),
-                  const _UpperCaseTextFormatter(),
-                  LengthLimitingTextInputFormatter(7),
                 ],
-                style: TextStyle(
-                  color: _primaryColor,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 1.2,
-                ),
-                decoration: InputDecoration(
-                  labelText: text("Plate Number", "Plate Number"),
-                  hintText: "ABC1234",
-                  helperText: text(
-                    "Enter exactly 6–7 letters and numbers",
-                    "Maglagay ng eksaktong 6–7 letra at numero",
-                  ),
-                  counterText: "",
-                  labelStyle: TextStyle(color: _mutedTextColor),
-                  prefixIcon: Icon(Icons.pin_rounded, color: _primaryColor),
-                  filled: true,
-                  fillColor: _backgroundColor,
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: BorderSide(color: _borderColor),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: BorderSide(color: _primaryColor, width: 1.5),
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actionsPadding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
-        actions: [
-          OutlinedButton(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: _primaryColor,
-              side: BorderSide(color: _primaryColor),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
               ),
             ),
-            onPressed: () => Navigator.pop(context),
-            child: Text(text("Cancel", "Kanselahin")),
           ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _primaryColor,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
+          actionsPadding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+          actions: [
+            OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: _primaryColor,
+                side: BorderSide(color: _primaryColor),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
               ),
+              onPressed: isSaving ? null : () => Navigator.pop(dialogContext),
+              child: Text(text("Cancel", "Kanselahin")),
             ),
-            onPressed: () async {
-              final success = await generateQueue(
-                type,
-                nameController.text.trim(),
-                plateController.text,
-              );
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _primaryColor,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+              onPressed: isSaving
+                  ? null
+                  : () async {
+                      if (categoryFormKey.currentState?.validate() != true) {
+                        return;
+                      }
+                      setDialogState(() => isSaving = true);
+                      final success = await generateQueue(
+                        type,
+                        nameController.text.trim(),
+                        plateController.text,
+                        requestId: requestId,
+                        vehicleCategory: category!,
+                        vehicleCategoryOther: otherCategoryController.text,
+                      );
 
-              if (success && context.mounted) {
-                Navigator.pop(context);
-              }
-            },
-            child: Text(text("Generate Queue", "Gumawa ng Queue")),
-          ),
-        ],
+                      if (!dialogContext.mounted) return;
+                      if (success) {
+                        Navigator.pop(dialogContext);
+                      } else {
+                        setDialogState(() => isSaving = false);
+                      }
+                    },
+              child: Text(text("Generate Queue", "Gumawa ng Queue")),
+            ),
+          ],
+        ),
       ),
     );
+    nameController.dispose();
+    plateController.dispose();
+    otherCategoryController.dispose();
   }
 
   // ================= GENERATE QUEUE =================
 
-  Future<bool> generateQueue(String type, String name, String plate) async {
+  Future<bool> generateQueue(
+    String type,
+    String name,
+    String plate, {
+    required String requestId,
+    required String vehicleCategory,
+    String? vehicleCategoryOther,
+  }) async {
     if (_isGeneratingQueue) return false;
-    if (!_isAdminSessionReady || _isCheckingAdminSession) {
+    if (!_isAdminSessionReady ||
+        _isCheckingAdminSession ||
+        !_capacityPolicyReady) {
       _showAdminSessionUnavailableMessage();
       return false;
     }
     _isGeneratingQueue = true;
 
     try {
-      return await _generateQueueOnce(type, name, plate);
+      return await _generateQueueOnce(
+        type,
+        name,
+        plate,
+        requestId: requestId,
+        vehicleCategory: vehicleCategory,
+        vehicleCategoryOther: vehicleCategoryOther,
+      );
     } finally {
       _isGeneratingQueue = false;
     }
@@ -1693,8 +1877,21 @@ class _AdminPageState extends State<AdminPage> {
   Future<bool> _generateQueueOnce(
     String type,
     String name,
-    String plate,
-  ) async {
+    String plate, {
+    required String requestId,
+    required String vehicleCategory,
+    String? vehicleCategoryOther,
+  }) async {
+    final categoryError = validateVehicleCategory(
+      vehicleCategory,
+      other: vehicleCategoryOther,
+    );
+    if (categoryError != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(categoryError)));
+      return false;
+    }
     if (name.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -1722,59 +1919,20 @@ class _AdminPageState extends State<AdminPage> {
 
     final String selectedDate = selectedQueueDateNotifier.value;
 
-    if (issuedCountForSelectedDate() >= maxQueueLimit) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            text(
-              "QUEUE CLOSED — DAILY LIMIT REACHED",
-              "SARADO NA ANG QUEUE — NAABOT NA ANG DAILY LIMIT",
-            ),
-          ),
-        ),
-      );
-      return false;
-    }
-
-    String queueNumber = await generateNextAvailableQueueCodeOnline(type);
-
-    if (queueNumber.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            text(
-              "No available queue number for this type",
-              "Wala nang available na queue number para sa type na ito",
-            ),
-          ),
-        ),
-      );
-      return false;
-    }
-
-    final Map<String, dynamic> queueData = {
-      "queueId": queueNumber,
-      "queue": queueNumber,
-      "name": name,
-      "plate": plateNumber,
-      "type": type,
-      "date": selectedDate,
-      ...firestoreQueryFields(
-        date: selectedDate,
-        plate: plateNumber,
-        name: name,
-      ),
-      "source": "Walk-in",
-      "status": "Waiting",
-      "createdAt": FieldValue.serverTimestamp(),
-      "updatedAt": FieldValue.serverTimestamp(),
-    };
-
     try {
-      await _saveQueueWithSessionRecovery(
-        queueItemsRef(selectedDate).doc(queueNumber),
-        queueData,
+      final queueNumber = await _saveQueueWithSessionRecovery(
+        () => DailyQueueCapacityService.generateWalkIn(
+          requestId: requestId,
+          date: selectedDate,
+          type: type,
+          name: name,
+          plate: plateNumber,
+          vehicleCategory: vehicleCategory,
+          vehicleCategoryOther: vehicleCategoryOther,
+        ),
       );
+
+      if (!mounted) return true;
 
       markQueueCodeAsIssued(selectedDate, queueNumber);
 
@@ -1797,9 +1955,27 @@ class _AdminPageState extends State<AdminPage> {
     } on _AdminSessionExpiredException {
       await _returnToLoginForExpiredAdminSession();
       return false;
-    } catch (e) {
+    } on DailyQueueSubmissionUnconfirmed {
+      if (!mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Failed to save queue online: $e")),
+        const SnackBar(
+          content: Text(
+            'Queue creation could not be confirmed. Check the queue list or retry '
+            'this same form before creating another ticket.',
+          ),
+        ),
+      );
+      return false;
+    } catch (e) {
+      if (!mounted) return false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            e is FirebaseException && e.message != null
+                ? e.message!
+                : "Failed to save queue online: $e",
+          ),
+        ),
       );
 
       return false;
@@ -2125,7 +2301,24 @@ class _AdminPageState extends State<AdminPage> {
     if (date.isEmpty || queue.isEmpty) return;
 
     try {
-      await queueItemsRef(date).doc(queue).delete();
+      final reference = queueItemsRef(date).doc(queue);
+      await DailyQueueCapacityService.runDayTransaction<void>(date, (
+        transaction,
+        day,
+      ) async {
+        final snapshot = await transaction.get(reference);
+        final current = snapshot.data();
+        if (current == null) return;
+        if (!_isWalkInCapacityRecord(current)) {
+          throw StateError('Only a walk-in queue can be deleted here.');
+        }
+        if (current['status'] == 'Passed' || current['status'] == 'Failed') {
+          day.completeQueue({...current, 'queue': queue, 'date': date});
+        } else {
+          day.releaseWalkIn(queue);
+        }
+        transaction.delete(reference);
+      });
 
       waitingQueueNotifier.value = waitingQueueNotifier.value.where((item) {
         return item["queue"] != queue || item["date"] != date;
@@ -2608,8 +2801,6 @@ class _AdminPageState extends State<AdminPage> {
               try {
                 final onlineItems = await getQueueItemsOnline(selectedDate);
 
-                final batch = FirebaseFirestore.instance.batch();
-
                 for (final item in onlineItems) {
                   final status = item["status"]?.toString() ?? "";
 
@@ -2619,16 +2810,31 @@ class _AdminPageState extends State<AdminPage> {
                     final queue = item["queue"]?.toString() ?? "";
 
                     if (queue.isNotEmpty) {
-                      batch.update(queueItemsRef(selectedDate).doc(queue), {
-                        "status": "Reset",
-                        "resetAt": FieldValue.serverTimestamp(),
-                        "updatedAt": FieldValue.serverTimestamp(),
-                      });
+                      final reference = queueItemsRef(selectedDate).doc(queue);
+                      await DailyQueueCapacityService.runDayTransaction<void>(
+                        selectedDate,
+                        (transaction, day) async {
+                          final snapshot = await transaction.get(reference);
+                          final current = snapshot.data();
+                          if (current == null ||
+                              !isActiveQueueStatus(
+                                current['status']?.toString() ?? '',
+                              )) {
+                            return;
+                          }
+                          if (_isWalkInCapacityRecord(current)) {
+                            day.releaseWalkIn(queue);
+                          }
+                          transaction.update(reference, {
+                            "status": "Reset",
+                            "resetAt": FieldValue.serverTimestamp(),
+                            "updatedAt": FieldValue.serverTimestamp(),
+                          });
+                        },
+                      );
                     }
                   }
                 }
-
-                await batch.commit();
 
                 waitingQueueNotifier.value = [];
                 nowServingNotifier.value = null;
@@ -2807,6 +3013,16 @@ class _AdminPageState extends State<AdminPage> {
             final queuePanelBody = buildQueuePanelBody(
               selectedDateQueue: selectedDateQueue,
               displayedNowServing: displayedNowServing,
+              capacityUsage:
+                  onlineItems == null ||
+                      !_completedCapacityReady ||
+                      !_capacityAppointmentsReady
+                  ? null
+                  : DailyQueueUsage.fromRecords(
+                      appointments: _capacityAppointments,
+                      queueItems: onlineItems,
+                      completedClaims: _completedCapacityClaims,
+                    ),
             );
             final selectedAdminPage = _activeAdminSection == _AdminSection.queue
                 ? queuePanelBody
@@ -2908,6 +3124,7 @@ class _AdminPageState extends State<AdminPage> {
   Widget buildQueuePanelBody({
     required List<Map<String, dynamic>> selectedDateQueue,
     required Map<String, dynamic>? displayedNowServing,
+    required DailyQueueUsage? capacityUsage,
   }) {
     return SafeArea(
       child: LayoutBuilder(
@@ -2942,7 +3159,10 @@ class _AdminPageState extends State<AdminPage> {
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              Expanded(flex: 4, child: buildLeftPanel()),
+                              Expanded(
+                                flex: 4,
+                                child: buildLeftPanel(capacityUsage),
+                              ),
                               const SizedBox(width: 20),
                               Expanded(
                                 flex: 8,
@@ -2956,7 +3176,10 @@ class _AdminPageState extends State<AdminPage> {
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              SizedBox(width: 230, child: buildLeftPanel()),
+                              SizedBox(
+                                width: 230,
+                                child: buildLeftPanel(capacityUsage),
+                              ),
                               const SizedBox(width: 18),
                               Expanded(
                                 child: buildNowServingCard(displayedNowServing),
@@ -2969,7 +3192,7 @@ class _AdminPageState extends State<AdminPage> {
                           children: [
                             buildNowServingCard(displayedNowServing),
                             const SizedBox(height: 16),
-                            buildLeftPanel(),
+                            buildLeftPanel(capacityUsage),
                           ],
                         ),
                       const SizedBox(height: 18),
@@ -3436,7 +3659,14 @@ class _AdminPageState extends State<AdminPage> {
 
   // ================= LEFT PANEL =================
 
-  Widget buildLeftPanel() {
+  Widget buildLeftPanel(DailyQueueUsage? capacityUsage) {
+    final remaining = capacityUsage?.walkInRemaining(_capacityPolicy);
+    final canGenerate =
+        _isAdminSessionReady &&
+        !_isCheckingAdminSession &&
+        _capacityPolicyReady &&
+        remaining != null &&
+        remaining > 0;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -3448,11 +3678,46 @@ class _AdminPageState extends State<AdminPage> {
                 title: text("GENERATE QUEUE TICKET", "GUMAWA NG QUEUE TICKET"),
               ),
               const SizedBox(height: 15),
+              Text(
+                !_capacityPolicyReady || remaining == null
+                    ? text(
+                        'Loading walk-in allocation…',
+                        'Kinukuha ang walk-in allocation…',
+                      )
+                    : text(
+                        'Walk-in slots remaining: $remaining of ${_capacityPolicy.sourceLimit}',
+                        'Natitirang walk-in slot: $remaining sa ${_capacityPolicy.sourceLimit}',
+                      ),
+                style: TextStyle(color: _mutedTextColor, fontSize: 13),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 6),
+              Text(
+                text(
+                  'Gas and Diesel combined • Appointment slots stay reserved.',
+                  'Pinagsamang Gas at Diesel • Nakareserba ang appointment slots.',
+                ),
+                style: TextStyle(color: _mutedTextColor, fontSize: 11.5),
+                textAlign: TextAlign.center,
+              ),
+              if (remaining == 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    text(
+                      'Walk-in allocation is full for this date.',
+                      'Puno na ang walk-in allocation para sa petsang ito.',
+                    ),
+                    style: const TextStyle(color: Colors.red),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
                 height: 48,
                 child: ElevatedButton.icon(
-                  onPressed: _isAdminSessionReady && !_isCheckingAdminSession
+                  onPressed: canGenerate
                       ? () => showGenerateDialog("Gas")
                       : null,
                   icon: const Icon(Icons.directions_car_rounded),
@@ -3464,7 +3729,7 @@ class _AdminPageState extends State<AdminPage> {
                 width: double.infinity,
                 height: 48,
                 child: ElevatedButton.icon(
-                  onPressed: _isAdminSessionReady && !_isCheckingAdminSession
+                  onPressed: canGenerate
                       ? () => showGenerateDialog("Diesel")
                       : null,
                   icon: const Icon(Icons.local_shipping_rounded),

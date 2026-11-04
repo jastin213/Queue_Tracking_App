@@ -4,6 +4,7 @@ import 'package:queue_tracking_app/screens/admin_page.dart';
 import 'package:queue_tracking_app/screens/book_appointment.dart';
 import 'package:queue_tracking_app/services/app_language.dart';
 import 'package:queue_tracking_app/services/booking_queue_availability.dart';
+import 'package:queue_tracking_app/services/daily_queue_capacity.dart';
 import 'package:queue_tracking_app/theme/app_theme.dart';
 
 const _bookingDate = '10/25/2026';
@@ -283,6 +284,177 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+
+  testWidgets(
+    'combined appointment quota disables selection without marking free codes taken',
+    (tester) async {
+      final dynamic state = await _pumpBookingPage(tester);
+      final bookings = List.generate(40, (index) {
+        final prefix = index < 20 ? 'G' : 'D';
+        final number = 2 * (index % 20) + 1;
+        return {
+          ..._appointment(
+            '$prefix${number.toString().padLeft(3, '0')}',
+            'Pending',
+          ),
+          'appointmentId': 'booking-$index',
+        };
+      });
+      state.updateQueueAvailability(
+        appointments: bookings,
+        queueItems: <Map<String, dynamic>>[],
+      );
+      await tester.pumpAndSettle();
+
+      expect(state.queueCapacityUsage.appointmentUsed, 40);
+      expect(state.queueCapacityUsage.walkInUsed, 0);
+      expect(state.appointmentSlotsRemaining, 0);
+      expect(state.isAppointmentQuotaFull, isTrue);
+      expect(state.getFirstAvailableQueueCode(), isEmpty);
+      expect(state.queueCodeState('G002'), BookingQueueCodeState.available);
+      final freePill = tester.widget<Semantics>(_queuePill('G002'));
+      expect(freePill.properties.enabled, isFalse);
+      expect(freePill.properties.label, contains('appointment slots full'));
+      expect(find.text('Appointment slots remaining: 0 of 40'), findsOneWidget);
+      expect(
+        tester
+            .widget<ElevatedButton>(
+              find.ancestor(
+                of: find.text('SUBMIT APPOINTMENT'),
+                matching: find.byType(ElevatedButton),
+              ),
+            )
+            .onPressed,
+        isNull,
+      );
+
+      bookings[0] = {...bookings[0], 'status': 'Rejected'};
+      state.updateQueueAvailability(appointments: bookings);
+      await tester.pumpAndSettle();
+      expect(state.appointmentSlotsRemaining, 1);
+      expect(state.isAppointmentQuotaFull, isFalse);
+      expect(state.getFirstAvailableQueueCode(), 'G001');
+      expect(
+        tester.widget<Semantics>(_queuePill('G002')).properties.enabled,
+        isTrue,
+      );
+      expect(find.text('Appointment slots remaining: 1 of 40'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets('approval mirror does not consume another appointment slot', (
+    tester,
+  ) async {
+    final dynamic state = await _pumpBookingPage(tester);
+    final approved = {
+      ..._appointment('G005', 'Approved'),
+      'appointmentId': 'approved-booking',
+    };
+    state.updateQueueAvailability(
+      appointments: [approved],
+      queueItems: [
+        {...approved, 'source': 'Appointment', 'status': 'Waiting'},
+      ],
+    );
+    await tester.pumpAndSettle();
+    expect(state.queueCapacityUsage.appointmentUsed, 1);
+    expect(state.appointmentSlotsRemaining, 39);
+    expect(find.text('Appointment slots remaining: 39 of 40'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+    'configured capacity updates code choices and source allocation',
+    (tester) async {
+      final dynamic state = await _pumpBookingPage(tester);
+      state.updateCapacityPolicy(
+        const DailyQueueCapacityPolicy(dailyLimit: 100),
+      );
+      state.updateQueueAvailability(
+        appointments: <Map<String, dynamic>>[],
+        queueItems: <Map<String, dynamic>>[],
+      );
+      await tester.pumpAndSettle();
+      expect(state.getQueueCodes(), hasLength(100));
+      expect(state.getQueueCodes().last, 'G100');
+      expect(state.appointmentSlotsRemaining, 50);
+      expect(
+        find.text('Appointment slots remaining: 50 of 50'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'completed capacity claims remain after report records disappear',
+    (tester) async {
+      final dynamic state = await _pumpBookingPage(tester);
+      state.updateQueueAvailability(
+        appointments: <Map<String, dynamic>>[],
+        queueItems: <Map<String, dynamic>>[],
+      );
+      state.updateCompletedCapacityClaims({
+        'completed-a': {
+          'source': 'appointment',
+          'queue': 'G005',
+          'appointmentId': 'a',
+        },
+      });
+      await tester.pumpAndSettle();
+      expect(state.queueCapacityUsage.appointmentUsed, 1);
+      expect(state.appointmentSlotsRemaining, 39);
+      expect(state.queueCodeState('G005'), BookingQueueCodeState.taken);
+      expect(
+        find.text('Appointment slots remaining: 39 of 40'),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  for (final width in [360.0, 1080.0]) {
+    testWidgets('appointment capacity summary fits a $width pixel screen', (
+      tester,
+    ) async {
+      final dynamic state = await _pumpBookingPage(tester);
+      state.updateQueueAvailability(
+        appointments: [
+          {..._appointment('G005', 'Pending'), 'appointmentId': 'gas-booking'},
+          {
+            ..._appointment('D005', 'Pending'),
+            'appointmentId': 'diesel-booking',
+          },
+        ],
+        queueItems: <Map<String, dynamic>>[],
+      );
+      tester.view.physicalSize = Size(width, 900);
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.text('Appointment slots remaining: 38 of 40'),
+        400,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.text('Appointment slots remaining: 38 of 40'),
+        findsOneWidget,
+      );
+      expect(
+        find.text(
+          'Gas and Diesel share the appointment allocation. Walk-in slots are reserved separately.',
+        ),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
 
   for (final language in [englishLanguage, filipinoLanguage]) {
     testWidgets('reserved label fits narrow $language screen at 2x text size', (

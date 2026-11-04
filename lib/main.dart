@@ -7,12 +7,14 @@ import 'screens/display_page.dart';
 import 'screens/splash_screen.dart';
 import 'services/app_language.dart';
 import 'services/customer_preferences.dart';
+import 'services/firebase_emulators.dart';
 import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  await configureFirebaseEmulators();
   await initializeAppTheme();
   await initializeAppLanguage();
   await initializeCustomerPreferences();

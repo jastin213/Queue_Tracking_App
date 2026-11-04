@@ -7,6 +7,8 @@ import 'package:flutter_tts/flutter_tts.dart';
 
 import '../services/app_language.dart';
 import '../services/appointment_approval_settings.dart';
+import '../services/daily_queue_capacity.dart';
+import '../services/daily_queue_capacity_service.dart';
 import '../services/public_display_settings.dart';
 import '../services/queue_voice.dart';
 import '../theme/app_theme.dart';
@@ -65,6 +67,10 @@ class _AdminSettingsState extends State<AdminSettings> {
   StreamSubscription<AppointmentApprovalSettings>?
   _appointmentApprovalSettingsSubscription;
   StreamSubscription<String>? _displayAnnouncementSubscription;
+  StreamSubscription<DailyQueueCapacityPolicy>? _queueCapacitySubscription;
+  bool _queueCapacityLoading = true;
+  bool _queueCapacitySaving = false;
+  int? _draftDailyLimit;
   bool _conditionalAutoApprovalEnabled = false;
   bool _conditionalAutoRejectionEnabled = false;
   bool _appointmentApprovalSettingsLoading = true;
@@ -76,8 +82,19 @@ class _AdminSettingsState extends State<AdminSettings> {
     announcementController.text = displayAnnouncementNotifier.value;
     if (Firebase.apps.isEmpty) {
       _appointmentApprovalSettingsLoading = false;
+      _queueCapacityLoading = false;
       return;
     }
+    _queueCapacitySubscription = DailyQueueCapacityService.watchPolicy().listen(
+      (policy) {
+        if (!mounted) return;
+        dailyQueueLimitNotifier.value = policy.dailyLimit;
+        setState(() => _queueCapacityLoading = false);
+      },
+      onError: (_) {
+        if (mounted) setState(() => _queueCapacityLoading = false);
+      },
+    );
     _displayAnnouncementSubscription = PublicDisplaySettings.watchAnnouncement()
         .listen((announcement) {
           if (!mounted) return;
@@ -106,6 +123,7 @@ class _AdminSettingsState extends State<AdminSettings> {
 
   @override
   void dispose() {
+    _queueCapacitySubscription?.cancel();
     _appointmentApprovalSettingsSubscription?.cancel();
     _displayAnnouncementSubscription?.cancel();
     announcementController.dispose();
@@ -157,8 +175,37 @@ class _AdminSettingsState extends State<AdminSettings> {
   }
 
   void updateQueueLimit(int value) {
-    dailyQueueLimitNotifier.value = value;
-    setState(() {});
+    setState(() => _draftDailyLimit = value);
+  }
+
+  Future<void> saveQueueLimit(double value) async {
+    if (_queueCapacitySaving) return;
+    final limit = value.round();
+    setState(() => _queueCapacitySaving = true);
+    try {
+      await DailyQueueCapacityService.savePolicy(limit);
+      if (!mounted) return;
+      dailyQueueLimitNotifier.value = limit;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Daily queue allocation saved.')),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Unable to confirm the daily queue limit. Check your connection and retry.',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _draftDailyLimit = null;
+          _queueCapacitySaving = false;
+        });
+      }
+    }
   }
 
   // ==========================================================================
@@ -688,7 +735,8 @@ class _AdminSettingsState extends State<AdminSettings> {
           settingLabel("Daily Queue Limit"),
           ValueListenableBuilder<int>(
             valueListenable: dailyQueueLimitNotifier,
-            builder: (context, value, _) {
+            builder: (context, savedValue, _) {
+              final value = _draftDailyLimit ?? savedValue;
               return Row(
                 children: [
                   Expanded(
@@ -700,9 +748,12 @@ class _AdminSettingsState extends State<AdminSettings> {
                       activeColor: _primaryColor,
                       inactiveColor: _borderColor,
                       label: value.toString(),
-                      onChanged: (newValue) {
-                        updateQueueLimit(newValue.round());
-                      },
+                      onChanged: _queueCapacityLoading || _queueCapacitySaving
+                          ? null
+                          : (newValue) {
+                              updateQueueLimit(newValue.round());
+                            },
+                      onChangeEnd: saveQueueLimit,
                     ),
                   ),
                   Container(
@@ -723,6 +774,20 @@ class _AdminSettingsState extends State<AdminSettings> {
                     ),
                   ),
                 ],
+              );
+            },
+          ),
+          const SizedBox(height: 8),
+          ValueListenableBuilder<int>(
+            valueListenable: dailyQueueLimitNotifier,
+            builder: (context, savedValue, _) {
+              final half = (_draftDailyLimit ?? savedValue) ~/ 2;
+              return Text(
+                _queueCapacityLoading
+                    ? 'Loading daily allocation…'
+                    : '$half appointment slots + $half walk-in slots. Gas and Diesel '
+                          'share these limits. Unused slots stay reserved for each group.',
+                style: TextStyle(color: _mutedTextColor, fontSize: 13),
               );
             },
           ),

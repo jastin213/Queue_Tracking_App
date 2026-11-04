@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
+import 'daily_queue_capacity_service.dart';
+
 final Set<String> _appointmentIdsBeingExpired = <String>{};
 
 DateTime? parseAppointmentDate(Object? value) {
@@ -49,7 +51,7 @@ bool isPastPendingAppointment(
       isPastAppointmentDate(appointment['date'], now: now);
 }
 
-/// Marks overdue pending appointments as expired in small batches.
+/// Expires overdue pending appointments together with their capacity claims.
 ///
 /// The appointment record is intentionally preserved for audit/report history;
 /// only its active Pending state is removed.
@@ -69,24 +71,31 @@ Future<int> expirePastPendingAppointmentDocuments(
   if (expiredDocuments.isEmpty) return 0;
 
   try {
-    const batchSize = 400;
-    for (var start = 0; start < expiredDocuments.length; start += batchSize) {
-      final end = (start + batchSize < expiredDocuments.length)
-          ? start + batchSize
-          : expiredDocuments.length;
-      final batch = FirebaseFirestore.instance.batch();
-
-      for (final document in expiredDocuments.sublist(start, end)) {
-        batch.update(document.reference, {
-          'status': 'Expired',
-          'expiredAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-      }
-
-      await batch.commit();
+    var expiredCount = 0;
+    for (final document in expiredDocuments) {
+      final expired = await DailyQueueCapacityService.runDayTransaction<bool>(
+        document.data()['date']?.toString() ?? '',
+        (transaction, day) async {
+          final snapshot = await transaction.get(document.reference);
+          final current = snapshot.data();
+          if (current == null || !isPastPendingAppointment(current, now: now)) {
+            return false;
+          }
+          day.releaseAppointment(
+            document.id,
+            current['queue']?.toString() ?? '',
+          );
+          transaction.update(document.reference, {
+            'status': 'Expired',
+            'expiredAt': FieldValue.serverTimestamp(),
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+          return true;
+        },
+      );
+      if (expired) expiredCount++;
     }
-    return expiredDocuments.length;
+    return expiredCount;
   } catch (error) {
     debugPrint('Unable to expire overdue appointments: $error');
     rethrow;

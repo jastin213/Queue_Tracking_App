@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart' hide Text;
@@ -14,13 +15,17 @@ import 'package:printing/printing.dart';
 
 import '../theme/app_theme.dart';
 import '../services/booking_queue_availability.dart';
+import '../services/daily_queue_capacity.dart';
+import '../services/daily_queue_capacity_service.dart';
 import '../services/document_image_optimizer.dart';
 import '../services/document_image_quality.dart';
 import '../services/document_upload_consent.dart';
 import '../services/firestore_query_fields.dart';
 import '../services/platform_storage_upload.dart';
+import '../services/vehicle_category.dart';
 import '../widgets/app_refresh_indicator.dart';
 import '../widgets/app_responsive_content.dart';
+import '../widgets/vehicle_category_field.dart';
 import 'barangay_data.dart';
 import 'location_data.dart';
 import 'admin_page.dart';
@@ -109,6 +114,10 @@ class BookAppointment extends StatefulWidget {
 class _BookAppointmentState extends State<BookAppointment> {
   final TextEditingController fullNameController = TextEditingController();
   final TextEditingController plateController = TextEditingController();
+  final TextEditingController vehicleCategoryOtherController =
+      TextEditingController();
+  final GlobalKey<FormState> vehicleCategoryFormKey = GlobalKey<FormState>();
+  String? selectedVehicleCategory;
   final ImagePicker picker = ImagePicker();
 
   DateTime? selectedDate;
@@ -139,6 +148,16 @@ class _BookAppointmentState extends State<BookAppointment> {
   _queueAvailabilitySubscription;
   Map<String, BookingQueueCodeState>? _appointmentCodeStates;
   Set<String>? _liveQueueCodes;
+  List<Map<String, dynamic>>? _appointmentCapacityRecords;
+  List<Map<String, dynamic>>? _queueCapacityRecords;
+  StreamSubscription<DailyQueueCapacityPolicy>? _capacityPolicySubscription;
+  StreamSubscription<Map<String, dynamic>>? _completedCapacitySubscription;
+  Map<String, dynamic> _completedCapacityClaims = {};
+  bool _completedCapacityLoading = false;
+  Object? _completedCapacityError;
+  DailyQueueCapacityPolicy _capacityPolicy = const DailyQueueCapacityPolicy();
+  bool _capacityPolicyLoading = false;
+  Object? _capacityPolicyError;
   bool _appointmentAvailabilityLoaded = false;
   bool _queueAvailabilityLoaded = false;
   int _availabilityGeneration = 0;
@@ -146,8 +165,6 @@ class _BookAppointmentState extends State<BookAppointment> {
   int _queueAvailabilityRevision = 0;
   Object? _availabilityError;
   int _queueSegmentIndex = 0;
-
-  static const int maxQueueLimit = 80;
 
   String get loggedInCustomerName => loggedInCustomerNameNotifier.value.trim();
 
@@ -163,6 +180,20 @@ class _BookAppointmentState extends State<BookAppointment> {
     if (loggedInCustomerName.isNotEmpty) {
       fullNameController.text = loggedInCustomerName;
     }
+    if (Firebase.apps.isNotEmpty) {
+      _capacityPolicyLoading = true;
+      _capacityPolicySubscription = DailyQueueCapacityService.watchPolicy()
+          .listen(
+            updateCapacityPolicy,
+            onError: (Object error) {
+              if (!mounted) return;
+              setState(() {
+                _capacityPolicyLoading = false;
+                _capacityPolicyError = error;
+              });
+            },
+          );
+    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) => showBookingPolicy());
   }
@@ -171,8 +202,11 @@ class _BookAppointmentState extends State<BookAppointment> {
   void dispose() {
     _appointmentAvailabilitySubscription?.cancel();
     _queueAvailabilitySubscription?.cancel();
+    _capacityPolicySubscription?.cancel();
+    _completedCapacitySubscription?.cancel();
     fullNameController.dispose();
     plateController.dispose();
+    vehicleCategoryOtherController.dispose();
     super.dispose();
   }
 
@@ -270,6 +304,56 @@ class _BookAppointmentState extends State<BookAppointment> {
   Set<String> get realtimeUnavailableCodes =>
       getQueueCodes().where(isQueueTaken).toSet();
 
+  DailyQueueCapacityPolicy get capacityPolicy => _capacityPolicy;
+
+  DailyQueueUsage get queueCapacityUsage => DailyQueueUsage.fromRecords(
+    appointments:
+        _appointmentCapacityRecords ??
+        [
+          ...pendingBookings.value.map(
+            (item) => {'status': 'Pending', ...item},
+          ),
+          ...approvedBookings.value.map(
+            (item) => {'status': 'Approved', ...item},
+          ),
+        ].where((item) => item['date'] == formattedDate),
+    queueItems:
+        _queueCapacityRecords ??
+        [
+          ...waitingQueueNotifier.value,
+          ?nowServingNotifier.value,
+          ...?dailyServedReportNotifier.value[formattedDate],
+          ...?dailyFailedReportNotifier.value[formattedDate],
+        ].where((item) => item['date'] == formattedDate),
+    completedClaims: _completedCapacityClaims,
+  );
+
+  int get appointmentSlotsRemaining =>
+      queueCapacityUsage.appointmentRemaining(_capacityPolicy);
+
+  bool get isAppointmentQuotaFull =>
+      selectedDate != null && appointmentSlotsRemaining == 0;
+
+  void updateCapacityPolicy(DailyQueueCapacityPolicy policy) {
+    if (!mounted) return;
+    setState(() {
+      _capacityPolicy = policy;
+      _capacityPolicyLoading = false;
+      _capacityPolicyError = null;
+      keepSelectedQueueAvailable();
+    });
+  }
+
+  void updateCompletedCapacityClaims(Map<String, dynamic> claims) {
+    if (!mounted) return;
+    setState(() {
+      _completedCapacityClaims = Map<String, dynamic>.from(claims);
+      _completedCapacityLoading = false;
+      _completedCapacityError = null;
+      keepSelectedQueueAvailable();
+    });
+  }
+
   void updateQueueAvailability({
     Iterable<Map<String, dynamic>>? appointments,
     Iterable<Map<String, dynamic>>? queueItems,
@@ -277,12 +361,20 @@ class _BookAppointmentState extends State<BookAppointment> {
     if (!mounted) return;
     setState(() {
       if (appointments != null) {
-        _appointmentCodeStates = appointmentQueueCodeStates(appointments);
+        _appointmentCapacityRecords = appointments
+            .where((item) => item['date'] == formattedDate)
+            .toList();
+        _appointmentCodeStates = appointmentQueueCodeStates(
+          _appointmentCapacityRecords!,
+        );
         _appointmentAvailabilityLoaded = true;
         _appointmentAvailabilityRevision++;
       }
       if (queueItems != null) {
-        _liveQueueCodes = unavailableLiveQueueCodes(queueItems);
+        _queueCapacityRecords = queueItems
+            .where((item) => item['date'] == formattedDate)
+            .toList();
+        _liveQueueCodes = unavailableLiveQueueCodes(_queueCapacityRecords!);
         _queueAvailabilityLoaded = true;
         _queueAvailabilityRevision++;
       }
@@ -292,8 +384,10 @@ class _BookAppointmentState extends State<BookAppointment> {
   }
 
   void keepSelectedQueueAvailable() {
-    if (selectedDate == null) return;
-    if (selectedQueueCode.isEmpty || isQueueTaken(selectedQueueCode)) {
+    if (selectedDate == null || isSubmitting) return;
+    if (isAppointmentQuotaFull ||
+        !getQueueCodes().contains(selectedQueueCode) ||
+        isQueueTaken(selectedQueueCode)) {
       selectedQueueCode = getFirstAvailableQueueCode();
       _queueSegmentIndex = queueSegmentIndexForCode(selectedQueueCode);
     }
@@ -302,6 +396,7 @@ class _BookAppointmentState extends State<BookAppointment> {
   void listenToQueueAvailability() {
     _appointmentAvailabilitySubscription?.cancel();
     _queueAvailabilitySubscription?.cancel();
+    _completedCapacitySubscription?.cancel();
 
     final date = formattedDate;
     if (date.isEmpty) return;
@@ -310,10 +405,32 @@ class _BookAppointmentState extends State<BookAppointment> {
     setState(() {
       _appointmentCodeStates = null;
       _liveQueueCodes = null;
+      _appointmentCapacityRecords = null;
+      _queueCapacityRecords = null;
+      _completedCapacityClaims = {};
+      _completedCapacityLoading = Firebase.apps.isNotEmpty;
+      _completedCapacityError = null;
       _appointmentAvailabilityLoaded = false;
       _queueAvailabilityLoaded = false;
       _availabilityError = null;
     });
+
+    if (Firebase.apps.isNotEmpty) {
+      _completedCapacitySubscription =
+          DailyQueueCapacityService.watchCompletedClaims(date).listen(
+            (claims) {
+              if (!mounted || _availabilityGeneration != generation) return;
+              updateCompletedCapacityClaims(claims);
+            },
+            onError: (Object error) {
+              if (!mounted || _availabilityGeneration != generation) return;
+              setState(() {
+                _completedCapacityLoading = false;
+                _completedCapacityError = error;
+              });
+            },
+          );
+    }
 
     _appointmentAvailabilitySubscription = FirebaseFirestore.instance
         .collection("appointments")
@@ -323,7 +440,9 @@ class _BookAppointmentState extends State<BookAppointment> {
           (snapshot) {
             if (!mounted || _availabilityGeneration != generation) return;
             updateQueueAvailability(
-              appointments: snapshot.docs.map((doc) => doc.data()),
+              appointments: snapshot.docs.map(
+                (doc) => {...doc.data(), 'appointmentId': doc.id},
+              ),
             );
           },
           onError: (Object error) {
@@ -372,7 +491,7 @@ class _BookAppointmentState extends State<BookAppointment> {
     if (!mounted || _availabilityGeneration != generation) return;
     // A refresh started before a live rejection must not restore its old hold.
     final appointments = appointmentRevision == _appointmentAvailabilityRevision
-        ? results[0].docs.map((doc) => doc.data())
+        ? results[0].docs.map((doc) => {...doc.data(), 'appointmentId': doc.id})
         : null;
     final queueItems = queueRevision == _queueAvailabilityRevision
         ? results[1].docs.map(
@@ -390,13 +509,18 @@ class _BookAppointmentState extends State<BookAppointment> {
   List<String> getQueueCodes() {
     String prefix = selectedVehicle == "Gas" ? "G" : "D";
 
-    return List.generate(maxQueueLimit, (index) {
+    return List.generate(_capacityPolicy.dailyLimit, (index) {
       return "$prefix${(index + 1).toString().padLeft(3, '0')}";
     });
   }
 
   BookingQueueCodeState queueCodeState(String code) {
     if (selectedDate == null) return BookingQueueCodeState.available;
+    if (_completedCapacityClaims.values.any(
+      (claim) => claim is Map && claim['queue']?.toString() == code,
+    )) {
+      return BookingQueueCodeState.taken;
+    }
 
     final liveCodes = _liveQueueCodes;
     if (liveCodes != null) {
@@ -440,27 +564,55 @@ class _BookAppointmentState extends State<BookAppointment> {
           .collection("appointments")
           .where("date", isEqualTo: date)
           .get(const GetOptions(source: Source.server)),
-      queueItemsRef(
-        date,
-      ).doc(queueCode).get(const GetOptions(source: Source.server)),
+      queueItemsRef(date).get(const GetOptions(source: Source.server)),
+      FirebaseFirestore.instance
+          .collection('capacity_days')
+          .doc(queueDateId(date))
+          .get(const GetOptions(source: Source.server)),
     ]);
     final appointmentSnapshot =
         results[0] as QuerySnapshot<Map<String, dynamic>>;
-    final queueSnapshot = results[1] as DocumentSnapshot<Map<String, dynamic>>;
+    final queueSnapshot = results[1] as QuerySnapshot<Map<String, dynamic>>;
+    final capacitySnapshot =
+        results[2] as DocumentSnapshot<Map<String, dynamic>>;
+    final completedClaims = capacitySnapshot.data()?['completedClaims'];
+    final appointments = appointmentSnapshot.docs
+        .map((doc) => {...doc.data(), 'appointmentId': doc.id})
+        .toList();
+    final queueItems = queueSnapshot.docs
+        .map((doc) => {...doc.data(), 'queue': doc.data()['queue'] ?? doc.id})
+        .toList();
+    final usage = DailyQueueUsage.fromRecords(
+      appointments: appointments,
+      queueItems: queueItems,
+      completedClaims: completedClaims is Map
+          ? Map<String, dynamic>.from(completedClaims)
+          : const {},
+    );
+    if (usage.appointmentRemaining(_capacityPolicy) == 0) {
+      throw FirebaseException(
+        plugin: 'cloud_firestore',
+        code: 'resource-exhausted',
+        message:
+            'Appointment slots are full for this date. Walk-in slots are reserved separately. Please choose another date.',
+      );
+    }
     final reservedAppointment = appointmentQueueCodeStates(
-      appointmentSnapshot.docs.map((doc) => doc.data()),
+      appointments,
     ).containsKey(queueCode);
-    final queueData = queueSnapshot.data();
     final activeQueue =
-        queueData != null &&
-        unavailableLiveQueueCodes([
-          {...queueData, 'queue': queueCode},
-        ]).isNotEmpty;
+        unavailableLiveQueueCodes(queueItems).contains(queueCode) ||
+        (completedClaims is Map &&
+            completedClaims.values.any(
+              (claim) =>
+                  claim is Map && claim['queue']?.toString() == queueCode,
+            ));
 
     return reservedAppointment || activeQueue;
   }
 
   String getFirstAvailableQueueCode() {
+    if (isAppointmentQuotaFull) return '';
     final codes = getQueueCodes();
 
     for (var code in codes) {
@@ -495,6 +647,11 @@ class _BookAppointmentState extends State<BookAppointment> {
       setState(() {
         _appointmentCodeStates = null;
         _liveQueueCodes = null;
+        _appointmentCapacityRecords = null;
+        _queueCapacityRecords = null;
+        _completedCapacityClaims = {};
+        _completedCapacityLoading = false;
+        _completedCapacityError = null;
         selectedDate = picked;
         selectedQueueCode = getFirstAvailableQueueCode();
         _queueSegmentIndex = queueSegmentIndexForCode(selectedQueueCode);
@@ -1162,6 +1319,31 @@ class _BookAppointmentState extends State<BookAppointment> {
 
   Future<void> submitBooking() async {
     if (isSubmitting) return;
+    // The ListView may unmount this field while the documents are in view.
+    // Validate the saved selection even when its FormState is unavailable.
+    final categoryError = validateVehicleCategory(
+      selectedVehicleCategory,
+      other: vehicleCategoryOtherController.text,
+    );
+    if (categoryError != null) {
+      vehicleCategoryFormKey.currentState?.validate();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(categoryError)));
+      final categoryContext = vehicleCategoryFormKey.currentContext;
+      if (categoryContext != null) {
+        await Scrollable.ensureVisible(
+          categoryContext,
+          duration: const Duration(milliseconds: 200),
+          alignment: 0.3,
+        );
+      }
+      return;
+    }
+    final categoryData = vehicleCategoryFields(
+      category: selectedVehicleCategory!,
+      other: vehicleCategoryOtherController.text,
+    );
 
     final User? currentUser = FirebaseAuth.instance.currentUser;
 
@@ -1191,8 +1373,38 @@ class _BookAppointmentState extends State<BookAppointment> {
       return;
     }
 
+    if (_capacityPolicyLoading ||
+        _capacityPolicyError != null ||
+        _completedCapacityLoading ||
+        _completedCapacityError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Daily queue capacity could not be verified yet. Please wait or retry after reconnecting.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    // Keep this attempt tied to the details selected when Submit was pressed.
+    final bookingSelectedDate = selectedDate;
+    final bookingDate = formattedDate;
+    final bookingQueue = selectedQueueCode;
+    final bookingVehicle = selectedVehicle;
+    final bookingMunicipality = selectedMunicipality;
+    final idBytes = idFileBytes;
+    final orBytes = orFileBytes;
+    final crBytes = crFileBytes;
+    final idName = idFileName ?? 'valid_id.jpg';
+    final orName = orFileName ?? 'official_receipt.jpg';
+    final crName = crFileName ?? 'certificate_of_registration.jpg';
+    final idPath = idFilePath;
+    final orPath = orFilePath;
+    final crPath = crFilePath;
+
     if (!await confirmDocumentUploadConsent()) return;
-    if (!mounted) return;
+    if (!mounted || isSubmitting) return;
 
     final String? currentPlateError = validatePhilippinePlateNumber(
       plateNumber,
@@ -1209,14 +1421,25 @@ class _BookAppointmentState extends State<BookAppointment> {
       return;
     }
 
-    if (selectedDate == null ||
+    if (bookingSelectedDate == null ||
         customerName.isEmpty ||
         barangay.isEmpty ||
-        idFileBytes == null ||
-        orFileBytes == null ||
-        crFileBytes == null) {
+        idBytes == null ||
+        orBytes == null ||
+        crBytes == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Complete all fields and documents.")),
+      );
+      return;
+    }
+
+    if (isAppointmentQuotaFull) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Appointment slots are full for this date. Walk-in slots are reserved separately. Please choose another date.',
+          ),
+        ),
       );
       return;
     }
@@ -1232,7 +1455,7 @@ class _BookAppointmentState extends State<BookAppointment> {
       return;
     }
 
-    if (isQueueTaken(selectedQueueCode)) {
+    if (isQueueTaken(bookingQueue)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
@@ -1261,8 +1484,8 @@ class _BookAppointmentState extends State<BookAppointment> {
 
     try {
       final bool firestoreQueueTaken = await isQueueTakenInFirestore(
-        formattedDate,
-        selectedQueueCode,
+        bookingDate,
+        bookingQueue,
       );
 
       if (firestoreQueueTaken) {
@@ -1304,9 +1527,9 @@ class _BookAppointmentState extends State<BookAppointment> {
           customerId: customerId,
           appointmentId: appointmentRef.id,
           documentType: 'ID',
-          fileName: idFileName ?? 'valid_id.jpg',
-          bytes: idFileBytes!,
-          filePath: idFilePath,
+          fileName: idName,
+          bytes: idBytes,
+          filePath: idPath,
           onProgress: (progress) {
             if (mounted) setState(() => uploadProgress = progress / 3);
           },
@@ -1318,9 +1541,9 @@ class _BookAppointmentState extends State<BookAppointment> {
           customerId: customerId,
           appointmentId: appointmentRef.id,
           documentType: 'OR',
-          fileName: orFileName ?? 'official_receipt.jpg',
-          bytes: orFileBytes!,
-          filePath: orFilePath,
+          fileName: orName,
+          bytes: orBytes,
+          filePath: orPath,
           onProgress: (progress) {
             if (mounted) setState(() => uploadProgress = (1 + progress) / 3);
           },
@@ -1332,9 +1555,9 @@ class _BookAppointmentState extends State<BookAppointment> {
           customerId: customerId,
           appointmentId: appointmentRef.id,
           documentType: 'CR',
-          fileName: crFileName ?? 'certificate_of_registration.jpg',
-          bytes: crFileBytes!,
-          filePath: crFilePath,
+          fileName: crName,
+          bytes: crBytes,
+          filePath: crPath,
           onProgress: (progress) {
             if (mounted) setState(() => uploadProgress = (2 + progress) / 3);
           },
@@ -1357,8 +1580,8 @@ class _BookAppointmentState extends State<BookAppointment> {
           appointmentRef: appointmentRef,
           customerId: customerId,
           documentType: 'ID',
-          fileName: idFileName ?? 'valid_id.jpg',
-          bytes: idFileBytes!,
+          fileName: idName,
+          bytes: idBytes,
           createdRefs: uploadedFirestoreDocumentRefs,
         );
         if (mounted) setState(() => uploadProgress = 0.65);
@@ -1366,8 +1589,8 @@ class _BookAppointmentState extends State<BookAppointment> {
           appointmentRef: appointmentRef,
           customerId: customerId,
           documentType: 'OR',
-          fileName: orFileName ?? 'official_receipt.jpg',
-          bytes: orFileBytes!,
+          fileName: orName,
+          bytes: orBytes,
           createdRefs: uploadedFirestoreDocumentRefs,
         );
         if (mounted) setState(() => uploadProgress = 0.82);
@@ -1375,8 +1598,8 @@ class _BookAppointmentState extends State<BookAppointment> {
           appointmentRef: appointmentRef,
           customerId: customerId,
           documentType: 'CR',
-          fileName: crFileName ?? 'certificate_of_registration.jpg',
-          bytes: crFileBytes!,
+          fileName: crName,
+          bytes: crBytes,
           createdRefs: uploadedFirestoreDocumentRefs,
         );
         if (mounted) setState(() => uploadProgress = 1);
@@ -1387,22 +1610,23 @@ class _BookAppointmentState extends State<BookAppointment> {
         "customerId": customerId,
         "customerEmail": customerEmail,
         "fullName": customerName,
-        "municipality": selectedMunicipality,
+        "municipality": bookingMunicipality,
         "barangay": barangay,
         "plate": plateNumber,
-        "vehicle": selectedVehicle,
-        "queue": selectedQueueCode,
-        "date": formattedDate,
+        "vehicle": bookingVehicle,
+        ...categoryData,
+        "queue": bookingQueue,
+        "date": bookingDate,
         ...firestoreQueryFields(
-          date: formattedDate,
+          date: bookingDate,
           plate: plateNumber,
           name: customerName,
         ),
         "status": "Pending",
 
-        "idFile": idFileName,
-        "orFile": orFileName,
-        "crFile": crFileName,
+        "idFile": idName,
+        "orFile": orName,
+        "crFile": crName,
         // Do not store reusable download tokens in Firestore. Authorized admin
         // viewers resolve protected Storage paths only when a file is opened.
         "idFileUrl": "",
@@ -1421,19 +1645,22 @@ class _BookAppointmentState extends State<BookAppointment> {
           DateTime.now().add(const Duration(days: 365)),
         ),
         "totalDocumentBytes":
-            idFileBytes!.lengthInBytes +
-            orFileBytes!.lengthInBytes +
-            crFileBytes!.lengthInBytes,
-        "idDocumentHash": sha256.convert(idFileBytes!).toString(),
-        "orDocumentHash": sha256.convert(orFileBytes!).toString(),
-        "crDocumentHash": sha256.convert(crFileBytes!).toString(),
+            idBytes.lengthInBytes +
+            orBytes.lengthInBytes +
+            crBytes.lengthInBytes,
+        "idDocumentHash": sha256.convert(idBytes).toString(),
+        "orDocumentHash": sha256.convert(orBytes).toString(),
+        "crDocumentHash": sha256.convert(crBytes).toString(),
 
         "source": "Appointment",
         "createdAt": FieldValue.serverTimestamp(),
         "updatedAt": FieldValue.serverTimestamp(),
       };
 
-      await appointmentRef.set(appointmentData);
+      await DailyQueueCapacityService.submitAppointment(
+        appointmentRef,
+        appointmentData,
+      );
       appointmentSaved = true;
 
       // Keep local data temporarily so current frontend pages still work
@@ -1444,12 +1671,12 @@ class _BookAppointmentState extends State<BookAppointment> {
           ...appointmentData,
           "createdAt": DateTime.now().toIso8601String(),
           "updatedAt": DateTime.now().toIso8601String(),
-          "idPath": idFilePath,
-          "orPath": orFilePath,
-          "crPath": crFilePath,
-          "idBytes": idFileBytes,
-          "orBytes": orFileBytes,
-          "crBytes": crFileBytes,
+          "idPath": idPath,
+          "orPath": orPath,
+          "crPath": crPath,
+          "idBytes": idBytes,
+          "orBytes": orBytes,
+          "crBytes": crBytes,
         },
       ];
 
@@ -1461,7 +1688,7 @@ class _BookAppointmentState extends State<BookAppointment> {
 
       Navigator.pop(context);
     } catch (e) {
-      if (!appointmentSaved) {
+      if (!appointmentSaved && e is! DailyQueueSubmissionUnconfirmed) {
         for (final Reference documentRef in uploadedDocumentRefs.reversed) {
           try {
             await documentRef.delete();
@@ -1482,7 +1709,13 @@ class _BookAppointmentState extends State<BookAppointment> {
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Appointment submission failed: $e")),
+        SnackBar(
+          content: Text(
+            e is DailyQueueSubmissionUnconfirmed
+                ? 'Submission could not be confirmed. Check My Appointment Status before trying again.'
+                : 'Appointment submission failed: $e',
+          ),
+        ),
       );
     } finally {
       if (mounted) {
@@ -1765,6 +1998,55 @@ class _BookAppointmentState extends State<BookAppointment> {
     );
   }
 
+  Widget appointmentCapacityStatus() {
+    final full = isAppointmentQuotaFull;
+    final loading = _capacityPolicyLoading || _completedCapacityLoading;
+    final hasError =
+        _capacityPolicyError != null || _completedCapacityError != null;
+    final unavailable = loading || hasError;
+    final message = loading
+        ? 'Loading daily appointment capacity...'
+        : hasError
+        ? 'Daily capacity is unavailable. Reconnect before submitting.'
+        : 'Appointment slots remaining: $appointmentSlotsRemaining of ${_capacityPolicy.sourceLimit}';
+    final color = full || unavailable ? Colors.orange.shade800 : _primaryColor;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(13),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            message,
+            style: TextStyle(color: color, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Gas and Diesel share the appointment allocation. Walk-in slots are reserved separately.',
+            style: TextStyle(
+              color: _mutedTextColor,
+              fontSize: 12.5,
+              height: 1.3,
+            ),
+          ),
+          if (full) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Appointment slots are full for this date. Please choose another date. Unused walk-in slots cannot be used for appointments.',
+              style: TextStyle(color: color, fontSize: 12.5, height: 1.3),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   double _queueCodeTileHeight(BuildContext context, double contentWidth) {
     double textHeight(String value, TextStyle style) {
       final painter = TextPainter(
@@ -1801,13 +2083,14 @@ class _BookAppointmentState extends State<BookAppointment> {
         .clamp(0, segmentCount - 1)
         .toInt();
     final visibleCodes = queueCodesForSegment(codes, safeSegmentIndex);
-    final availableInSegment = visibleCodes
-        .where((code) => !isQueueTaken(code))
-        .length;
+    final availableInSegment = isAppointmentQuotaFull
+        ? 0
+        : visibleCodes.where((code) => !isQueueTaken(code)).length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        appointmentCapacityStatus(),
         liveAvailabilityStatus(),
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -1936,6 +2219,7 @@ class _BookAppointmentState extends State<BookAppointment> {
                   final pending =
                       state == BookingQueueCodeState.pendingApproval;
                   final taken = state != BookingQueueCodeState.available;
+                  final quotaFull = isAppointmentQuotaFull;
                   final selected = !taken && selectedQueueCode == code;
                   final statusLabel = pending
                       ? 'Reserved—Pending Approval'
@@ -1943,17 +2227,19 @@ class _BookAppointmentState extends State<BookAppointment> {
 
                   return Semantics(
                     button: true,
-                    enabled: !taken && !isSubmitting,
+                    enabled: !taken && !isSubmitting && !quotaFull,
                     selected: selected,
                     label: taken
                         ? '$code, ${appText(statusLabel)}'
+                        : quotaFull
+                        ? '$code, appointment slots full'
                         : 'Queue code $code',
                     child: Material(
                       color: Colors.transparent,
                       borderRadius: BorderRadius.circular(12),
                       child: InkWell(
                         borderRadius: BorderRadius.circular(12),
-                        onTap: taken || isSubmitting
+                        onTap: taken || isSubmitting || quotaFull
                             ? null
                             : () {
                                 setState(() {
@@ -2257,7 +2543,9 @@ class _BookAppointmentState extends State<BookAppointment> {
                   width: double.infinity,
                   height: 55,
                   child: ElevatedButton(
-                    onPressed: isSubmitting ? null : submitBooking,
+                    onPressed: isSubmitting || isAppointmentQuotaFull
+                        ? null
+                        : submitBooking,
                     child: isSubmitting
                         ? Row(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -2299,7 +2587,7 @@ class _BookAppointmentState extends State<BookAppointment> {
                     number: "1",
                     title: "Appointment Details",
                     subtitle:
-                        "Choose the date, location, vehicle type, and queue code.",
+                        "Choose the date, location, fuel type, vehicle category, and queue code.",
                     icon: Icons.event_available_outlined,
                   ),
                   sectionCard(
@@ -2370,10 +2658,10 @@ class _BookAppointmentState extends State<BookAppointment> {
 
                       const SizedBox(height: 18),
 
-                      fieldLabel("Vehicle Type"),
+                      fieldLabel("Fuel Type"),
                       DropdownButtonFormField<String>(
                         initialValue: selectedVehicle,
-                        decoration: formDecoration("Select Vehicle Type"),
+                        decoration: formDecoration("Select Fuel Type"),
                         dropdownColor: _cardColor,
                         iconEnabledColor: _primaryColor,
                         style: TextStyle(color: _primaryColor),
@@ -2407,6 +2695,22 @@ class _BookAppointmentState extends State<BookAppointment> {
                               },
                       ),
 
+                      const SizedBox(height: 18),
+
+                      VehicleCategoryField(
+                        formKey: vehicleCategoryFormKey,
+                        category: selectedVehicleCategory,
+                        otherController: vehicleCategoryOtherController,
+                        enabled: !isSubmitting,
+                        onChanged: (value) {
+                          setState(() {
+                            selectedVehicleCategory = value;
+                            if (value != 'Other') {
+                              vehicleCategoryOtherController.clear();
+                            }
+                          });
+                        },
+                      ),
                       const SizedBox(height: 18),
 
                       fieldLabel("Available Queue Codes"),

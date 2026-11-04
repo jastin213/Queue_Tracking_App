@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../services/daily_queue_capacity_service.dart';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
@@ -3171,7 +3172,27 @@ class _DailyReportState extends State<DailyReport> {
     try {
       final queueRef = await reportQueueRef(record);
       final appointmentRef = reportAppointmentRef(record);
+      if (queueRef == null && appointmentRef == null) {
+        throw StateError("The report record could not be located.");
+      }
       final appointmentSnapshot = await appointmentRef?.get();
+      final queueSnapshot = await queueRef?.get();
+      final queueStatus = queueSnapshot
+          ?.data()?['status']
+          ?.toString()
+          .trim()
+          .toLowerCase();
+
+      // Deleting history must not make a completed service available again.
+      // Preserve only source/code usage; the existing file and record deletion
+      // below continues to remove the customer's report data as requested.
+      if (queueStatus == 'passed' || queueStatus == 'failed') {
+        await DailyQueueCapacityService.preserveCompletedUsage(
+          date: record['date']?.toString() ?? '',
+          queue: record['queue']?.toString() ?? '',
+          appointmentId: appointmentRef?.id,
+        );
+      }
 
       if (appointmentRef != null && (appointmentSnapshot?.exists ?? false)) {
         await deleteAppointmentFiles(
@@ -3180,13 +3201,49 @@ class _DailyReportState extends State<DailyReport> {
         );
       }
 
-      final batch = FirebaseFirestore.instance.batch();
-      if (queueRef != null) batch.delete(queueRef);
-      if (appointmentRef != null) batch.delete(appointmentRef);
-      if (queueRef == null && appointmentRef == null) {
-        throw StateError("The report record could not be located.");
-      }
-      await batch.commit();
+      final date =
+          record['date']?.toString() ??
+          appointmentSnapshot?.data()?['date']?.toString() ??
+          queueSnapshot?.data()?['date']?.toString() ??
+          '';
+      await DailyQueueCapacityService.runDayTransaction<void>(date, (
+        transaction,
+        day,
+      ) async {
+        final currentQueue = queueRef == null
+            ? null
+            : await transaction.get(queueRef);
+        final currentAppointment = appointmentRef == null
+            ? null
+            : await transaction.get(appointmentRef);
+        final queueData = currentQueue?.data();
+        final appointmentData = currentAppointment?.data();
+        if (queueData != null) {
+          final status = queueData['status']?.toString().trim().toLowerCase();
+          final code = queueData['queue']?.toString() ?? queueRef!.id;
+          if (status == 'passed' || status == 'failed') {
+            day.completeQueue({...queueData, 'queue': code, 'date': date});
+          } else {
+            final quotaSource = queueData['quotaSource']
+                ?.toString()
+                .trim()
+                .toLowerCase();
+            if (quotaSource == 'walkin' ||
+                (quotaSource != 'appointment' &&
+                    normalizedQueueSource(queueData) == walkInQueueSource)) {
+              day.releaseWalkIn(code);
+            }
+          }
+        }
+        if (appointmentData != null) {
+          day.releaseAppointment(
+            appointmentRef!.id,
+            appointmentData['queue']?.toString() ?? queue,
+          );
+        }
+        if (queueRef != null) transaction.delete(queueRef);
+        if (appointmentRef != null) transaction.delete(appointmentRef);
+      });
       await refreshReportAfterMutation();
 
       if (!mounted) return;

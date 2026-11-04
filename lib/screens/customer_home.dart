@@ -9,6 +9,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/app_theme.dart';
 import '../services/notification_time.dart';
 import '../services/customer_preferences.dart';
+import '../services/daily_queue_capacity.dart';
+import '../services/daily_queue_capacity_service.dart';
 import '../services/remembered_login.dart';
 import '../widgets/app_refresh_indicator.dart';
 import '../widgets/app_responsive_content.dart';
@@ -43,6 +45,8 @@ class _CustomerHomeState extends State<CustomerHome> {
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>?
   _appointmentSubscription;
   bool _receivedInitialAppointmentSnapshot = false;
+  late final Stream<DailyQueueCapacityPolicy> _capacityPolicyStream =
+      DailyQueueCapacityService.watchPolicy();
 
   @override
   void initState() {
@@ -954,11 +958,28 @@ class _CustomerHomeState extends State<CustomerHome> {
                                       : "Monday to Saturday",
                                 ),
                                 const SizedBox(height: 10),
-                                _InfoRow(
-                                  icon: Icons.groups_rounded,
-                                  text: filipino
-                                      ? "Arawang queue limit: 80 customer"
-                                      : "Daily queue limit: 80 customers",
+                                StreamBuilder<DailyQueueCapacityPolicy>(
+                                  stream: _capacityPolicyStream,
+                                  builder: (context, snapshot) {
+                                    final policy = snapshot.data;
+                                    final message = snapshot.hasError
+                                        ? (filipino
+                                              ? "Hindi makuha ang arawang queue limit."
+                                              : "Daily queue limit is unavailable.")
+                                        : policy == null
+                                        ? (filipino
+                                              ? "Kinukuha ang arawang queue limit…"
+                                              : "Loading daily queue limit…")
+                                        : (filipino
+                                              ? "Arawang queue limit: ${policy.dailyLimit} customer "
+                                                    "(${policy.sourceLimit} appointment / ${policy.sourceLimit} walk-in)"
+                                              : "Daily queue limit: ${policy.dailyLimit} customers "
+                                                    "(${policy.sourceLimit} appointments / ${policy.sourceLimit} walk-ins)");
+                                    return _InfoRow(
+                                      icon: Icons.groups_rounded,
+                                      text: message,
+                                    );
+                                  },
                                 ),
                               ],
                             ),
